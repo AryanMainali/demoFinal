@@ -149,6 +149,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     const { user, logout } = useAuth();
     const pathname = usePathname();
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const userMenuRef = React.useRef<HTMLDivElement>(null);
 
     if (!user) return null;
 
@@ -157,6 +159,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     const handleLogout = () => {
         logout();
     };
+
+    React.useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+                setUserMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -241,8 +254,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     </ul>
                 </nav>
 
-                {/* Logout Button */}
-                <div className="border-t border-gray-200 p-4">
+                {/* Logout Button - Mobile only */}
+                <div className="border-t border-gray-200 p-4 lg:hidden">
                     <button
                         onClick={handleLogout}
                         className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-red-50 hover:text-red-700"
@@ -269,19 +282,63 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     {/* Right side of header */}
                     <div className="flex items-center gap-4">
                         {/* Notifications - placeholder */}
-                        <button className="relative rounded-full p-2 text-gray-500 hover:bg-gray-100">
+                        <button className="relative rounded-full p-2 text-gray-500 hover:bg-gray-100 transition-colors">
                             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                             </svg>
                             <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
                         </button>
 
-                        {/* User menu */}
-                        <div className="hidden sm:flex items-center gap-2">
-                            <span className="text-sm text-gray-700">{user.full_name}</span>
-                            <div className="h-8 w-8 rounded-full bg-[#862733] flex items-center justify-center text-white text-sm font-semibold">
-                                {user.full_name?.charAt(0).toUpperCase() || 'U'}
-                            </div>
+                        {/* User Profile Menu - Outlook style */}
+                        <div className="relative hidden sm:block" ref={userMenuRef}>
+                            <button
+                                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                                className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-gray-100 transition-colors"
+                            >
+                                <div className="h-8 w-8 rounded-full bg-[#862733] flex items-center justify-center text-white text-sm font-semibold">
+                                    S
+                                </div>
+                            </button>
+
+                            {/* Dropdown - Outlook style */}
+                            {userMenuOpen && (
+                                <div className="absolute right-0 mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+                                    {/* User Info Section - Top with large avatar */}
+                                    <div className="p-4 text-center border-b border-gray-200">
+                                        <div className="h-16 w-16 mx-auto mb-3 rounded-full bg-[#862733] flex items-center justify-center text-white text-2xl font-semibold">
+                                            S
+                                        </div>
+                                        <p className="text-sm font-semibold text-gray-900">{user.full_name}</p>
+                                        <p className="text-xs text-gray-500 mt-1 break-words">{user.email}</p>
+                                    </div>
+                                    
+                                    {/* Menu Items */}
+                                    <div className="p-2 space-y-1">
+                                        <Link
+                                            href={`/${user.role.toLowerCase()}/settings`}
+                                            className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                            onClick={() => setUserMenuOpen(false)}
+                                        >
+                                            <SettingsIcon />
+                                            View account
+                                        </Link>
+                                    </div>
+                                    
+                                    {/* Sign Out */}
+                                    <div className="border-t border-gray-200 p-2">
+                                        <button
+                                            onClick={() => {
+                                                handleLogout();
+                                                setUserMenuOpen(false);
+                                            }}
+                                            className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
+                                        >
+                                            <LogoutIcon />
+                                            Sign Out
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </header>
