@@ -150,6 +150,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     const pathname = usePathname();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
     const userMenuRef = React.useRef<HTMLDivElement>(null);
 
     if (!user) return null;
@@ -328,8 +329,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                                     <div className="border-t border-gray-200 p-2">
                                         <button
                                             onClick={() => {
-                                                handleLogout();
-                                                setUserMenuOpen(false);
+                                                setShowLogoutConfirm(true);
                                             }}
                                             className="flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium text-red-700 hover:bg-red-50 transition-colors"
                                         >
@@ -342,6 +342,48 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                         </div>
                     </div>
                 </header>
+
+                {/* Logout Confirmation Modal */}
+                {showLogoutConfirm && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 animate-in fade-in duration-200">
+                        <div className="bg-white rounded-2xl shadow-2xl p-8 w-96 animate-in zoom-in duration-200">
+                            {/* Logo/Avatar */}
+                            <div className="flex justify-center mb-6">
+                                <div className="h-12 w-12 rounded-full bg-[#862733] flex items-center justify-center text-white text-lg font-bold">
+                                    {user.full_name?.charAt(0).toUpperCase() || 'S'}
+                                </div>
+                            </div>
+                            
+                            {/* Title */}
+                            <h2 className="text-center text-xl font-semibold text-gray-900 mb-3">Sign out?</h2>
+                            
+                            {/* Description */}
+                            <p className="text-center text-sm text-gray-600 mb-8">You'll be signed out of your account.</p>
+                            
+                            {/* Buttons */}
+                            <div className="flex gap-3 justify-center">
+                                <button
+                                    onClick={() => {
+                                        setShowLogoutConfirm(false);
+                                        setUserMenuOpen(false);
+                                    }}
+                                    className="px-6 py-2.5 text-sm font-medium text-gray-700 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+                                >
+                                    No
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setShowLogoutConfirm(false);
+                                        handleLogout();
+                                    }}
+                                    className="px-6 py-2.5 rounded-lg text-sm font-medium text-white bg-[#862733] hover:bg-[#a13040] transition-colors"
+                                >
+                                    Yes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Page Content */}
                 <main className="p-4 lg:p-6">
