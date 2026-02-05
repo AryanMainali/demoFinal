@@ -98,11 +98,7 @@ export default function StudentDashboardPage() {
                                     You have {displayStats.pending_assignments || 3} assignments due this week.
                                 </p>
                             </div>
-                            <div className="flex items-center gap-4">
-                                <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                                    <p className="text-2xl font-bold">{displayStats.streak_days || 7}</p>
-                                    <p className="text-xs text-white/70">Day Streak 🔥</p>
-                                </div>
+                            <div className="flex items-center gap-4">    
                                 <Link href="/student/assignments">
                                     <Button className="bg-white text-[#862733] hover:bg-white/90">
                                         View Assignments
@@ -114,35 +110,33 @@ export default function StudentDashboardPage() {
                     </div>
 
                     {/* Stats Cards */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        <StatsCard
-                            title="Enrolled Courses"
-                            value={statsLoading ? '...' : displayStats.enrolled_courses}
-                            icon={BookOpen}
-                            trend={{ value: 0, label: 'Active' }}
-                            variant="primary"
-                        />
-                        <StatsCard
-                            title="Submissions"
-                            value={statsLoading ? '...' : displayStats.total_submissions}
-                            icon={FileCode}
-                            trend={{ value: 5, label: 'this week' }}
-                            variant="success"
-                        />
-                        <StatsCard
-                            title="Pending"
-                            value={statsLoading ? '...' : displayStats.pending_assignments || 3}
-                            icon={Clock}
-                            trend={{ value: 0, label: 'due soon' }}
-                            variant="warning"
-                        />
-                        <StatsCard
-                            title="Average Score"
-                            value={statsLoading ? '...' : `${displayStats.average_score}%`}
-                            icon={Award}
-                            trend={{ value: 3, label: 'improvement' }}
-                            variant="default"
-                        />
+                    <div className="flex justify-center">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-6xl">
+                            <StatsCard
+                                title="Enrolled Courses"
+                                value={statsLoading ? '...' : displayStats.enrolled_courses}
+                                icon={BookOpen}
+                                variant="primary"
+                            />
+                            <StatsCard
+                                title="Submissions"
+                                value={statsLoading ? '...' : displayStats.total_submissions}
+                                icon={FileCode}
+                                variant="success"
+                            />
+                            <StatsCard
+                                title="Pending"
+                                value={statsLoading ? '...' : displayStats.pending_assignments || 3}
+                                icon={Clock}
+                                variant="warning"
+                            />
+                            <StatsCard
+                                title="Average Score"
+                                value={statsLoading ? '...' : `${displayStats.average_score}%`}
+                                icon={Award}
+                                variant="default"
+                            />
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
