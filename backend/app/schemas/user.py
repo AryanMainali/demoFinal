@@ -23,6 +23,11 @@ class UserCreate(UserBase):
         return v
 
 
+class AdminUserCreate(UserCreate):
+    is_active: bool = True
+    is_verified: bool = True
+
+
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     full_name: Optional[str] = None
