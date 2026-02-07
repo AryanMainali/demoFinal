@@ -67,7 +67,7 @@ def create_user(
         full_name=user_in.full_name,
         role=user_in.role,
         student_id=user_in.student_id,
-        is_active=True,
+        is_active=user_in.is_active if getattr(user_in, 'is_active', None) is not None else True,
         is_verified=True
     )
     
@@ -83,8 +83,19 @@ def create_user(
     )
     db.add(audit)
     db.commit()
-    
-    logger.info(f"User {user.id} created by admin {current_user.id}")
+
+    # If a welcome email is requested, record it and log. Integrate actual email sending
+    # with your async task queue or mailer later.
+    if getattr(user_in, 'send_welcome_email', False):
+        welcome_audit = AuditLog(
+            user_id=current_user.id,
+            event_type="welcome_email_requested",
+            description=f"Welcome email requested for {user.email}"
+        )
+        db.add(welcome_audit)
+        db.commit()
+        logger.info(f"Welcome email requested for user {user.email} by admin {current_user.id}")
+
     return user
 
 

@@ -13,6 +13,8 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
+    is_active: Optional[bool] = True
+    send_welcome_email: Optional[bool] = True
     
     @validator('password')
     def validate_password(cls, v):

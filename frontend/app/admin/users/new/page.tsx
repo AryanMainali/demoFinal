@@ -37,6 +37,8 @@ export default function NewUserPage() {
             full_name: data.full_name,
             role: data.role,
             student_id: data.student_id || undefined,
+            is_active: data.is_active,
+            send_welcome_email: data.send_welcome_email,
         }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
