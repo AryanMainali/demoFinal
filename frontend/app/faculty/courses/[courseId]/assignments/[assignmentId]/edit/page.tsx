@@ -39,11 +39,27 @@ export default function EditAssignmentPage() {
     const [error, setError] = useState<string | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-    const { data: assignment, isLoading: fetchingAssignment } = useQuery({
-        queryKey: ['assignment', assignmentId],
-        queryFn: () => apiClient.getAssignment(assignmentId),
-        enabled: !!assignmentId,
+    // Debug logs
+    useEffect(() => {
+        console.log('Edit page loaded:', { courseId, assignmentId, courseIdStr, assignmentIdStr });
+    }, [courseId, assignmentId, courseIdStr, assignmentIdStr]);
+
+    // Fetch course assignments to find the one we're editing
+    const { data: courseAssignments, isLoading: fetchingAssignments, error: queryError } = useQuery({
+        queryKey: ['assignments', courseId],
+        queryFn: () => apiClient.getAssignments(courseId),
+        enabled: !!courseId && !isNaN(courseId),
     });
+
+    useEffect(() => {
+        console.log('Assignments query:', { fetchingAssignments, count: courseAssignments?.length, queryError });
+    }, [courseAssignments, fetchingAssignments, queryError]);
+
+    const assignment = courseAssignments?.find((a: any) => a.id === assignmentId);
+
+    useEffect(() => {
+        console.log('Assignment found:', assignment);
+    }, [assignment]);
 
     const { register, handleSubmit, formState: { errors }, watch, setValue } = useForm<AssignmentCreateForm>({
         resolver: zodResolver(assignmentCreateSchema),
@@ -189,7 +205,7 @@ export default function EditAssignmentPage() {
         },
     });
 
-    if (fetchingAssignment) {
+    if (fetchingAssignments) {
         return (
             <ProtectedRoute allowedRoles={["FACULTY"]}>
                 <DashboardLayout>
@@ -201,13 +217,39 @@ export default function EditAssignmentPage() {
         );
     }
 
+    if (queryError) {
+        return (
+            <ProtectedRoute allowedRoles={["FACULTY"]}>
+                <DashboardLayout>
+                    <Alert type="error">
+                        Failed to load assignments: {(queryError as any)?.message || 'Unknown error'}
+                    </Alert>
+                    <Button 
+                        onClick={() => router.push('/faculty/assignments')} 
+                        variant="outline"
+                        className="mt-4"
+                    >
+                        Back to Assignments
+                    </Button>
+                </DashboardLayout>
+            </ProtectedRoute>
+        );
+    }
+
     if (!assignment) {
         return (
             <ProtectedRoute allowedRoles={["FACULTY"]}>
                 <DashboardLayout>
                     <Alert type="error">
-                        Assignment not found.
+                        Assignment not found. Please check if you have access to this assignment.
                     </Alert>
+                    <Button 
+                        onClick={() => router.push('/faculty/assignments')} 
+                        variant="outline"
+                        className="mt-4"
+                    >
+                        Back to Assignments
+                    </Button>
                 </DashboardLayout>
             </ProtectedRoute>
         );

@@ -21,7 +21,6 @@ import {
     Clock,
     Loader2,
     Search,
-    Eye,
     Edit,
 } from 'lucide-react';
 
@@ -123,11 +122,6 @@ export default function AssignmentsPage() {
             className: 'w-24',
             cell: (assignment: Assignment) => (
                 <div className="flex gap-2">
-                    <Link href={`/faculty/courses/${courseId}/assignments/${assignment.id}`}>
-                        <Button variant="ghost" size="sm">
-                            <Eye className="w-4 h-4" />
-                        </Button>
-                    </Link>
                     <Link href={`/faculty/courses/${courseId}/assignments/${assignment.id}/edit`}>
                         <Button variant="ghost" size="sm">
                             <Edit className="w-4 h-4" />
