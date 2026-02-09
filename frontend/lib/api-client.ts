@@ -1,6 +1,7 @@
 import axios, { AxiosInstance} from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const PUBLIC_API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = PUBLIC_API.endsWith('/api/v1') ? PUBLIC_API : `${PUBLIC_API.replace(/\/$/, '')}/api/v1`;
 
 class ApiClient {
     private client: AxiosInstance;
@@ -29,6 +30,14 @@ class ApiClient {
         this.client.interceptors.response.use(
             (response) => response,
             async (error) => {
+                try {
+                    // Log axios error details for easier debugging (network / CORS / response)
+                    // Avoid throwing during logging
+                    // eslint-disable-next-line no-console
+                    console.error('API response error:', error?.toJSON ? error.toJSON() : error);
+                } catch (logErr) {
+                    // ignore logging errors
+                }
                 const originalRequest = error.config;
 
                 // If 401 and not already retried, try to refresh token
@@ -126,7 +135,7 @@ class ApiClient {
     }
 
     async updateCourse(id: number, data: any) {
-        const response = await this.client.put(`/courses/${id}`, data);
+        const response = await this.client.patch(`/courses/${id}`, data);
         return response.data;
     }
 

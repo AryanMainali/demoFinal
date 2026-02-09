@@ -15,7 +15,7 @@ class CourseBase(BaseModel):
 
 
 class CourseCreate(CourseBase):
-    pass
+    instructor_id: Optional[int] = None
 
 
 class CourseUpdate(BaseModel):

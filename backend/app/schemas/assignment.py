@@ -135,13 +135,22 @@ class AssignmentUpdate(BaseModel):
     is_published: Optional[bool] = None
     rubric: Optional[RubricUpdate] = None
 
+class CourseForAssignment(BaseModel):
+    id: int
+    code: str
+    name: str
+    section: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class Assignment(AssignmentBase):
     id: int
     course_id: int
     language_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-    course: Optional[Any] = None  # Will hold course data {id, code, name, section}
+    course: Optional[CourseForAssignment] = None
     
     class Config:
         from_attributes = True

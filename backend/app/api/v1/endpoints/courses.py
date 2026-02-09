@@ -70,9 +70,20 @@ def create_course(
             detail="Course code already exists"
         )
     
+    # Ensure newly created courses are ACTIVE by default
+    course_data = course_in.dict()
+    course_data.setdefault('section', None)
+    
+    # Allow admins to assign instructor; faculty creates their own course
+    instructor_id = course_data.pop('instructor_id') if course_data.get('instructor_id') else None
+    if not instructor_id:
+        instructor_id = current_user.id
+    
     course = Course(
-        **course_in.dict(),
-        instructor_id=current_user.id
+        **course_data,
+        instructor_id=instructor_id,
+        status=CourseStatus.ACTIVE,
+        is_active=True,
     )
     
     db.add(course)

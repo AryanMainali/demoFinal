@@ -2,7 +2,8 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, inspect
+from sqlalchemy import and_
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models import (
@@ -30,7 +31,7 @@ def list_assignments(
     current_user: User = Depends(get_current_user)
 ):
     """List assignments - students see published only, faculty see all their course assignments"""
-    query = db.query(Assignment)
+    query = db.query(Assignment).options(joinedload(Assignment.course))
     
     if course_id:
         query = query.filter(Assignment.course_id == course_id)
@@ -61,51 +62,7 @@ def list_assignments(
     
     assignments = query.all()
     
-    # Build response with course info
-    result = []
-    for assignment in assignments:
-        course = db.query(Course).filter(Course.id == assignment.course_id).first()
-        assignment_dict = {
-            'id': assignment.id,
-            'course_id': assignment.course_id,
-            'title': assignment.title,
-            'description': assignment.description,
-            'instructions': assignment.instructions,
-            'due_date': assignment.due_date,
-            'max_score': assignment.max_score,
-            'passing_score': assignment.passing_score,
-            'difficulty': assignment.difficulty,
-            'test_weight': assignment.test_weight,
-            'rubric_weight': assignment.rubric_weight,
-            'allow_late': assignment.allow_late,
-            'late_penalty_per_day': assignment.late_penalty_per_day,
-            'max_late_days': assignment.max_late_days,
-            'max_attempts': assignment.max_attempts,
-            'max_file_size_mb': assignment.max_file_size_mb,
-            'allowed_file_extensions': assignment.allowed_file_extensions,
-            'required_files': assignment.required_files,
-            'allow_groups': assignment.allow_groups,
-            'max_group_size': assignment.max_group_size,
-            'enable_plagiarism_check': assignment.enable_plagiarism_check,
-            'plagiarism_threshold': assignment.plagiarism_threshold,
-            'enable_ai_detection': assignment.enable_ai_detection,
-            'ai_detection_threshold': assignment.ai_detection_threshold,
-            'starter_code': assignment.starter_code,
-            'solution_code': assignment.solution_code,
-            'is_published': assignment.is_published,
-            'language_id': assignment.language_id,
-            'created_at': assignment.created_at,
-            'updated_at': assignment.updated_at,
-            'course': {
-                'id': course.id,
-                'code': course.code,
-                'name': course.name,
-                'section': course.section,
-            } if course else None,
-        }
-        result.append(assignment_dict)
-    
-    return result
+    return assignments
 
 
 @router.get("/{assignment_id}", response_model=AssignmentDetail)
@@ -155,9 +112,8 @@ def create_assignment(
         if not language_obj:
             raise HTTPException(status_code=422, detail="Language not found")
 
-        # Introspect the 'assignments' table to get actual column names
-        inspector = inspect(db.bind)
-        available_columns = {c['name'] for c in inspector.get_columns('assignments')}
+        # Get available columns from the model directly
+        available_columns = {c.name for c in Assignment.__table__.columns}
 
         # Prepare assignment data from the input schema
         assignment_data_in = assignment_in.model_dump(exclude={"rubric", "test_suites"})
@@ -168,12 +124,11 @@ def create_assignment(
         }
         
         if 'difficulty' in assignment_data:
-            assignment_data['difficulty'] = str(assignment_data['difficulty']).upper()
+            assignment_data['difficulty'] = str(assignment_data['difficulty']).lower()
 
         # Create assignment
         assignment = Assignment(
             **assignment_data,
-            created_at=datetime.utcnow()
         )
         
         db.add(assignment)
@@ -210,18 +165,19 @@ def create_assignment(
                     )
                     db.add(item)
         
-        db.commit()
-        db.refresh(assignment)
-        
         # Audit log
         audit = AuditLog(
             user_id=current_user.id,
             event_type="assignment_created",
             description=f"Assignment '{assignment.title}' created",
-            created_at=datetime.utcnow()
         )
         db.add(audit)
+        
         db.commit()
+        db.refresh(assignment)
+
+        # Manually attach the course object to prevent serialization errors from lazy loading
+        assignment.course = course
         
         logger.info(f"Assignment {assignment.id} created by user {current_user.id}")
         return assignment
@@ -253,9 +209,8 @@ def update_assignment(
     if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
-    # Introspect the 'assignments' table to get actual column names
-    inspector = inspect(db.bind)
-    available_columns = {c['name'] for c in inspector.get_columns('assignments')}
+    # Get available columns from the model directly
+    available_columns = {c.name for c in Assignment.__table__.columns}
 
     # Update fields
     update_data_in = assignment_in.model_dump(exclude_unset=True)
@@ -266,24 +221,22 @@ def update_assignment(
     }
     
     if "difficulty" in update_data and isinstance(update_data["difficulty"], str):
-        update_data["difficulty"] = update_data["difficulty"].upper()
+        update_data["difficulty"] = update_data["difficulty"].lower()
         
     for field, value in update_data.items():
         setattr(assignment, field, value)
-    
-    assignment.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(assignment)
     
     # Audit log
     audit = AuditLog(
         user_id=current_user.id,
         event_type="assignment_updated",
         description=f"Assignment '{assignment.title}' updated",
-        created_at=datetime.utcnow()
     )
     db.add(audit)
+    
+    # The 'updated_at' field on assignment is handled by 'onupdate' in the model
     db.commit()
+    db.refresh(assignment)
     
     return assignment
 
@@ -307,8 +260,7 @@ def delete_assignment(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="assignment_deleted",
-        description=f"Assignment '{assignment.title}' deleted",
-        created_at=datetime.utcnow()
+        description=f"Assignment '{assignment.title}' deleted"
     )
     db.add(audit)
     
@@ -334,15 +286,12 @@ def publish_assignment(
         raise HTTPException(status_code=403, detail="Not authorized")
     
     assignment.is_published = True
-    assignment.updated_at = datetime.utcnow()
-    db.commit()
     
     # Audit log
     audit = AuditLog(
         user_id=current_user.id,
         event_type="assignment_published",
-        description=f"Assignment '{assignment.title}' published",
-        created_at=datetime.utcnow()
+        description=f"Assignment '{assignment.title}' published"
     )
     db.add(audit)
     db.commit()
@@ -366,15 +315,12 @@ def unpublish_assignment(
         raise HTTPException(status_code=403, detail="Not authorized")
     
     assignment.is_published = False
-    assignment.updated_at = datetime.utcnow()
-    db.commit()
     
     # Audit log
     audit = AuditLog(
         user_id=current_user.id,
         event_type="assignment_unpublished",
-        description=f"Assignment '{assignment.title}' unpublished",
-        created_at=datetime.utcnow()
+        description=f"Assignment '{assignment.title}' unpublished"
     )
     db.add(audit)
     db.commit()
