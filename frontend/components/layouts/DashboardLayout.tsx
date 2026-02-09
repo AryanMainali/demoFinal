@@ -316,7 +316,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             {/* Main Content */}
             <div className={user.role === 'STUDENT' ? '' : 'lg:pl-72'}>
                 {/* Top Header */}
-                <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-gray-200 bg-white px-4 shadow-sm lg:px-6">
+                <header className="sticky top-0 z-30 relative flex h-16 items-center gap-4 border-b border-gray-200 bg-white px-4 shadow-sm lg:px-6">
                     {user.role !== 'STUDENT' && (
                         <button
                             onClick={() => setSidebarOpen(true)}
@@ -326,21 +326,23 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                         </button>
                     )}
 
-                    {/* Top nav (large screens) */}
-                    <nav className="hidden lg:flex lg:items-center lg:gap-6 ml-4">
-                        {getTopNavItems(user.role).map((item) => {
-                            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
-                            return (
-                                <Link
-                                    key={item.href}
-                                    href={item.href}
-                                    className={`text-sm px-2 py-1 rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#862733] ${isActive ? 'text-[#862733] font-semibold border-b-2 border-[#862733]' : 'text-gray-600 hover:text-[#862733]'}`}
-                                >
-                                    {item.label}
-                                </Link>
-                            );
-                        })}
-                    </nav>
+                    {/* Top nav (large screens) - centered */}
+                    <div className="absolute inset-x-0 hidden lg:flex justify-center pointer-events-none">
+                        <nav className="pointer-events-auto flex items-center gap-6">
+                            {getTopNavItems(user.role).map((item) => {
+                                const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                                return (
+                                    <Link
+                                        key={item.href}
+                                        href={item.href}
+                                        className={`text-sm px-2 py-1 rounded-md transition-colors transform-gpu will-change-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#862733] ${isActive ? 'text-[#862733] font-semibold border-b-2 border-[#862733]' : 'text-gray-600 hover:text-[#862733]'}`}
+                                    >
+                                        {item.label}
+                                    </Link>
+                                );
+                            })}
+                        </nav>
+                    </div>
 
                     <div className="flex-1" />
 
@@ -462,7 +464,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
                 {/* Page Content */}
                 <main className="p-4 lg:p-6">
-                    {children}
+                    <div className="mx-auto max-w-7xl w-full">
+                        <div className="bg-white/90 dark:bg-[#0b0b0b]/80 rounded-2xl shadow-sm p-6 transition-shadow">
+                            {children}
+                        </div>
+                    </div>
                 </main>
             </div>
         </div>
