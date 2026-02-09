@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
 
 interface NavItem {
@@ -182,10 +182,36 @@ const getTopNavItems = (role: UserRole) => {
 export function DashboardLayout({ children }: DashboardLayoutProps) {
     const { user, logout } = useAuth();
     const pathname = usePathname();
+    const router = useRouter();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+    const [contentVisible, setContentVisible] = useState(true);
+    const [isNavigating, setIsNavigating] = useState(false);
     const userMenuRef = React.useRef<HTMLDivElement>(null);
+
+    const handleNavClick = (e: React.MouseEvent, href: string, closeSidebar = false) => {
+        if (e) e.preventDefault();
+        if (isNavigating) return;
+
+        if (closeSidebar) setSidebarOpen(false);
+
+        // Respect reduced motion user preference
+        if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            router.push(href);
+            return;
+        }
+
+        setIsNavigating(true);
+        setContentVisible(false);
+
+        // Wait for exit animation to finish before navigating
+        const NAV_DELAY = 450; // ms, should be shorter than the container duration (500ms)
+        setTimeout(() => {
+            router.push(href);
+            setIsNavigating(false);
+        }, NAV_DELAY);
+    };
 
     if (!user) return null;
 
@@ -211,6 +237,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // On route change, reveal content after the new page mounts (we trigger exit explicitly on clicks)
+    React.useEffect(() => {
+        if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            setContentVisible(true);
+            return;
+        }
+
+        // Small delay to allow the new route to render before fading in
+        const t = setTimeout(() => setContentVisible(true), 80);
+        return () => clearTimeout(t);
+    }, [pathname]);
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -281,11 +319,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                                         <li key={item.href}>
                                             <Link
                                                 href={item.href}
-                                                onClick={() => setSidebarOpen(false)}
+                                                onClick={(e) => handleNavClick(e, item.href, true)}
                                                 aria-current={isActive ? 'page' : undefined}
-                                                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transform transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#862733] ${isActive
+                                                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transform transition-transform duration-500 ease-[cubic-bezier(.2,.9,.2,1)] active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#862733] ${isActive
                                                     ? 'bg-[#862733] text-white shadow-md ring-1 ring-[#862733]/20'
-                                                    : 'text-gray-700 hover:bg-gray-100 hover:-translate-y-1 hover:shadow-sm'
+                                                    : 'text-gray-700 hover:bg-gray-100 hover:-translate-y-0.5 hover:shadow-sm'
                                                     }`}
                                             >
                                                 <span className={isActive ? 'text-white' : 'text-gray-500 group-hover:text-gray-700 transition-colors'}>
@@ -335,7 +373,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                                     <Link
                                         key={item.href}
                                         href={item.href}
-                                        className={`text-sm px-2 py-1 rounded-md transition-colors transform-gpu will-change-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#862733] ${isActive ? 'text-[#862733] font-semibold border-b-2 border-[#862733]' : 'text-gray-600 hover:text-[#862733]'}`}
+                                        onClick={(e) => handleNavClick(e, item.href)}
+                                        className={`text-sm px-2 py-1 rounded-md transition-colors transform-gpu will-change-transform hover:-translate-y-0.5 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#862733] ${isActive ? 'text-[#862733] font-semibold border-b-2 border-[#862733]' : 'text-gray-600 hover:text-[#862733]'}`}
                                     >
                                         {item.label}
                                     </Link>
@@ -465,7 +504,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 {/* Page Content */}
                 <main className="p-4 lg:p-6">
                     <div className="mx-auto max-w-7xl w-full">
-                        <div className="bg-white/90 dark:bg-[#0b0b0b]/80 rounded-2xl shadow-sm p-6 transition-shadow">
+                        <div className={`bg-white/90 dark:bg-[#0b0b0b]/80 rounded-2xl shadow-sm p-6 motion-reduce:transition-none transition-all duration-500 ease-[cubic-bezier(.2,.9,.2,1)] transform will-change-transform will-change-opacity ${contentVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-2 scale-98'}`}>
                             {children}
                         </div>
                     </div>
