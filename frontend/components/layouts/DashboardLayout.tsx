@@ -97,7 +97,6 @@ const getNavItems = (role: UserRole): NavItem[] => {
         return [
             { label: 'Dashboard', href: `${baseUrl}/dashboard`, icon: <DashboardIcon /> },
             { label: 'My Courses', href: `${baseUrl}/courses`, icon: <BookIcon /> },
-            { label: 'Assignments', href: `${baseUrl}/assignments`, icon: <AssignmentIcon /> },
             { label: 'Grades', href: `${baseUrl}/grades`, icon: <GradeIcon /> },
             { label: 'Progress', href: `${baseUrl}/progress`, icon: <ReportIcon /> },
             { label: 'Schedule', href: `${baseUrl}/schedule`, icon: <AuditIcon /> },
