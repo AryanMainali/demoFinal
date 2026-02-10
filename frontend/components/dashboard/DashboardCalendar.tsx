@@ -3,13 +3,27 @@ import { format } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Clock } from 'lucide-react';
 
-export function DashboardCalendar() {
+type DashboardCalendarProps = {
+    // Array of date strings (e.g. ISO) representing days that have assignments/events
+    highlightDates?: string[];
+};
+
+export function DashboardCalendar({ highlightDates = [] }: DashboardCalendarProps) {
     // Simple calendar data for current month (static UI, no real data yet)
     const today = new Date();
     const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
     const currentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
     const startWeekday = currentMonthStart.getDay(); // 0 (Sun) - 6 (Sat)
     const daysInMonth = currentMonthEnd.getDate();
+
+    const highlightSet = new Set(
+        highlightDates
+            .map((d) => {
+                const date = new Date(d);
+                return isNaN(date.getTime()) ? null : date.toDateString();
+            })
+            .filter((d): d is string => Boolean(d))
+    );
 
     const calendarDays: (number | null)[] = [];
     for (let i = 0; i < startWeekday; i++) {
@@ -45,22 +59,26 @@ export function DashboardCalendar() {
                     ))}
                 </div>
                 <div className="grid grid-cols-7 gap-2 text-sm">
-                    {calendarDays.map((day, index) => (
-                        <div
-                            key={index}
-                            className={`h-10 rounded-lg flex flex-col items-center justify-center ${
-                                day ? 'bg-gray-50 text-gray-900' : ''
-                            }`}
-                        >
-                            {day && (
-                                <>
-                                    <span>{day}</span>
-                                    {/* Static dot for now; will later reflect real assignments */}
-                                    <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-gray-300" />
-                                </>
-                            )}
-                        </div>
-                    ))}
+                    {calendarDays.map((day, index) => {
+                        if (!day) {
+                            return <div key={index} />;
+                        }
+
+                        const dateObj = new Date(today.getFullYear(), today.getMonth(), day);
+                        const hasEvent = highlightSet.has(dateObj.toDateString());
+
+                        return (
+                            <div
+                                key={index}
+                                className="h-10 rounded-lg flex flex-col items-center justify-center bg-gray-50 text-gray-900"
+                            >
+                                <span>{day}</span>
+                                {hasEvent && (
+                                    <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-[#862733]" />
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             </CardContent>
         </Card>

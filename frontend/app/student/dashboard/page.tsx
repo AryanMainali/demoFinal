@@ -76,6 +76,10 @@ export default function StudentDashboardPage() {
     const displayAssignments = assignments.length > 0 ? assignments : mockUpcomingAssignments;
     const displayCourses = courses.length > 0 ? courses : mockCourses;
 
+    const highlightDates = displayAssignments
+        .map((assignment: any) => assignment.due_date)
+        .filter((date: string | undefined | null) => Boolean(date));
+
     const getTimeRemaining = (dueDate: string) => {
         const due = new Date(dueDate);
         if (isPast(due)) return { text: 'Overdue', urgent: true };
@@ -196,7 +200,7 @@ export default function StudentDashboardPage() {
 
                         {/* Calendar + Recent Grades (stacked in right column) */}
                         <div className="space-y-4">
-                            <DashboardCalendar />
+                            <DashboardCalendar highlightDates={highlightDates} />
 
                             {/* Recent Grades (moved below calendar) */}
                             <Card>
