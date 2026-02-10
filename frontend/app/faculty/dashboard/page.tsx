@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+import { format } from 'date-fns';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,12 +21,35 @@ export default function FacultyDashboard() {
         queryFn: () => apiClient.getDashboardStats(),
     });
 
-    // Placeholder calendar data for now: upcoming grading / assignment milestones
-    const mockFacultyEvents = [
-        new Date(Date.now() + 1000 * 60 * 60 * 24 * 1).toISOString(),
-        new Date(Date.now() + 1000 * 60 * 60 * 24 * 3).toISOString(),
-        new Date(Date.now() + 1000 * 60 * 60 * 24 * 5).toISOString(),
+    // Placeholder upcoming events for now; later this can use real faculty schedule/assignments
+    const mockUpcomingItems = [
+        {
+            id: 1,
+            type: 'lecture',
+            title: 'Lecture: Data Structures',
+            detail: 'Section A',
+            date: new Date(Date.now() + 1000 * 60 * 60 * 24 * 1).toISOString(),
+        },
+        {
+            id: 2,
+            type: 'grading',
+            title: 'Grade: Linked List Assignment',
+            detail: '24 submissions pending',
+            date: new Date(Date.now() + 1000 * 60 * 60 * 24 * 3).toISOString(),
+        },
     ];
+
+    const mockFacultyEvents = mockUpcomingItems.map((item) => item.date);
+
+    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+    const filteredItems = selectedDate
+        ? mockUpcomingItems.filter((item) => {
+              const d = new Date(item.date);
+              if (isNaN(d.getTime())) return false;
+              return d.toDateString() === selectedDate.toDateString();
+          })
+        : mockUpcomingItems;
 
     const quickLinks = [
         {
@@ -121,39 +146,51 @@ export default function FacultyDashboard() {
                             </CardHeader>
                             <CardContent>
                                 <div className="space-y-3">
-                                    <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                                        <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-blue-100">
-                                            <BookOpen className="w-5 h-5 text-blue-600" />
+                                    {filteredItems.map((item) => {
+                                        const isLecture = item.type === 'lecture';
+                                        const iconBg = isLecture ? 'bg-blue-100' : 'bg-green-100';
+                                        const iconColor = isLecture ? 'text-blue-600' : 'text-green-600';
+                                        const Icon = isLecture ? BookOpen : FileText;
+                                        const when = format(new Date(item.date), 'EEE, MMM d');
+
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg"
+                                            >
+                                                <div
+                                                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${iconBg}`}
+                                                >
+                                                    <Icon className={`w-5 h-5 ${iconColor}`} />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-gray-900 truncate">
+                                                        {item.title}
+                                                    </p>
+                                                    <p className="text-sm text-gray-500">
+                                                        {when} • {item.detail}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {filteredItems.length === 0 && (
+                                        <div className="text-center py-8 text-gray-500">
+                                            <p>No teaching sessions or grading on this date.</p>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-medium text-gray-900 truncate">
-                                                Lecture: Data Structures
-                                            </p>
-                                            <p className="text-sm text-gray-500">
-                                                Tomorrow • Section A
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                                        <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-green-100">
-                                            <FileText className="w-5 h-5 text-green-600" />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-medium text-gray-900 truncate">
-                                                Grade: Linked List Assignment
-                                            </p>
-                                            <p className="text-sm text-gray-500">
-                                                Due in 3 days • 24 submissions pending
-                                            </p>
-                                        </div>
-                                    </div>
+                                    )}
                                 </div>
                             </CardContent>
                         </Card>
 
                         {/* Calendar column (same position as student) */}
                         <div className="space-y-4">
-                            <DashboardCalendar highlightDates={mockFacultyEvents} />
+                            <DashboardCalendar
+                                highlightDates={mockFacultyEvents}
+                                selectedDate={selectedDate}
+                                onSelectDate={setSelectedDate}
+                            />
                         </div>
                     </div>
 
