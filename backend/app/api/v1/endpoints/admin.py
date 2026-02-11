@@ -237,7 +237,7 @@ def deactivate_user(
 @router.post("/users/{user_id}/reset-password")
 def admin_reset_password(
     user_id: int,
-    payload: AdminPasswordReset,
+    new_password: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -246,7 +246,7 @@ def admin_reset_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    user.hashed_password = get_password_hash(payload.new_password)
+    user.hashed_password = get_password_hash(new_password)
     user.password_changed_at = datetime.utcnow()
     user.updated_at = datetime.utcnow()
     db.commit()
