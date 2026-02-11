@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { StatsCard } from '@/components/ui/stats-card';
+import { DashboardCalendar } from '@/components/dashboard/DashboardCalendar';
 import {
     BookOpen,
     FileCode,
@@ -74,6 +75,24 @@ export default function StudentDashboardPage() {
     const displayStats = stats || mockStats;
     const displayAssignments = assignments.length > 0 ? assignments : mockUpcomingAssignments;
     const displayCourses = courses.length > 0 ? courses : mockCourses;
+
+    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+    const highlightDates = displayAssignments
+        .map((assignment: any) => assignment.due_date)
+        .filter((date: string | undefined | null) => Boolean(date));
+
+    const filteredAssignments = selectedDate
+        ? displayAssignments.filter((assignment: any) => {
+              const raw = assignment.due_date;
+              if (!raw) return false;
+              const due = new Date(raw);
+              if (isNaN(due.getTime())) return false;
+              return due.toDateString() === selectedDate.toDateString();
+          })
+        : displayAssignments;
+
+    const assignmentsToShow = (selectedDate ? filteredAssignments : displayAssignments).slice(0, 4);
 
     const getTimeRemaining = (dueDate: string) => {
         const due = new Date(dueDate);
@@ -148,7 +167,11 @@ export default function StudentDashboardPage() {
                                         <Clock className="w-5 h-5 text-[#862733]" />
                                         Upcoming Assignments
                                     </CardTitle>
-                                    <CardDescription>Assignments due soon</CardDescription>
+                                    <CardDescription>
+                                        {selectedDate
+                                            ? `Assignments due on ${format(selectedDate, 'MMM d, yyyy')}`
+                                            : 'Assignments due soon'}
+                                    </CardDescription>
                                 </div>
                                 <Link href="/student/assignments">
                                     <Button variant="ghost" size="sm">
@@ -162,7 +185,7 @@ export default function StudentDashboardPage() {
                                     <div className="text-center py-8 text-gray-500">Loading...</div>
                                 ) : (
                                     <div className="space-y-3">
-                                        {displayAssignments.slice(0, 4).map((assignment: any) => {
+                                        {assignmentsToShow.map((assignment: any) => {
                                             const timeInfo = getTimeRemaining(assignment.due_date);
                                             return (
                                                 <Link
@@ -182,7 +205,7 @@ export default function StudentDashboardPage() {
                                                 </Link>
                                             );
                                         })}
-                                        {displayAssignments.length === 0 && (
+                                        {(selectedDate ? filteredAssignments.length : displayAssignments.length) === 0 && (
                                             <div className="text-center py-8 text-gray-500">
                                                 <CheckCircle className="w-12 h-12 mx-auto mb-3 text-green-500" />
                                                 <p>All caught up! No pending assignments.</p>
@@ -193,41 +216,68 @@ export default function StudentDashboardPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Recent Grades */}
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="flex items-center gap-2">
-                                    <Award className="w-5 h-5 text-[#862733]" />
-                                    Recent Grades
-                                </CardTitle>
-                                <CardDescription>Your latest results</CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    {mockRecentGrades.map((grade) => (
-                                        <div key={grade.id} className="p-3 bg-gray-50 rounded-lg">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <p className="font-medium text-gray-900 text-sm truncate flex-1">{grade.title}</p>
-                                                <Badge variant={grade.score >= 90 ? 'success' : grade.score >= 70 ? 'warning' : 'danger'}>
-                                                    {grade.score}%
-                                                </Badge>
+                        {/* Calendar + Recent Grades (stacked in right column) */}
+                        <div className="space-y-4">
+                            <DashboardCalendar
+                                highlightDates={highlightDates}
+                                selectedDate={selectedDate}
+                                onSelectDate={setSelectedDate}
+                            />
+
+                            {/* Recent Grades (moved below calendar) */}
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Award className="w-5 h-5 text-[#862733]" />
+                                        Recent Grades
+                                    </CardTitle>
+                                    <CardDescription>Your latest results</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-4">
+                                        {mockRecentGrades.map((grade) => (
+                                            <div key={grade.id} className="p-3 bg-gray-50 rounded-lg">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <p className="font-medium text-gray-900 text-sm truncate flex-1">
+                                                        {grade.title}
+                                                    </p>
+                                                    <Badge
+                                                        variant={
+                                                            grade.score >= 90
+                                                                ? 'success'
+                                                                : grade.score >= 70
+                                                                ? 'warning'
+                                                                : 'danger'
+                                                        }
+                                                    >
+                                                        {grade.score}%
+                                                    </Badge>
+                                                </div>
+                                                <p className="text-xs text-gray-500">{grade.course}</p>
+                                                <Progress
+                                                    value={grade.score}
+                                                    max={grade.max_score}
+                                                    size="sm"
+                                                    variant={
+                                                        grade.score >= 90
+                                                            ? 'success'
+                                                            : grade.score >= 70
+                                                            ? 'warning'
+                                                            : 'danger'
+                                                    }
+                                                    className="mt-2"
+                                                />
                                             </div>
-                                            <p className="text-xs text-gray-500">{grade.course}</p>
-                                            <Progress
-                                                value={grade.score}
-                                                max={grade.max_score}
-                                                size="sm"
-                                                variant={grade.score >= 90 ? 'success' : grade.score >= 70 ? 'warning' : 'danger'}
-                                                className="mt-2"
-                                            />
-                                        </div>
-                                    ))}
-                                </div>
-                                <Link href="/student/grades">
-                                    <Button variant="outline" className="w-full mt-4">View All Grades</Button>
-                                </Link>
-                            </CardContent>
-                        </Card>
+                                        ))}
+                                    </div>
+                                    <Link href="/student/grades">
+                                        <Button variant="outline" className="w-full mt-4">
+                                            View All Grades
+                                        </Button>
+                                    </Link>
+                                </CardContent>
+                            </Card>
+                        </div>
                     </div>
 
                     {/* My Courses */}
