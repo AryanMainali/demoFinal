@@ -51,7 +51,7 @@ class S3StorageService:
             # Generate unique S3 key
             timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
             file_extension = Path(filename).suffix
-            s3_key = f"submissions/{assignment_id}/{student_id}/{submission_id}/{timestamp}_{filename}"
+            s3_key = f"submissions/{assignment_id}/{student_id}/{submission_id}/{filename}"
             
             # Calculate file hash
             file_content.seek(0)

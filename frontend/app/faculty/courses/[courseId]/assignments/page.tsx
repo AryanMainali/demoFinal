@@ -72,7 +72,7 @@ export default function AssignmentsPage() {
             key: 'status',
             header: 'Status',
             cell: (assignment: Assignment) => (
-                <Badge variant={assignment.is_published ? 'success' : 'secondary'}>
+                <Badge variant={assignment.is_published ? 'success' : 'default'}>
                     {assignment.is_published ? 'Published' : 'Draft'}
                 </Badge>
             ),
@@ -85,7 +85,7 @@ export default function AssignmentsPage() {
                     assignment.difficulty === 'hard' ? 'danger' :
                         assignment.difficulty === 'medium' ? 'warning' : 'default'
                 }>
-                    {assignment.difficulty?.charAt(0).toUpperCase() + assignment.difficulty?.slice(1) || 'N/A'}
+                    {assignment.difficulty ? assignment.difficulty.charAt(0).toUpperCase() + assignment.difficulty.slice(1) : 'N/A'}
                 </Badge>
             ),
         },
