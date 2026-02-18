@@ -14,7 +14,6 @@ import {
     Users,
     GraduationCap,
     BookOpen,
-    FileText,
     CheckCircle,
     ArrowRight,
     BarChart3,
@@ -108,13 +107,7 @@ export default function AdminDashboard() {
                             icon={BookOpen}
                             variant="warning"
                         />
-                        <StatsCard
-                            title="Assignments"
-                            value={isLoading ? '...' : stats?.assignments?.total || 0}
-                            subtitle={`${stats?.assignments?.published || 0} published`}
-                            icon={FileText}
-                            variant="danger"
-                        />
+
                     </div>
 
                     {/* Second Row */}

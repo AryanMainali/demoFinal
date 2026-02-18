@@ -124,7 +124,6 @@ const getNavItems = (role: UserRole): NavItem[] => {
         { label: 'Students', href: `${baseUrl}/students`, icon: <UsersIcon /> },
         { label: 'Faculty', href: `${baseUrl}/faculty`, icon: <UsersIcon /> },
         { label: 'Courses', href: `${baseUrl}/courses`, icon: <BookIcon /> },
-        { label: 'Assignments', href: `${baseUrl}/assignments`, icon: <AssignmentIcon /> },
         { label: 'Languages', href: `${baseUrl}/languages`, icon: <SettingsIcon /> },
         { label: 'Security', href: `${baseUrl}/security`, icon: <AuditIcon /> },
         { label: 'Reports', href: `${baseUrl}/reports`, icon: <ReportIcon /> },
@@ -173,7 +172,6 @@ const getTopNavItems = (role: UserRole) => {
         { label: 'Dashboard', href: '/admin/dashboard' },
         { label: 'Users', href: '/admin/users' },
         { label: 'Courses', href: '/admin/courses' },
-        { label: 'Assignments', href: '/admin/assignments' },
         { label: 'Reports', href: '/admin/reports' },
         { label: 'Settings', href: '/admin/settings' },
     ];
