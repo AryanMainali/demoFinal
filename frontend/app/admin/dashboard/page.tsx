@@ -1,7 +1,7 @@
 'use client';
 
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { DashboardLayout } from '@/components/layouts/DashboardLayout';
+import { AdminLayout } from '@/components/layouts/AdminLayout';
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
 import { StatsCard } from '@/components/ui/stats-card';
@@ -55,7 +55,7 @@ export default function AdminDashboard() {
 
     return (
         <ProtectedRoute allowedRoles={['ADMIN']}>
-            <DashboardLayout>
+            <AdminLayout>
                 <div className="space-y-6">
                     {/* Welcome Section */}
                     <div className="bg-gradient-to-r from-[#862733] to-[#a63344] rounded-2xl p-6 text-white">
@@ -312,7 +312,7 @@ export default function AdminDashboard() {
                         </Link>
                     </div>
                 </div>
-            </DashboardLayout>
+            </AdminLayout>
         </ProtectedRoute>
     );
 }
