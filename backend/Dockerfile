@@ -2,11 +2,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and language compilers
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
+    default-jdk \
+    mono-mcs \
+    mono-runtime \
+    nodejs \
+    npm \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Install TypeScript
+RUN npm install -g typescript ts-node
 
 # Copy requirements
 COPY requirements.txt .

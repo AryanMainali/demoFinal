@@ -199,7 +199,12 @@ def get_faculty_courses(
         ).count()
         
         # Calculate average score
-        assignment_ids = [a.id for a in course.assignments]
+        # Query assignment IDs directly instead of using the relationship
+        assignment_ids_query = db.query(Assignment.id).filter(
+            Assignment.course_id == course.id
+        ).all()
+        assignment_ids = [aid[0] for aid in assignment_ids_query]
+        
         avg_score = None
         if assignment_ids:
             avg_result = db.query(func.avg(Submission.final_score)).filter(
@@ -245,7 +250,10 @@ def get_course_students(
     ).all()
     
     # Get assignment IDs for this course
-    assignment_ids = [a.id for a in course.assignments]
+    assignment_ids_query = db.query(Assignment.id).filter(
+        Assignment.course_id == course_id
+    ).all()
+    assignment_ids = [aid[0] for aid in assignment_ids_query]
     
     result = []
     for enrollment in enrollments:

@@ -46,7 +46,7 @@ export const registerSchema = z.object({
         .string()
         .min(1, 'Last name is required')
         .max(50, 'Last name must be less than 50 characters'),
-}).refine((data) => data.password === data.confirmPassword, {
+}).refine((data: any) => data.password === data.confirmPassword, {
     message: "Passwords don't match",
     path: ['confirmPassword'],
 });
@@ -76,76 +76,66 @@ export const resetPasswordSchema = z.object({
     confirmPassword: z
         .string()
         .min(1, 'Please confirm your password'),
-}).refine((data) => data.password === data.confirmPassword, {
+}).refine((data: any) => data.password === data.confirmPassword, {
     message: "Passwords don't match",
     path: ['confirmPassword'],
 });
 
 export type ResetPasswordFormData = z.infer<typeof resetPasswordSchema>;
 
-// Assignment creation validation schema
+// Assignment creation validation schema (complete)
 export const assignmentCreateSchema = z.object({
-    // Route-provided
-    course_id: z.coerce.number().int().positive('Invalid course id'),
-
-    // Basic info
+    // Required fields
     title: z.string().min(1, 'Title is required'),
-    description: z.string().min(1, 'Description is required'),
-    instructions: z.string().optional().or(z.literal('')),
-
-    // Programming settings
     language_id: z.coerce.number().int().positive('Language is required'),
-    starter_code: z.string().optional().or(z.literal('')),
-    solution_code: z.string().optional().or(z.literal('')),
-
-    // Scoring
-    max_score: z.coerce.number().min(0, 'Max score must be >= 0'),
-    passing_score: z.coerce.number().min(0, 'Passing score must be >= 0'),
-    difficulty: z.enum(['easy', 'medium', 'hard'], {
-        required_error: 'Difficulty is required',
-    }),
-
-    // Due date & late policy
+    description: z.string().min(1, 'Description is required'),
     due_date: z
         .string()
         .min(1, 'Due date is required')
-        .refine((v) => !Number.isNaN(Date.parse(v)), {
+        .refine((v: any) => !Number.isNaN(Date.parse(v)), {
             message: 'Invalid date/time',
         }),
-    allow_late: z.coerce.boolean(),
-    late_penalty_per_day: z.coerce.number().min(0).max(100),
-    max_late_days: z.coerce.number().min(0),
-
+    
+    // Optional fields with defaults
+    instructions: z.string().optional().or(z.literal('')),
+    max_score: z.coerce.number().min(0, 'Max score must be >= 0').default(100),
+    passing_score: z.coerce.number().min(0, 'Passing score must be >= 0').default(60),
+    difficulty: z.enum(['easy', 'medium', 'hard']).default('medium'),
+    
+    // Late submission policy
+    allow_late: z.coerce.boolean().default(true),
+    late_penalty_per_day: z.coerce.number().min(0).max(100).default(10),
+    max_late_days: z.coerce.number().min(0).default(7),
+    
     // Submission settings
-    max_attempts: z.coerce.number().min(0),
-    max_file_size_mb: z.coerce.number().min(1),
-    // Form uses comma-separated strings; transform later in onSubmit
+    max_attempts: z.coerce.number().min(0).default(10),
+    max_file_size_mb: z.coerce.number().min(1).default(10),
     allowedExtensionsStr: z.string().optional().or(z.literal('')),
     requiredFilesStr: z.string().optional().or(z.literal('')),
-
+    
     // Group settings
-    allow_groups: z.coerce.boolean(),
-    max_group_size: z.coerce.number().min(1),
-
-    // Integrity settings
-    enable_plagiarism_check: z.coerce.boolean(),
-    plagiarism_threshold: z.coerce.number().min(0).max(100),
-    enable_ai_detection: z.coerce.boolean(),
-    ai_detection_threshold: z.coerce.number().min(0).max(100),
-
-    // Weights
-    test_weight: z.coerce.number().min(0).max(100),
-    rubric_weight: z.coerce.number().min(0).max(100),
-
-    // Publish toggle
+    allow_groups: z.coerce.boolean().default(false),
+    max_group_size: z.coerce.number().min(1).default(4),
+    
+    // Integrity checks
+    enable_plagiarism_check: z.coerce.boolean().default(true),
+    plagiarism_threshold: z.coerce.number().min(0).max(100).default(30),
+    enable_ai_detection: z.coerce.boolean().default(true),
+    ai_detection_threshold: z.coerce.number().min(0).max(100).default(50),
+    
+    // Grading weights
+    test_weight: z.coerce.number().min(0).max(100).default(70),
+    rubric_weight: z.coerce.number().min(0).max(100).default(30),
+    
+    // Publishing
     is_published: z.coerce.boolean().default(false),
 })
-.refine((data) => data.passing_score <= data.max_score, {
+.refine((data: any) => data.passing_score <= data.max_score, {
     message: 'Passing score cannot exceed max score',
     path: ['passing_score'],
 })
-.refine((data) => data.test_weight + data.rubric_weight === 100, {
-    message: 'Test and rubric weights must sum to 100',
+.refine((data: any) => data.test_weight + data.rubric_weight === 100, {
+    message: 'Test weight and manual weight must sum to 100%',
     path: ['rubric_weight'],
 });
 

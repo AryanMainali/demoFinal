@@ -118,7 +118,7 @@ class ApiClient {
         return response.data;
     }
 
-    // Course endpoints
+    // endpoints
     async getCourses() {
         const response = await this.client.get('/courses');
         return response.data;
@@ -165,6 +165,13 @@ class ApiClient {
         return response.data;
     }
 
+    async getCourseAssignments(courseId: number, includeUnpublished: boolean = false) {
+        const response = await this.client.get(`/courses/${courseId}/assignments`, {
+            params: { include_unpublished: includeUnpublished }
+        });
+        return response.data;
+    }
+
     async unenrollStudent(courseId: number, studentId: number) {
         const response = await this.client.delete(`/courses/${courseId}/students/${studentId}`);
         return response.data;
@@ -182,8 +189,15 @@ class ApiClient {
         return response.data;
     }
 
-    async createAssignment(data: any) {
-        const response = await this.client.post('/assignments', data);
+    async createAssignment(data: any, files?: File[]) {
+        const formData = new FormData();
+        formData.append('assignment_data', JSON.stringify(data));
+        if (files && files.length > 0) {
+            files.forEach((file) => formData.append('files', file));
+        }
+        const response = await this.client.post('/assignments', formData, {
+            headers: { 'Content-Type': undefined as unknown as string },
+        });
         return response.data;
     }
 
@@ -215,6 +229,11 @@ class ApiClient {
         return response.data;
     }
 
+    async getAssignmentSubmissions(assignmentId: number) {
+        const response = await this.client.get(`/submissions/assignment/${assignmentId}/all`);
+        return response.data;
+    }
+
     async createSubmission(assignmentId: number, files: File[], groupId?: number) {
         const formData = new FormData();
         formData.append('assignment_id', assignmentId.toString());
@@ -222,7 +241,7 @@ class ApiClient {
         files.forEach((file) => formData.append('files', file));
 
         const response = await this.client.post('/submissions', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: { 'Content-Type': undefined as unknown as string },
         });
         return response.data;
     }
@@ -248,8 +267,56 @@ class ApiClient {
         return response.data;
     }
 
-    async runCode(assignmentId: number, files: { name: string; content: string }[]) {
-        const response = await this.client.post(`/assignments/${assignmentId}/run`, { files });
+    async getSubmissionFileContent(submissionId: number, fileId: number) {
+        const response = await this.client.get(`/submissions/${submissionId}/files/${fileId}/content`);
+        return response.data;
+    }
+
+    async saveManualGrade(submissionId: number, data: {
+        final_score?: number;
+        feedback?: string;
+        rubric_scores?: any[];
+        test_overrides?: any[];
+    }) {
+        const formData = new FormData();
+        if (data.final_score !== undefined) formData.append('final_score', data.final_score.toString());
+        if (data.feedback !== undefined) formData.append('feedback', data.feedback);
+        if (data.rubric_scores) formData.append('rubric_scores_json', JSON.stringify(data.rubric_scores));
+        if (data.test_overrides) formData.append('test_overrides_json', JSON.stringify(data.test_overrides));
+
+        const response = await this.client.put(`/submissions/${submissionId}/manual-grade`, formData, {
+            headers: { 'Content-Type': undefined as unknown as string },
+        });
+        return response.data;
+    }
+
+    // Test case CRUD
+    async getTestCases(assignmentId: number) {
+        const response = await this.client.get(`/assignments/${assignmentId}/test-cases`);
+        return response.data;
+    }
+
+    async createTestCase(assignmentId: number, data: any) {
+        const response = await this.client.post(`/assignments/${assignmentId}/test-cases`, data);
+        return response.data;
+    }
+
+    async updateTestCase(assignmentId: number, testCaseId: number, data: any) {
+        const response = await this.client.put(`/assignments/${assignmentId}/test-cases/${testCaseId}`, data);
+        return response.data;
+    }
+
+    async deleteTestCase(assignmentId: number, testCaseId: number) {
+        const response = await this.client.delete(`/assignments/${assignmentId}/test-cases/${testCaseId}`);
+        return response.data;
+    }
+
+    async runCode(assignmentId: number, files: { name: string; content: string }[], testCaseIds?: number[]) {
+        const payload: any = { files };
+        if (testCaseIds && testCaseIds.length > 0) {
+            payload.test_case_ids = testCaseIds;
+        }
+        const response = await this.client.post(`/assignments/${assignmentId}/run`, payload);
         return response.data;
     }
 
@@ -382,6 +449,32 @@ class ApiClient {
         search?: string;
     }) {
         const response = await this.client.get('/admin/audit-logs', { params });
+        return response.data;
+    }
+
+    // Plagiarism endpoints
+    async checkPlagiarism(submissionId: number) {
+        const response = await this.client.post(`/submissions/${submissionId}/check-plagiarism`);
+        return response.data;
+    }
+
+    async checkPlagiarismAll(assignmentId: number) {
+        const response = await this.client.post(`/submissions/assignment/${assignmentId}/check-plagiarism-all`);
+        return response.data;
+    }
+
+    async getPlagiarismMatches(submissionId: number) {
+        const response = await this.client.get(`/submissions/${submissionId}/plagiarism-matches`);
+        return response.data;
+    }
+
+    async reviewPlagiarismMatch(matchId: number, isConfirmed: boolean, reviewerNotes: string) {
+        const formData = new FormData();
+        formData.append('is_confirmed', String(isConfirmed));
+        formData.append('reviewer_notes', reviewerNotes);
+        const response = await this.client.put(`/submissions/plagiarism-matches/${matchId}/review`, formData, {
+            headers: { 'Content-Type': undefined as unknown as string },
+        });
         return response.data;
     }
 

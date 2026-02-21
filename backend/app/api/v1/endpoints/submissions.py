@@ -10,14 +10,19 @@ from pathlib import Path
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models import (
-    User, UserRole, Assignment, Submission, SubmissionFile,
+    User, UserRole, Assignment, Course, Submission, SubmissionFile, TestResult, RubricScore,
     Enrollment, EnrollmentStatus, Group, GroupMembership, AuditLog
 )
+from app.models.assignment import Rubric, RubricCategory, RubricItem, TestCase
 from app.schemas.submission import (
     SubmissionCreate,
     Submission as SubmissionSchema,
-    SubmissionDetail
+    SubmissionDetail,
+    SubmissionWithStudent,
+    SubmissionDetailWithStudent,
+    PlagiarismMatchOut,
 )
+from sqlalchemy.orm import joinedload
 from app.core.config import settings
 from app.core.logging import logger
 from app.services.grading import GradingService
@@ -56,14 +61,44 @@ def list_submissions(
     return submissions
 
 
-@router.get("/{submission_id}", response_model=SubmissionDetail)
+@router.get("/assignment/{assignment_id}/all", response_model=List[SubmissionWithStudent])
+def list_assignment_submissions(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
+):
+    """Faculty/Admin: list all submissions for an assignment with student info"""
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if current_user.role == UserRole.FACULTY:
+        if assignment.course.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    submissions = (
+        db.query(Submission)
+        .options(joinedload(Submission.student))
+        .filter(Submission.assignment_id == assignment_id)
+        .order_by(desc(Submission.submitted_at))
+        .all()
+    )
+    return submissions
+
+
+@router.get("/{submission_id}", response_model=SubmissionDetailWithStudent)
 def get_submission(
     submission_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get submission details including test results"""
-    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    submission = (
+        db.query(Submission)
+        .options(joinedload(Submission.student), joinedload(Submission.files), joinedload(Submission.test_results), joinedload(Submission.plagiarism_matches))
+        .filter(Submission.id == submission_id)
+        .first()
+    )
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
@@ -315,8 +350,22 @@ async def create_submission(
     
     logger.info(f"Submission {submission.id} created by user {current_user.id} for assignment {assignment_id}")
     
-    # Trigger autograding asynchronously (in production, use Celery/background tasks)
-    # For now, we'll return and grade later
+    try:
+        from app.tasks.grading import grade_submission_task, check_plagiarism_task
+        from celery import chain as celery_chain
+        task_chain = celery_chain(
+            grade_submission_task.si(submission.id),
+            check_plagiarism_task.si(submission.id),
+        )
+        task_chain.apply_async(queue="grading")
+        logger.info(f"Triggered Celery grading + plagiarism for submission {submission.id}")
+    except Exception as e:
+        logger.warning(f"Could not trigger Celery tasks for submission {submission.id}: {str(e)}")
+        try:
+            from app.tasks.grading import grade_submission_task
+            grade_submission_task.apply_async(args=[submission.id], queue="grading")
+        except Exception:
+            pass
     
     return submission
 
@@ -377,8 +426,7 @@ def override_score(
     
     old_score = submission.final_score
     submission.final_score = new_score
-    submission.score_override = True
-    submission.override_reason = reason
+    submission.override_score = new_score
     submission.updated_at = datetime.utcnow()
     
     db.commit()
@@ -448,3 +496,281 @@ async def download_submission(
         filename=f"submission_{submission.id}.zip",
         media_type="application/zip"
     )
+
+
+@router.get("/{submission_id}/files/{file_id}/content")
+def get_file_content(
+    submission_id: int,
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Read the content of a submitted file"""
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    can_access = False
+    if current_user.role == UserRole.ADMIN:
+        can_access = True
+    elif current_user.role == UserRole.FACULTY:
+        can_access = submission.assignment.course.instructor_id == current_user.id
+    elif current_user.role == UserRole.STUDENT:
+        can_access = submission.student_id == current_user.id
+
+    if not can_access:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    file_record = db.query(SubmissionFile).filter(
+        and_(SubmissionFile.id == file_id, SubmissionFile.submission_id == submission_id)
+    ).first()
+    if not file_record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    content = ""
+    if settings.USE_S3_STORAGE and file_record.file_path.startswith("http"):
+        try:
+            s3_key = file_record.file_path.split(".amazonaws.com/")[-1] if ".amazonaws.com/" in file_record.file_path else file_record.file_path
+            import tempfile as tmpf
+            with tmpf.NamedTemporaryFile(delete=False, suffix=file_record.filename) as tmp:
+                s3_service.download_submission_file(s3_key, tmp.name)
+                with open(tmp.name, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                os.unlink(tmp.name)
+        except Exception as e:
+            logger.error(f"Error reading S3 file: {e}")
+            content = f"[Error reading file from S3: {str(e)}]"
+    else:
+        file_path = Path(file_record.file_path)
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+            except Exception as e:
+                content = f"[Error reading file: {str(e)}]"
+        else:
+            content = "[File not found on disk]"
+
+    return {
+        "id": file_record.id,
+        "filename": file_record.filename,
+        "content": content,
+    }
+
+
+@router.put("/{submission_id}/manual-grade")
+def save_manual_grade(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+    final_score: Optional[float] = Form(None),
+    feedback: Optional[str] = Form(None),
+    rubric_scores_json: Optional[str] = Form(None),
+    test_overrides_json: Optional[str] = Form(None),
+):
+    """Save manual grading: feedback, rubric scores, test overrides, final score"""
+    import json as json_lib
+    submission = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    if current_user.role == UserRole.FACULTY:
+        if submission.assignment.course.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    if feedback is not None:
+        submission.feedback = feedback
+
+    if test_overrides_json:
+        try:
+            overrides = json_lib.loads(test_overrides_json)
+            for ov in overrides:
+                tr = db.query(TestResult).filter(
+                    and_(TestResult.id == ov["id"], TestResult.submission_id == submission_id)
+                ).first()
+                if tr:
+                    tr.points_awarded = float(ov.get("points_awarded", tr.points_awarded))
+                    if "passed" in ov:
+                        tr.passed = bool(ov["passed"])
+        except Exception as e:
+            logger.warning(f"Error processing test overrides: {e}")
+
+    if rubric_scores_json:
+        try:
+            rubric_data = json_lib.loads(rubric_scores_json)
+            for item in rubric_data:
+                existing = db.query(RubricScore).filter(
+                    and_(
+                        RubricScore.submission_id == submission_id,
+                        RubricScore.rubric_item_id == item["rubric_item_id"]
+                    )
+                ).first()
+                if existing:
+                    existing.score = float(item["score"])
+                    existing.comment = item.get("comment", existing.comment)
+                    existing.graded_by = current_user.id
+                    existing.graded_at = datetime.utcnow()
+                else:
+                    db.add(RubricScore(
+                        submission_id=submission_id,
+                        rubric_item_id=item["rubric_item_id"],
+                        score=float(item["score"]),
+                        max_score=float(item.get("max_score", 0)),
+                        comment=item.get("comment"),
+                        graded_by=current_user.id,
+                        graded_at=datetime.utcnow(),
+                    ))
+        except Exception as e:
+            logger.warning(f"Error processing rubric scores: {e}")
+
+    if final_score is not None:
+        submission.final_score = final_score
+        submission.override_score = final_score
+
+    submission.graded_by = current_user.id
+    submission.graded_at = datetime.utcnow()
+    submission.status = "completed"
+    submission.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(submission)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        event_type="manual_grade",
+        description=f"Manual grade saved for submission {submission_id}: score={final_score}"
+    )
+    db.add(audit)
+    db.commit()
+
+    return {"message": "Grade saved successfully", "submission_id": submission_id}
+
+
+# ---------------------------------------------------------------------------
+# Plagiarism endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/{submission_id}/check-plagiarism")
+def check_plagiarism(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
+):
+    """Trigger plagiarism check for a single submission"""
+    submission = (
+        db.query(Submission)
+        .options(joinedload(Submission.assignment).joinedload(Assignment.course))
+        .filter(Submission.id == submission_id)
+        .first()
+    )
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    if current_user.role == UserRole.FACULTY:
+        if submission.assignment.course.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    from app.services.plagiarism import PlagiarismService
+    service = PlagiarismService(db)
+    try:
+        result = service.check_submission(submission_id, force=True)
+        audit = AuditLog(
+            user_id=current_user.id,
+            event_type="plagiarism_check",
+            description=f"Plagiarism check on submission {submission_id}: score={result.get('plagiarism_score')}",
+            status="success",
+        )
+        db.add(audit)
+        db.commit()
+        return result
+    except Exception as e:
+        logger.error(f"Plagiarism check failed for submission {submission_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Plagiarism check failed: {str(e)}")
+
+
+@router.post("/assignment/{assignment_id}/check-plagiarism-all")
+def check_plagiarism_all(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
+):
+    """Run plagiarism check on ALL submissions for an assignment"""
+    assignment = (
+        db.query(Assignment)
+        .options(joinedload(Assignment.course))
+        .filter(Assignment.id == assignment_id)
+        .first()
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if current_user.role == UserRole.FACULTY:
+        if assignment.course.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    from app.services.plagiarism import PlagiarismService
+    service = PlagiarismService(db)
+    try:
+        result = service.check_all_for_assignment(assignment_id)
+        audit = AuditLog(
+            user_id=current_user.id,
+            event_type="plagiarism_batch_check",
+            description=f"Batch plagiarism check for assignment {assignment_id}: {result['total_checked']} submissions",
+            status="success",
+        )
+        db.add(audit)
+        db.commit()
+        return result
+    except Exception as e:
+        logger.error(f"Batch plagiarism check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch plagiarism check failed: {str(e)}")
+
+
+@router.get("/{submission_id}/plagiarism-matches", response_model=List[PlagiarismMatchOut])
+def get_plagiarism_matches(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
+):
+    """Get plagiarism match details for a submission"""
+    submission = (
+        db.query(Submission)
+        .options(joinedload(Submission.assignment).joinedload(Assignment.course))
+        .filter(Submission.id == submission_id)
+        .first()
+    )
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if current_user.role == UserRole.FACULTY:
+        if submission.assignment.course.instructor_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    from app.services.plagiarism import PlagiarismService
+    service = PlagiarismService(db)
+    return service.get_matches(submission_id)
+
+
+@router.put("/plagiarism-matches/{match_id}/review")
+def review_plagiarism_match(
+    match_id: int,
+    is_confirmed: bool = Form(...),
+    reviewer_notes: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
+):
+    """Faculty reviews a plagiarism match (confirm/dismiss)"""
+    from app.models.submission import PlagiarismMatch as PMModel
+    match = db.query(PMModel).filter(PMModel.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Plagiarism match not found")
+
+    from app.services.plagiarism import PlagiarismService
+    service = PlagiarismService(db)
+    try:
+        updated = service.review_match(match_id, is_confirmed, reviewer_notes, current_user.id)
+        return {
+            "message": "Review saved",
+            "match_id": updated.id,
+            "is_confirmed": updated.is_confirmed,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

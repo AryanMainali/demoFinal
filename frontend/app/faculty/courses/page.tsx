@@ -26,7 +26,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { Alert } from '@/components/ui/alert';
 import {
     BookOpen,
     Plus,
@@ -379,13 +378,25 @@ export default function FacultyCoursesPage() {
 
                     {/* ==================== Notification ==================== */}
                     {notification && (
-                        <Alert
-                            type={notification.type}
-                            title={notification.type === 'success' ? 'Success' : 'Error'}
-                            onClose={() => setNotification(null)}
-                        >
-                            {notification.message}
-                        </Alert>
+                        <div className={`relative w-full rounded-lg border p-4 flex items-start gap-3 ${
+                            notification.type === 'success'
+                                ? 'bg-green-50 border-green-200 text-green-800'
+                                : 'bg-red-50 border-red-200 text-red-800'
+                        }`}>
+                            {notification.type === 'success' ? (
+                                <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                            ) : (
+                                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                            )}
+                            <div className="flex-1">
+                                <p className="font-semibold text-sm">{notification.type === 'success' ? 'Success' : 'Error'}</p>
+                                <p className="text-sm mt-0.5">{notification.message}</p>
+                            </div>
+                            <button onClick={() => setNotification(null)} className="text-gray-400 hover:text-gray-600">
+                                <span className="sr-only">Dismiss</span>
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
                     )}
 
                     {/* ==================== Page Header ==================== */}
@@ -418,14 +429,19 @@ export default function FacultyCoursesPage() {
 
                     {/* ==================== Error State ==================== */}
                     {isError && (
-                        <Alert type="error" title="Failed to load courses">
-                            <div className="flex items-center justify-between">
-                                <span>{(error as any)?.message || 'An error occurred while loading courses.'}</span>
-                                <Button variant="outline" size="sm" onClick={() => refetch()}>
-                                    Try Again
-                                </Button>
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                                <p className="font-semibold text-sm text-red-800">Failed to load courses</p>
+                                <p className="text-sm text-red-700 mt-0.5">{(error as any)?.message || 'An error occurred while loading courses.'}</p>
                             </div>
-                        </Alert>
+                            <button
+                                onClick={() => refetch()}
+                                className="px-3 py-1.5 text-sm border border-red-300 rounded-lg text-red-700 hover:bg-red-100 transition-colors"
+                            >
+                                Try Again
+                            </button>
+                        </div>
                     )}
 
                     {/* ==================== Statistics Cards ==================== */}

@@ -2,6 +2,38 @@ from typing import List, Optional, Any
 from datetime import datetime
 from pydantic import BaseModel
 
+# --- Test Case Schemas ---
+
+class TestCaseBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    input_data: Optional[str] = None
+    expected_output: Optional[str] = None
+    test_code: Optional[str] = None
+    setup_code: Optional[str] = None
+    teardown_code: Optional[str] = None
+    points: float = 10.0
+    is_hidden: bool = False
+    is_sample: bool = False
+    ignore_whitespace: bool = True
+    ignore_case: bool = False
+    use_regex: bool = False
+    time_limit_seconds: Optional[int] = None
+    memory_limit_mb: Optional[int] = None
+    order: int = 0
+
+class TestCaseCreate(TestCaseBase):
+    pass
+
+class TestCase(TestCaseBase):
+    id: int
+    assignment_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
 # --- Rubric Schemas ---
 
 class RubricItemBase(BaseModel):
@@ -88,7 +120,7 @@ class AssignmentBase(BaseModel):
     enable_ai_detection: bool = True
     ai_detection_threshold: float = 50.0
     
-    # Code
+    # Code (starter_code also stores S3 attachment refs as JSON when files are uploaded)
     starter_code: Optional[str] = None
     solution_code: Optional[str] = None
     
@@ -98,6 +130,7 @@ class AssignmentCreate(AssignmentBase):
     course_id: int
     language_id: int
     rubric: Optional[RubricCreate] = None
+    test_cases: Optional[List[TestCaseCreate]] = None
     test_suites: Optional[List[Any]] = None
 
 class AssignmentUpdate(BaseModel):
@@ -157,4 +190,5 @@ class Assignment(AssignmentBase):
 
 class AssignmentDetail(Assignment):
     rubric: Optional[Rubric] = None
+    test_cases: List[TestCase] = []
     test_suites: List[Any] = []

@@ -10,11 +10,10 @@ import {
     ArrowLeft,
     Play,
     Send,
-    Folder,
+    FolderOpen,
     FileCode,
     Target,
     X,
-    Calendar,
     Upload as UploadIcon,
     AlertCircle,
     Loader2,
@@ -25,25 +24,21 @@ import {
     BookOpen,
     ClipboardList,
     Terminal,
-    Clock,
-    Award,
-    Zap,
-    TrendingUp,
     Code,
-    Sparkles,
+    ChevronDown,
+    Clock,
+    Plus,
+    PartyPopper,
 } from 'lucide-react'
 
 import { ProtectedRoute } from '@/components/ProtectedRoute'
-import { DashboardLayout } from '@/components/layouts/DashboardLayout'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/use-toast'
 
 /* ====================================================================
-   TYPE DEFINITIONS
+   TYPES
    ==================================================================== */
 
 interface UploadedFile {
@@ -52,14 +47,27 @@ interface UploadedFile {
     size: number
 }
 
-interface TestResult {
+interface TestResultItem {
     id: number
     name: string
     passed: boolean
     score: number
     max_score: number
-    output?: string
-    error?: string
+    output?: string | null
+    error?: string | null
+    expected_output?: string | null
+    execution_time?: number
+}
+
+interface RunCodeResult {
+    success: boolean
+    results: TestResultItem[]
+    total_score: number
+    max_score: number
+    tests_passed: number
+    tests_total: number
+    message?: string
+    compilation_status?: string
 }
 
 interface Assignment {
@@ -67,1078 +75,981 @@ interface Assignment {
     title: string
     description: string
     instructions: string
-    rubric: string
     due_date: string
     max_score: number
+    passing_score: number
+    max_attempts: number
+    max_file_size_mb: number
+    allowed_file_extensions: string[] | null
+    required_files: string[] | null
+    allow_late: boolean
+    late_penalty_per_day: number
+    max_late_days: number
+    difficulty: string
+    test_weight: number
+    rubric_weight: number
+    starter_code: string | null
     language: {
         id: number
         name: string
-        version: string
+        display_name: string
+        file_extension: string
     }
+    course: {
+        id: number
+        name: string
+        code: string
+    }
+    rubric?: any
 }
 
-interface Submission {
+interface SubmissionItem {
     id: number
     created_at: string
+    submitted_at: string
     final_score: number | null
     status: string
+    tests_passed: number
+    tests_total: number
+    is_late: boolean
+    attempt_number: number
+}
+
+const FILE_ICONS: Record<string, string> = {
+    '.py': '🐍', '.java': '☕', '.cpp': '⚡', '.c': '⚙️',
+    '.js': '🟨', '.ts': '🔷', '.txt': '📄', '.md': '📝',
+}
+
+function getFileIcon(filename: string) {
+    const ext = '.' + (filename.split('.').pop()?.toLowerCase() || '')
+    return FILE_ICONS[ext] || '📄'
 }
 
 /* ====================================================================
-   MAIN COMPONENT
+   COMPONENT
    ==================================================================== */
 
-export default function AssignmentPage() {
+export default function StudentAssignmentPage() {
     const { id } = useParams()
     const router = useRouter()
     const queryClient = useQueryClient()
     const { toast } = useToast()
-
     const assignmentId = Number(id)
-
-    /* ----------------------------- Constants ---------------------------- */
-    const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
-    const ALLOWED_EXTENSIONS = ['.py', '.java', '.cpp', '.c', '.js', '.ts', '.txt']
-
-    /* ----------------------------- Refs ---------------------------- */
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    /* ----------------------------- State ---------------------------- */
+    // State
     const [files, setFiles] = useState<UploadedFile[]>([])
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null)
-    const [testResults, setTestResults] = useState<TestResult[]>([])
-    const [compilationMessage, setCompilationMessage] = useState<string>('')
-    const [compilationSuccess, setCompilationSuccess] = useState<boolean>(false)
+    const [runResult, setRunResult] = useState<RunCodeResult | null>(null)
     const [isRunning, setIsRunning] = useState(false)
     const [isSubmitting, setIsSubmitting] = useState(false)
-    const [activeModal, setActiveModal] = useState<
-        'description' | 'instructions' | 'rubric' | 'submissions' | null
-    >(null)
-    const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
+    const [showSubmitDialog, setShowSubmitDialog] = useState(false)
+    const [submitPhase, setSubmitPhase] = useState<'confirm' | 'loading' | 'success'>('confirm')
     const [error, setError] = useState<string | null>(null)
-    const [isHoveringUpload, setIsHoveringUpload] = useState(false)
-    const [successAnimation, setSuccessAnimation] = useState(false)
+    const [explorerOpen, setExplorerOpen] = useState(true)
+    const [panelOpen, setPanelOpen] = useState(true)
+    const [activePanel, setActivePanel] = useState<'output' | 'tests'>('output')
+    const [rightPanel, setRightPanel] = useState<'description' | 'instructions' | 'rubric' | 'history' | null>(null)
 
-    /* ----------------------------- API Queries ---------------------------- */
-    const {
-        data: assignment,
-        isLoading: isLoadingAssignment,
-        error: assignmentError
-    } = useQuery<Assignment>({
+    // API
+    const { data: assignment, isLoading, error: loadError } = useQuery<Assignment>({
         queryKey: ['assignment', assignmentId],
         queryFn: () => apiClient.getAssignment(assignmentId),
         retry: 2,
     })
 
-    const {
-        data: submissions = [],
-        isLoading: isLoadingSubmissions
-    } = useQuery<Submission[]>({
+    const { data: submissions = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
         queryKey: ['submissions', assignmentId],
         queryFn: () => apiClient.getSubmissions(assignmentId),
         enabled: !!assignment,
     })
 
-    /* ----------------------------- Derived State ---------------------------- */
-    const isOverdue = useMemo(() =>
-        assignment ? new Date(assignment.due_date) < new Date() : false,
-        [assignment]
-    )
+    // Derived
+    const maxFileSizeMB = assignment?.max_file_size_mb || 10
+    const maxFileSize = maxFileSizeMB * 1024 * 1024
+    const allowedExtensions = assignment?.allowed_file_extensions || ['.py', '.java', '.cpp', '.c', '.js', '.ts', '.txt']
+    const isOverdue = useMemo(() => assignment ? new Date(assignment.due_date) < new Date() : false, [assignment])
+    const dueDate = useMemo(() => assignment ? new Date(assignment.due_date) : null, [assignment])
+    const latestSubmission = useMemo(() => submissions.length > 0 ? submissions[0] : null, [submissions])
+    const maxAttempts = assignment?.max_attempts || 0
+    const attemptsLeft = maxAttempts > 0 ? maxAttempts - submissions.length : Infinity
 
-    const dueDate = useMemo(() =>
-        assignment ? new Date(assignment.due_date) : null,
-        [assignment]
-    )
+    const editorLines = (selectedFile?.content || '').split('\n')
 
-    const passingTests = useMemo(() =>
-        testResults.filter(r => r.passed).length,
-        [testResults]
-    )
+    // Load starter code only if it contains actual code
+    useEffect(() => {
+        if (!assignment || files.length > 0) return
+        if (!assignment.starter_code) return
 
-    const totalScore = useMemo(() =>
-        testResults.reduce((sum, r) => sum + r.score, 0),
-        [testResults]
-    )
+        let codeContent = ''
+        try {
+            const parsed = JSON.parse(assignment.starter_code)
+            codeContent = parsed.code || ''
+        } catch {
+            codeContent = assignment.starter_code
+        }
 
-    const maxPossibleScore = useMemo(() =>
-        testResults.reduce((sum, r) => sum + r.max_score, 0),
-        [testResults]
-    )
+        if (codeContent.trim()) {
+            const ext = assignment.language?.file_extension || '.py'
+            const f: UploadedFile = { name: `main${ext}`, content: codeContent, size: new Blob([codeContent]).size }
+            setFiles([f])
+            setSelectedFile(f)
+        }
+    }, [assignment])
 
-    const latestSubmission = useMemo(() =>
-        submissions.length > 0 ? submissions[0] : null,
-        [submissions]
-    )
-
-    /* ----------------------------- File Handling ---------------------------- */
+    /* ===== File Handling ===== */
 
     const handleUpload = useCallback((fileList: FileList | null) => {
         if (!fileList) return
         setError(null)
-
-        const fileArray = Array.from(fileList)
-
-        fileArray.forEach((file) => {
-            // Validate file size
-            if (file.size > MAX_FILE_SIZE) {
-                const errorMsg = `File "${file.name}" exceeds 5MB limit`
-                setError(errorMsg)
-                toast({
-                    title: 'File too large',
-                    description: errorMsg,
-                    variant: 'destructive',
-                })
+        for (const file of Array.from(fileList)) {
+            if (file.size > maxFileSize) {
+                const msg = `File exceeded the required size (${maxFileSizeMB} MB)`
+                setError(msg)
+                toast({ title: 'File too large', description: msg, variant: 'destructive' })
                 return
             }
-
-            // Validate file extension
             const ext = '.' + file.name.split('.').pop()?.toLowerCase()
-            if (!ALLOWED_EXTENSIONS.includes(ext)) {
-                const errorMsg = `File "${file.name}" has an unsupported extension`
-                setError(errorMsg)
-                toast({
-                    title: 'Invalid file type',
-                    description: errorMsg,
-                    variant: 'destructive',
-                })
+            if (!allowedExtensions.includes(ext)) {
+                const msg = `"${file.name}" is not allowed. Use: ${allowedExtensions.join(', ')}`
+                setError(msg)
+                toast({ title: 'Invalid file type', description: msg, variant: 'destructive' })
                 return
             }
-
             const reader = new FileReader()
             reader.onload = (e) => {
                 const content = e.target?.result as string
-                const newFile: UploadedFile = {
-                    name: file.name,
-                    content,
-                    size: file.size,
-                }
-
+                const newFile: UploadedFile = { name: file.name, content, size: file.size }
                 setFiles((prev) => {
-                    const existingIndex = prev.findIndex((f) => f.name === file.name)
-                    if (existingIndex >= 0) {
-                        toast({
-                            title: 'File updated',
-                            description: `"${file.name}" has been updated`,
-                        })
-                        const updated = [...prev]
-                        updated[existingIndex] = newFile
-                        return updated
-                    }
-                    toast({
-                        title: 'File added',
-                        description: `"${file.name}" has been uploaded`,
-                    })
+                    const idx = prev.findIndex((f) => f.name === file.name)
+                    if (idx >= 0) { const u = [...prev]; u[idx] = newFile; return u }
                     return [...prev, newFile]
                 })
-
-                if (!selectedFile) setSelectedFile(newFile)
+                setSelectedFile(newFile)
             }
-
-            reader.onerror = () => {
-                toast({
-                    title: 'Upload failed',
-                    description: `Failed to read "${file.name}"`,
-                    variant: 'destructive',
-                })
-            }
-
             reader.readAsText(file)
-        })
-    }, [selectedFile, toast, MAX_FILE_SIZE, ALLOWED_EXTENSIONS])
+        }
+    }, [maxFileSize, maxFileSizeMB, allowedExtensions, toast])
+
+    const handleNewFile = useCallback(() => {
+        const ext = assignment?.language?.file_extension || '.py'
+        let name = `file${ext}`
+        let c = 1
+        while (files.some(f => f.name === name)) { name = `file${c}${ext}`; c++ }
+        const nf: UploadedFile = { name, content: '', size: 0 }
+        setFiles(prev => [...prev, nf])
+        setSelectedFile(nf)
+    }, [assignment, files])
 
     const removeFile = useCallback((name: string) => {
         setFiles((prev) => prev.filter((f) => f.name !== name))
         if (selectedFile?.name === name) {
-            const remaining = files.filter(f => f.name !== name)
-            setSelectedFile(remaining.length > 0 ? remaining[0] : null)
+            const rest = files.filter(f => f.name !== name)
+            setSelectedFile(rest.length > 0 ? rest[0] : null)
         }
-        toast({
-            title: 'File removed',
-            description: `"${name}" has been removed`,
-        })
-    }, [selectedFile, files, toast])
+    }, [selectedFile, files])
 
     const updateFileContent = useCallback((value: string) => {
         if (!selectedFile) return
-
-        const updated = { ...selectedFile, content: value }
+        const updated = { ...selectedFile, content: value, size: new Blob([value]).size }
         setSelectedFile(updated)
-        setFiles((prev) =>
-            prev.map((f) => (f.name === updated.name ? updated : f))
-        )
+        setFiles((prev) => prev.map((f) => (f.name === updated.name ? updated : f)))
     }, [selectedFile])
 
-    /* ----------------------------- Run Code ---------------------------- */
+    /* ===== Run Code ===== */
 
     const runCode = async () => {
         if (!files.length) {
-            toast({
-                title: 'No files uploaded',
-                description: 'Please upload at least one file before running',
-                variant: 'destructive',
-            })
+            toast({ title: 'No files', description: 'Create or upload a file first.', variant: 'destructive' })
+            return
+        }
+        // Validate no empty files
+        const emptyFiles = files.filter(f => !f.content.trim())
+        if (emptyFiles.length === files.length) {
+            toast({ title: 'Empty files', description: 'Write some code before running.', variant: 'destructive' })
             return
         }
 
         setIsRunning(true)
-        setTestResults([])
-        setCompilationMessage('')
+        setRunResult(null)
         setError(null)
+        setPanelOpen(true)
+        setActivePanel('output')
 
         try {
-            const response = await apiClient.runCode(assignmentId, files)
+            const response: RunCodeResult = await apiClient.runCode(assignmentId, files)
+            setRunResult(response)
+            setActivePanel(response.results.length > 0 ? 'tests' : 'output')
 
-            // Handle case with no test cases (compilation check only)
-            if (response.results.length === 0 && response.message) {
-                setCompilationSuccess(response.success)
-                setCompilationMessage(response.message)
-
-                toast({
-                    title: response.success ? 'Compiled Successfully' : 'Compilation Failed',
-                    description: response.success ? 'Your code compiled and ran successfully!' : 'Check the output for errors',
-                    variant: response.success ? 'default' : 'destructive',
-                })
-            } else {
-                // Handle test results
-                setTestResults(response.results)
-                const passed = response.results.filter((r: TestResult) => r.passed).length
-                const total = response.results.length
-                const score = response.results.reduce((sum: number, r: TestResult) => sum + r.score, 0)
-
-                toast({
-                    title: `Tests Completed: ${passed}/${total} Passed`,
-                    description: `Score: ${score} points`,
-                    variant: passed === total ? 'default' : 'destructive',
-                })
+            if (response.compilation_status === 'Time Exceeds') {
+                toast({ title: 'Time Exceeds', description: 'Your code took too long to run.', variant: 'destructive' })
+            } else if (response.compilation_status === 'Not Compiled Successfully') {
+                toast({ title: 'Not Compiled Successfully', description: 'Check the output panel.', variant: 'destructive' })
+            } else if (response.compilation_status === 'Compiled Successfully') {
+                if (response.results.length > 0) {
+                    const p = response.tests_passed, t = response.tests_total
+                    toast({
+                        title: p === t ? 'All Tests Passed!' : `${p}/${t} Tests Passed`,
+                        variant: p === t ? 'default' : 'destructive',
+                    })
+                } else {
+                    toast({ title: 'Compiled Successfully', description: 'Your code ran without errors.' })
+                }
             }
         } catch (err: any) {
-            const errorMsg = err?.response?.data?.detail || 'Failed to run code. Please try again.'
-            setError(errorMsg)
-            setCompilationSuccess(false)
-            setCompilationMessage(errorMsg)
-            toast({
-                title: 'Execution Failed',
-                description: errorMsg,
-                variant: 'destructive',
+            const msg = err?.response?.data?.detail || 'Failed to run code'
+            setError(msg)
+            setRunResult({
+                success: false, results: [], total_score: 0, max_score: 0,
+                tests_passed: 0, tests_total: 0, message: msg, compilation_status: 'Not Compiled Successfully'
             })
+            toast({ title: 'Execution Failed', description: msg, variant: 'destructive' })
         } finally {
             setIsRunning(false)
         }
     }
 
-    /* ----------------------------- Submit ---------------------------- */
+    /* ===== Submit ===== */
 
     const handleSubmit = () => {
         if (!files.length) {
-            toast({
-                title: 'No files to submit',
-                description: 'Please upload at least one file before submitting',
-                variant: 'destructive',
-            })
-            return
+            toast({ title: 'No files', description: 'Upload files before submitting.', variant: 'destructive' }); return
         }
-        setShowSubmitConfirm(true)
+        if (files.every(f => !f.content.trim())) {
+            toast({ title: 'Empty files', description: 'Write code before submitting.', variant: 'destructive' }); return
+        }
+        if (attemptsLeft <= 0) {
+            toast({ title: 'No attempts left', description: `You've used all ${maxAttempts} attempts.`, variant: 'destructive' }); return
+        }
+        if (assignment?.required_files?.length) {
+            const missing = assignment.required_files.filter(rf => !files.some(f => f.name === rf))
+            if (missing.length > 0) {
+                toast({ title: 'Missing required files', description: `Required: ${missing.join(', ')}`, variant: 'destructive' }); return
+            }
+        }
+        setSubmitPhase('confirm')
+        setShowSubmitDialog(true)
     }
 
     const submitCode = async () => {
         setIsSubmitting(true)
         setError(null)
-        setShowSubmitConfirm(false)
+        setSubmitPhase('loading')
 
         try {
             const fileObjects = files.map((f) => {
                 const blob = new Blob([f.content], { type: 'text/plain' })
                 return new File([blob], f.name)
             })
-
             await apiClient.createSubmission(assignmentId, fileObjects)
             await queryClient.invalidateQueries({ queryKey: ['submissions', assignmentId] })
-
-            setSuccessAnimation(true)
-            toast({
-                title: 'Submission Successful!',
-                description: 'Your assignment has been submitted for grading',
-            })
-
-            // Clear files after successful submission
-            setTimeout(() => {
-                setFiles([])
-                setSelectedFile(null)
-                setTestResults([])
-                setCompilationMessage('')
-            }, 800)
-
-            // Redirect after animation
-            setTimeout(() => router.push('/student/courses'), 2000)
+            setSubmitPhase('success')
         } catch (err: any) {
-            const errorMsg = err?.response?.data?.detail || 'Failed to submit assignment'
-            setError(errorMsg)
-            toast({
-                title: 'Submission failed',
-                description: errorMsg,
-                variant: 'destructive',
-            })
+            const msg = err?.response?.data?.detail || 'Submission failed'
+            setError(msg)
+            toast({ title: 'Submission Failed', description: msg, variant: 'destructive' })
+            setShowSubmitDialog(false)
         } finally {
             setIsSubmitting(false)
         }
     }
 
-    /* ====================================================================
-       RENDER
-       ==================================================================== */
+    // Keyboard shortcuts
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'Enter') {
+                e.preventDefault(); if (!isRunning && files.length > 0) runCode()
+            }
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'Enter') {
+                e.preventDefault(); if (!isSubmitting && files.length > 0) handleSubmit()
+            }
+        }
+        window.addEventListener('keydown', handler)
+        return () => window.removeEventListener('keydown', handler)
+    }, [isRunning, isSubmitting, files.length])
 
-    // Loading state
-    if (isLoadingAssignment) {
+    /* ===== RENDER ===== */
+
+    if (isLoading) {
         return (
             <ProtectedRoute allowedRoles={['STUDENT']}>
-                <DashboardLayout>
-                    <div className="flex items-center justify-center h-[calc(100vh-120px)]">
-                        <div className="text-center space-y-6 animate-in fade-in-50 duration-500">
-                            <Loader2 className="w-16 h-16 mx-auto animate-spin text-foreground" />
-                            <div className="space-y-2">
-                                <p className="text-xl font-semibold">Loading assignment...</p>
-                                <p className="text-sm text-muted-foreground">Preparing your workspace</p>
-                            </div>
-                        </div>
+                <div className="flex items-center justify-center h-screen bg-[#1e1e1e]">
+                    <div className="text-center space-y-4">
+                        <Loader2 className="w-10 h-10 mx-auto animate-spin text-[#0e639c]" />
+                        <p className="text-sm text-[#858585]">Loading workspace...</p>
                     </div>
-                </DashboardLayout>
+                </div>
             </ProtectedRoute>
         )
     }
 
-    // Error state
-    if (assignmentError || !assignment) {
+    if (loadError || !assignment) {
         return (
             <ProtectedRoute allowedRoles={['STUDENT']}>
-                <DashboardLayout>
-                    <div className="flex items-center justify-center h-[calc(100vh-120px)]">
-                        <Card className="p-8 max-w-md shadow-lg animate-in zoom-in-95 duration-300">
-                            <div className="text-center space-y-6">
-                                <AlertCircle className="w-20 h-20 mx-auto text-muted-foreground" />
-                                <div className="space-y-2">
-                                    <h2 className="text-2xl font-bold">Assignment Not Found</h2>
-                                    <p className="text-muted-foreground leading-relaxed">
-                                        The assignment you're looking for doesn't exist or you don't have permission to access it.
-                                    </p>
-                                </div>
-                                <Button
-                                    onClick={() => router.push('/student/courses')}
-                                    className="mt-4 group"
-                                    size="lg"
-                                >
-                                    <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" />
-                                    Back to Courses
-                                </Button>
-                            </div>
-                        </Card>
+                <div className="flex items-center justify-center h-screen bg-[#1e1e1e]">
+                    <div className="text-center space-y-6 p-8 border border-[#3c3c3c] rounded-xl bg-[#252526] max-w-md">
+                        <AlertCircle className="w-16 h-16 mx-auto text-[#f44747]" />
+                        <h2 className="text-xl font-bold text-[#cccccc]">Assignment Not Found</h2>
+                        <p className="text-sm text-[#858585]">This assignment doesn't exist or you don't have access.</p>
+                        <Button onClick={() => router.push('/student/courses')} className="bg-[#0e639c] hover:bg-[#1177bb] text-white">
+                            <ArrowLeft className="w-4 h-4 mr-2" /> Back to Courses
+                        </Button>
                     </div>
-                </DashboardLayout>
+                </div>
             </ProtectedRoute>
         )
     }
 
     return (
         <ProtectedRoute allowedRoles={['STUDENT']}>
-            <DashboardLayout>
-                <div className="flex flex-col h-[calc(100vh-120px)] space-y-4 p-1 animate-in fade-in-50 duration-300">
+            <div className="flex flex-col h-screen bg-[#1e1e1e] text-[#cccccc] overflow-hidden">
 
-                    {/* ================ Assignment Header ================ */}
-                    <Card className="shadow-md hover:shadow-lg transition-shadow duration-300">
-                        <CardHeader className="pb-4">
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="space-y-3 flex-1">
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                        <h1 className="text-3xl font-bold tracking-tight">{assignment.title}</h1>
-                                        {isOverdue ? (
-                                            <Badge variant="destructive" className="text-xs font-semibold">
-                                                <AlertCircle className="w-3 h-3 mr-1" />
-                                                Overdue
-                                            </Badge>
-                                        ) : (
-                                            <Badge className="text-xs font-semibold">
-                                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                                Active
-                                            </Badge>
-                                        )}
-                                        <Badge variant="outline" className="text-xs font-semibold">
-                                            <Code className="w-3 h-3 mr-1" />
-                                            {assignment.language?.name || 'N/A'}
-                                        </Badge>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-4 text-sm">
-                                        <div className="flex items-center gap-2 text-muted-foreground">
-                                            <Calendar className="w-4 h-4 flex-shrink-0" />
-                                            <span>
-                                                Due: <strong className="text-foreground">
-                                                    {dueDate ? format(dueDate, 'MMM dd, yyyy · hh:mm a') : 'No due date'}
-                                                </strong>
-                                            </span>
-                                        </div>
-                                        <div className="h-4 w-px bg-border" />
-                                        <div className="flex items-center gap-2 text-muted-foreground">
-                                            <Target className="w-4 h-4 flex-shrink-0" />
-                                            <span>
-                                                Max Score: <strong className="text-foreground">{assignment.max_score || 100} pts</strong>
-                                            </span>
-                                        </div>
-                                        <div className="h-4 w-px bg-border" />
-                                        <div className="flex items-center gap-2 text-muted-foreground">
-                                            <Code className="w-4 h-4 flex-shrink-0" />
-                                            <span>
-                                                Language: <strong className="text-foreground capitalize">{assignment.language?.name || 'N/A'}</strong>
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {latestSubmission && (
-                                        <Alert className="mt-3">
-                                            <Info className="h-4 w-4" />
-                                            <AlertDescription>
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    <strong>Latest submission:</strong> {format(new Date(latestSubmission.created_at), 'MMM dd, yyyy · hh:mm a')} ·
-                                                    Score: <strong>{latestSubmission.final_score ?? 'Pending'}/{assignment.max_score}</strong>
-                                                    {latestSubmission.final_score !== null && (
-                                                        <Badge variant="outline" className="ml-2">
-                                                            {((latestSubmission.final_score / assignment.max_score) * 100).toFixed(0)}%
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            </AlertDescription>
-                                        </Alert>
-                                    )}
-                                </div>
-
-                                <div className="flex flex-wrap gap-2">
-                                    <Button variant="outline" size="sm" onClick={() => setActiveModal('description')}>
-                                        <BookOpen className="w-4 h-4 mr-1" />
-                                        Description
-                                    </Button>
-                                    <Button variant="outline" size="sm" onClick={() => setActiveModal('instructions')}>
-                                        <Info className="w-4 h-4 mr-1" />
-                                        Instructions
-                                    </Button>
-                                    <Button variant="outline" size="sm" onClick={() => setActiveModal('rubric')}>
-                                        <ClipboardList className="w-4 h-4 mr-1" />
-                                        Rubric
-                                    </Button>
-                                    <Button variant="outline" size="sm" onClick={() => setActiveModal('submissions')}>
-                                        <History className="w-4 h-4 mr-1" />
-                                        History
-                                        {submissions.length > 0 && (
-                                            <Badge variant="outline" className="ml-1">
-                                                {submissions.length}
-                                            </Badge>
-                                        )}
-                                    </Button>
-                                </div>
-                            </div>
-                        </CardHeader>
-                    </Card>
-
-                    {/* ================ Error Alert ================ */}
-                    {error && (
-                        <Alert variant="destructive" className="animate-in slide-in-from-top-2 duration-300">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertDescription className="font-medium">{error}</AlertDescription>
-                            <Button variant="ghost" size="sm" onClick={() => setError(null)} className="ml-auto">
-                                <X className="h-4 w-4" />
-                            </Button>
-                        </Alert>
-                    )}
-
-                    {/* ================ Action Bar ================ */}
-                    <div className="flex items-center justify-between bg-muted/30 px-6 py-4 rounded-lg border shadow-sm">
-                        <Button
-                            variant="ghost"
-                            onClick={() => router.push('/student/courses')}
-                            size="sm"
-                            className="group"
-                        >
-                            <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" />
-                            Back to Courses
+                {/* ===== Title Bar ===== */}
+                <div className="flex items-center justify-between bg-[#323233] px-4 py-1.5 border-b border-[#3c3c3c] select-none shrink-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <Button variant="ghost" size="sm" onClick={() => router.back()}
+                            className="h-6 px-2 text-[#cccccc] hover:text-white hover:bg-[#505050] text-xs shrink-0">
+                            <ArrowLeft className="w-3 h-3 mr-1" /> Back
                         </Button>
-
-                        <div className="flex items-center gap-4">
-                            {files.length > 0 && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground bg-background px-4 py-2 rounded-lg border">
-                                    <FileCode className="w-4 h-4" />
-                                    <span className="font-medium">
-                                        {files.length} file{files.length !== 1 ? 's' : ''} uploaded
-                                    </span>
-                                </div>
-                            )}
-                            <Button
-                                onClick={runCode}
-                                disabled={isRunning || files.length === 0}
-                                variant="secondary"
-                                size="default"
-                                className="min-w-[150px] font-semibold"
-                            >
-                                {isRunning ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        Running...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Play className="w-4 h-4 mr-2" />
-                                        Run & Test
-                                    </>
-                                )}
-                            </Button>
-
-                            <Button
-                                onClick={handleSubmit}
-                                disabled={isSubmitting || files.length === 0}
-                                className="min-w-[180px] font-semibold"
-                            >
-                                {isSubmitting ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        Submitting...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Send className="w-4 h-4 mr-2" />
-                                        Submit Assignment
-                                    </>
-                                )}
-                            </Button>
-                        </div>
+                        <div className="h-3 w-px bg-[#5a5a5a]" />
+                        <span className="text-xs text-[#cccccc] font-medium truncate">
+                            {assignment.course?.code} &mdash; {assignment.title}
+                        </span>
+                        {isOverdue
+                            ? <Badge variant="danger" className="text-[10px] px-1.5 py-0 shrink-0"><Clock className="w-2.5 h-2.5 mr-0.5" /> Overdue</Badge>
+                            : <Badge variant="success" className="text-[10px] px-1.5 py-0 shrink-0">Active</Badge>
+                        }
                     </div>
-
-                    {/* ================ Main Layout: Three Columns ================ */}
-                    <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
-
-                        {/* ========== Left Panel: File Manager ========== */}
-                        <Card className="col-span-3 flex flex-col overflow-hidden shadow-md hover:shadow-lg transition-shadow duration-300">
-                            <CardHeader className="pb-3 border-b bg-muted/30">
-                                <div className="flex items-center justify-between mb-3">
-                                    <CardTitle className="text-base flex items-center gap-2">
-                                        <Folder className="w-5 h-5" />
-                                        <span>Files</span>
-                                        {files.length > 0 && (
-                                            <Badge variant="outline" className="ml-1">
-                                                {files.length}
-                                            </Badge>
-                                        )}
-                                    </CardTitle>
-
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        multiple
-                                        hidden
-                                        accept={ALLOWED_EXTENSIONS.join(',')}
-                                        onChange={(e) => handleUpload(e.target.files)}
-                                    />
-
-                                    <Button
-                                        size="sm"
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
-                                        <UploadIcon className="w-4 h-4 mr-1" />
-                                        Upload
-                                    </Button>
-                                </div>
-                                <p className="text-xs text-muted-foreground px-1">
-                                    Max 5MB · {ALLOWED_EXTENSIONS.join(', ')}
-                                </p>
-                            </CardHeader>
-
-                            <div className="flex-1 overflow-y-auto p-3">
-                                {files.length === 0 ? (
-                                    <div
-                                        className="flex flex-col items-center justify-center h-full text-center py-8 cursor-pointer"
-                                        onClick={() => fileInputRef.current?.click()}
-                                        onDragOver={(e) => {
-                                            e.preventDefault()
-                                            setIsHoveringUpload(true)
-                                        }}
-                                        onDragLeave={() => setIsHoveringUpload(false)}
-                                        onDrop={(e) => {
-                                            e.preventDefault()
-                                            setIsHoveringUpload(false)
-                                            handleUpload(e.dataTransfer.files)
-                                        }}
-                                    >
-                                        <FileCode className="w-20 h-20 text-muted-foreground/50 mb-4" />
-                                        <p className="text-sm font-medium text-muted-foreground mb-1">
-                                            No files uploaded
-                                        </p>
-                                        <p className="text-xs text-muted-foreground mb-4">
-                                            Click or drag files to begin
-                                        </p>
-                                        <Button
-                                            size="sm"
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                fileInputRef.current?.click()
-                                            }}
-                                            variant="outline"
-                                        >
-                                            <UploadIcon className="w-4 h-4 mr-2" />
-                                            Choose Files
-                                        </Button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {files.map((file, index) => (
-                                            <div
-                                                key={file.name}
-                                                onClick={() => setSelectedFile(file)}
-                                                className={`p-3 rounded-lg cursor-pointer flex items-center justify-between group/file transition-all duration-300 animate-in slide-in-from-left-2 ${selectedFile?.name === file.name
-                                                    ? 'bg-gradient-to-r from-primary/20 to-purple-500/20 border-2 border-primary shadow-lg scale-[1.02]'
-                                                    : 'hover:bg-accent/50 border-2 border-transparent hover:border-accent hover:scale-[1.01] hover:shadow-md'
-                                                    }`}
-                                                style={{ animationDelay: `${index * 50}ms` }}
-                                            >
-                                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                    <div className={`p-1.5 rounded-md transition-colors duration-300 ${selectedFile?.name === file.name ? 'bg-primary/20' : 'bg-muted group-hover/file:bg-primary/10'}`}>
-                                                        <FileCode className={`w-4 h-4 flex-shrink-0 transition-colors duration-300 ${selectedFile?.name === file.name ? 'text-primary' : 'text-muted-foreground group-hover/file:text-primary'
-                                                            }`} />
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className={`text-sm font-medium truncate transition-colors duration-300 ${selectedFile?.name === file.name ? 'text-primary' : 'group-hover/file:text-foreground'
-                                                            }`}>
-                                                            {file.name}
-                                                        </p>
-                                                        <div className="flex items-center gap-2 mt-0.5">
-                                                            <span className="text-xs text-muted-foreground">
-                                                                {(file.size / 1024).toFixed(1)} KB
-                                                            </span>
-                                                            <span className="text-xs text-muted-foreground">·</span>
-                                                            <span className="text-xs text-muted-foreground">
-                                                                {file.content.split('\n').length} lines
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    className="h-8 w-8 p-0 opacity-0 group-hover/file:opacity-100 hover:bg-destructive hover:text-destructive-foreground transition-all duration-300 hover:scale-110"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation()
-                                                        removeFile(file.name)
-                                                    }}
-                                                >
-                                                    <X className="w-4 h-4" />
-                                                </Button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </Card>
-
-                        {/* ========== Middle Panel: Code Editor ========== */}
-                        <Card className="col-span-6 flex flex-col overflow-hidden shadow-md hover:shadow-lg transition-shadow duration-300">
-                            {selectedFile ? (
-                                <>
-                                    <CardHeader className="pb-3 border-b bg-muted/30">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <Code className="w-4 h-4" />
-                                                <div className="flex flex-col">
-                                                    <CardTitle className="text-sm font-mono font-bold">
-                                                        {selectedFile.name}
-                                                    </CardTitle>
-                                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                                        Editing mode
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-3">
-                                                <Badge variant="outline" className="text-xs">
-                                                    <Terminal className="w-3 h-3 mr-1" />
-                                                    {selectedFile.content.split('\n').length} lines
-                                                </Badge>
-                                                <Badge variant="outline" className="text-xs">
-                                                    {(selectedFile.size / 1024).toFixed(1)} KB
-                                                </Badge>
-                                            </div>
-                                        </div>
-                                    </CardHeader>
-                                    <div className="flex-1 overflow-hidden">
-                                        <textarea
-                                            value={selectedFile.content}
-                                            onChange={(e) => updateFileContent(e.target.value)}
-                                            className="w-full h-full p-5 font-mono text-sm outline-none resize-none bg-background"
-                                            placeholder="// Write your code here..."
-                                            spellCheck={false}
-                                        />
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="flex items-center justify-center h-full">
-                                    <div className="text-center space-y-4 p-8">
-                                        <Code className="w-24 h-24 mx-auto text-muted-foreground/50" />
-                                        <div className="space-y-2">
-                                            <p className="text-lg font-semibold text-muted-foreground">
-                                                No file selected
-                                            </p>
-                                            <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                                                {files.length > 0
-                                                    ? 'Select a file from the left panel to start editing'
-                                                    : 'Upload files to get started with your assignment'}
-                                            </p>
-                                        </div>
-                                        {files.length === 0 && (
-                                            <Button
-                                                onClick={() => fileInputRef.current?.click()}
-                                                variant="outline"
-                                                className="mt-4"
-                                            >
-                                                <UploadIcon className="w-4 h-4 mr-2" />
-                                                Upload Your First File
-                                            </Button>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </Card>
-
-                        {/* Right Panel - Results */}
-                        <Card className="col-span-3 flex flex-col overflow-hidden shadow-md hover:shadow-lg transition-shadow duration-300">
-                            <CardHeader className="pb-3 border-b bg-muted/30">
-                                <CardTitle className="text-base flex items-center gap-2">
-                                    {compilationMessage && testResults.length === 0 ? (
-                                        <>
-                                            <Terminal className="w-5 h-5" />
-                                            <span>Compilation</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Target className="w-5 h-5" />
-                                            <span>Test Results</span>
-                                        </>
-                                    )}
-                                    {testResults.length > 0 && (
-                                        <Badge
-                                            variant={passingTests === testResults.length ? 'default' : 'destructive'}
-                                            className="ml-auto"
-                                        >
-                                            {passingTests}/{testResults.length}
-                                        </Badge>
-                                    )}
-                                </CardTitle>
-                            </CardHeader>
-
-                            <div className="flex-1 overflow-y-auto p-4">                              {isRunning ? (
-                                <div className="flex flex-col items-center justify-center h-full text-center">
-                                    <Loader2 className="w-12 h-12 animate-spin mb-4" />
-                                    <p className="text-sm font-semibold mb-2">Running code...</p>
-                                    <p className="text-xs text-muted-foreground">
-                                        Executing tests and checking results
-                                    </p>
-                                </div>
-                            ) : compilationMessage && testResults.length === 0 ? (
-                                <div className="space-y-3">
-                                    <Alert variant={compilationSuccess ? 'default' : 'destructive'}>
-                                        {compilationSuccess ? (
-                                            <CheckCircle2 className="h-5 w-5" />
-                                        ) : (
-                                            <XCircle className="h-5 w-5" />
-                                        )}
-                                        <AlertDescription className="font-semibold">
-                                            {compilationSuccess ? '\u2713 Compilation Successful' : '\u2717 Compilation Failed'}
-                                        </AlertDescription>
-                                    </Alert>
-                                    <Card className="bg-muted/50">
-                                        <CardHeader className="pb-2">
-                                            <CardTitle className="text-sm font-medium flex items-center gap-2">
-                                                <Terminal className="w-4 h-4" />
-                                                Output:
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed p-3 rounded-md bg-background border">
-                                                {compilationMessage}
-                                            </pre>
-                                        </CardContent>
-                                    </Card>
-                                </div>
-                            ) : testResults.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-full text-center">
-                                    <Target className="w-20 h-20 text-muted-foreground/50 mb-4" />
-                                    <p className="text-sm font-medium text-muted-foreground mb-1">
-                                        No results yet
-                                    </p>
-                                    <p className="text-xs text-muted-foreground max-w-[200px]">
-                                        Run your code to see test results and feedback
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    {totalScore > 0 && (
-                                        <Alert>
-                                            <Award className="h-5 w-5" />
-                                            <AlertDescription className="font-semibold flex items-center gap-2">
-                                                <span>Total Score:</span>
-                                                <span className="text-xl font-bold">{totalScore}</span>
-                                                <span>/</span>
-                                                <span>{maxPossibleScore}</span>
-                                                <span className="text-sm">points</span>
-                                                <Badge variant="outline" className="ml-2">
-                                                    {((totalScore / maxPossibleScore) * 100).toFixed(0)}%
-                                                </Badge>
-                                            </AlertDescription>
-                                        </Alert>
-                                    )}
-                                    {testResults.map((test) => (
-                                        <Card
-                                            key={test.id}
-                                            className={`border-2 transition-shadow hover:shadow-md ${test.passed
-                                                ? 'border-foreground/20'
-                                                : 'border-destructive/50'
-                                                }`}
-                                        >
-                                            <CardHeader className="pb-2">
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <div className="flex items-center gap-2">
-                                                        {test.passed ? (
-                                                            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                                                        ) : (
-                                                            <XCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-                                                        )}
-                                                        <CardTitle className="text-sm font-semibold">{test.name}</CardTitle>
-                                                    </div>
-                                                    <Badge
-                                                        variant={test.passed ? 'default' : 'destructive'}
-                                                        className="text-xs font-bold"
-                                                    >
-                                                        {test.score}/{test.max_score}
-                                                    </Badge>
-                                                </div>
-                                            </CardHeader>
-                                            {(test.error || test.output) && (
-                                                <CardContent className="pt-0 space-y-2">
-                                                    {test.error && (
-                                                        <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3">
-                                                            <p className="text-xs font-semibold mb-2 flex items-center gap-1">
-                                                                <XCircle className="w-3 h-3" />
-                                                                Error:
-                                                            </p>
-                                                            <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed">
-                                                                {test.error}
-                                                            </pre>
-                                                        </div>
-                                                    )}
-                                                    {test.output && (
-                                                        <div className="bg-muted/50 border rounded-lg p-3">
-                                                            <p className="text-xs font-semibold mb-2 flex items-center gap-1">
-                                                                <Terminal className="w-3 h-3" />
-                                                                Output:
-                                                            </p>
-                                                            <pre className="text-xs font-mono whitespace-pre-wrap leading-relaxed">
-                                                                {test.output}
-                                                            </pre>
-                                                        </div>
-                                                    )}
-                                                </CardContent>
-                                            )}
-                                        </Card>
-                                    ))}
-                                </div>
-                            )}
-                            </div>
-                        </Card>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] text-[#858585]">Due: {dueDate ? format(dueDate, 'MMM dd, yyyy · hh:mm a') : 'N/A'}</span>
+                        <div className="h-3 w-px bg-[#5a5a5a]" />
+                        <span className="text-[10px] text-[#858585]">{assignment.language?.display_name || 'N/A'}</span>
+                        <div className="h-3 w-px bg-[#5a5a5a]" />
+                        <span className="text-[10px] text-[#858585]">{assignment.max_score} pts</span>
+                        {maxAttempts > 0 && (
+                            <>
+                                <div className="h-3 w-px bg-[#5a5a5a]" />
+                                <span className={`text-[10px] ${attemptsLeft <= 1 ? 'text-red-400' : 'text-[#858585]'}`}>
+                                    {attemptsLeft === Infinity ? '∞' : attemptsLeft} left
+                                </span>
+                            </>
+                        )}
                     </div>
                 </div>
 
-                {/* ================ Info Modals ================ */}
-                <Dialog open={!!activeModal} onOpenChange={() => setActiveModal(null)}>
-                    <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
-                        <DialogHeader>
-                            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                                {activeModal === 'description' && <BookOpen className="w-6 h-6 text-primary" />}
-                                {activeModal === 'instructions' && <Info className="w-6 h-6 text-primary" />}
-                                {activeModal === 'rubric' && <ClipboardList className="w-6 h-6 text-primary" />}
-                                {activeModal === 'submissions' && <History className="w-6 h-6 text-primary" />}
-                                <span className="capitalize">{activeModal}</span>
-                            </DialogTitle>
-                        </DialogHeader>
+                {/* ===== Toolbar ===== */}
+                <div className="flex items-center justify-between bg-[#252526] px-3 py-1 border-b border-[#3c3c3c] shrink-0">
+                    <div className="flex items-center gap-1">
+                        {latestSubmission && (
+                            <span className="text-[10px] text-[#858585] mr-2 px-2 py-0.5 bg-[#333] rounded">
+                                Last score: {latestSubmission.final_score ?? 'Grading...'}/{assignment.max_score}
+                            </span>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setRightPanel(rightPanel === 'description' ? null : 'description')}
+                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'description' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
+                            <BookOpen className="w-3 h-3" /> Description
+                        </button>
+                        <button onClick={() => setRightPanel(rightPanel === 'instructions' ? null : 'instructions')}
+                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'instructions' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
+                            <Info className="w-3 h-3" /> Instructions
+                        </button>
+                        <button onClick={() => setRightPanel(rightPanel === 'rubric' ? null : 'rubric')}
+                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'rubric' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
+                            <ClipboardList className="w-3 h-3" /> Rubric
+                        </button>
+                        <button onClick={() => setRightPanel(rightPanel === 'history' ? null : 'history')}
+                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'history' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
+                            <History className="w-3 h-3" /> History
+                            {submissions.length > 0 && <span className="px-1 py-0 text-[9px] bg-[#505050] rounded">{submissions.length}</span>}
+                        </button>
+                        <div className="w-px h-4 bg-[#5a5a5a] mx-1" />
+                        <Button onClick={runCode} disabled={isRunning || files.length === 0} size="sm"
+                            className="h-6 px-3 text-[10px] bg-[#0e639c] hover:bg-[#1177bb] text-white border-0">
+                            {isRunning
+                                ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Running...</>
+                                : <><Play className="w-3 h-3 mr-1" /> Run Code <span className="ml-1 text-[9px] opacity-60">⌘↵</span></>
+                            }
+                        </Button>
+                        <Button onClick={handleSubmit} disabled={isSubmitting || files.length === 0 || attemptsLeft <= 0} size="sm"
+                            className="h-6 px-3 text-[10px] bg-[#862733] hover:bg-[#a03040] text-white border-0">
+                            {isSubmitting
+                                ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Submitting...</>
+                                : <><Send className="w-3 h-3 mr-1" /> Submit</>
+                            }
+                        </Button>
+                    </div>
+                </div>
 
-                        <div className="border-t my-2" />
+                {/* ===== Main Content ===== */}
+                <div className="flex flex-1 min-h-0">
 
-                        <div className="flex-1 overflow-y-auto">
-                            {activeModal === 'description' && (
-                                <div className="prose dark:prose-invert max-w-none">
-                                    <p className="text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                                        {assignment.description || 'No description provided.'}
-                                    </p>
+                    {/* Activity Bar */}
+                    <div className="w-12 bg-[#333333] border-r border-[#3c3c3c] flex flex-col items-center py-2 gap-1 shrink-0">
+                        <button onClick={() => setExplorerOpen(!explorerOpen)} title="Explorer"
+                            className={`w-10 h-10 flex items-center justify-center rounded hover:bg-[#505050] ${explorerOpen ? 'text-white border-l-2 border-white' : 'text-[#858585]'}`}>
+                            <FileCode className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => { setPanelOpen(true); setActivePanel('output') }} title="Output"
+                            className={`w-10 h-10 flex items-center justify-center rounded hover:bg-[#505050] ${panelOpen && activePanel === 'output' ? 'text-white border-l-2 border-white' : 'text-[#858585]'}`}>
+                            <Terminal className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => { setPanelOpen(true); setActivePanel('tests') }} title="Tests"
+                            className={`w-10 h-10 flex items-center justify-center rounded hover:bg-[#505050] ${panelOpen && activePanel === 'tests' ? 'text-white border-l-2 border-white' : 'text-[#858585]'}`}>
+                            <Target className="w-5 h-5" />
+                        </button>
+
+                    </div>
+
+                    {/* Explorer Sidebar */}
+                    {explorerOpen && (
+                        <div className="w-56 bg-[#252526] border-r border-[#3c3c3c] flex flex-col min-h-0 shrink-0">
+                            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#bbbbbb] flex items-center justify-between">
+                                <span>Explorer</span>
+                                <div className="flex gap-0.5">
+                                    <button onClick={handleNewFile} className="p-0.5 rounded hover:bg-[#505050]" title="New File"><Plus className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => fileInputRef.current?.click()} className="p-0.5 rounded hover:bg-[#505050]" title="Upload"><UploadIcon className="w-3.5 h-3.5" /></button>
                                 </div>
-                            )}
+                            </div>
+                            <input ref={fileInputRef} type="file" multiple hidden accept={allowedExtensions.join(',')} onChange={(e) => handleUpload(e.target.files)} />
 
-                            {activeModal === 'instructions' && (
-                                <div className="prose dark:prose-invert max-w-none">
-                                    <pre className="whitespace-pre-wrap text-sm bg-muted p-4 rounded-lg leading-relaxed">
-                                        {assignment.instructions || 'No instructions provided.'}
-                                    </pre>
+                            <div className="px-2 py-1">
+                                <div className="flex items-center gap-1 px-2 py-1 text-[11px] text-[#cccccc]">
+                                    <ChevronDown className="w-3 h-3" />
+                                    <FolderOpen className="w-3.5 h-3.5 text-[#dcb67a]" />
+                                    <span className="font-medium truncate">{assignment.title.substring(0, 18)}</span>
                                 </div>
-                            )}
+                            </div>
 
-                            {activeModal === 'rubric' && (
-                                <div className="prose dark:prose-invert max-w-none">
-                                    <div className="bg-muted p-4 rounded-lg whitespace-pre-wrap leading-relaxed">
-                                        {assignment.rubric || 'No rubric provided.'}
+                            <div className="flex-1 overflow-y-auto px-1"
+                                onDragOver={(e) => e.preventDefault()}
+                                onDrop={(e) => { e.preventDefault(); handleUpload(e.dataTransfer.files) }}>
+                                {files.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-8 cursor-pointer text-center"
+                                        onClick={() => fileInputRef.current?.click()}>
+                                        <UploadIcon className="w-8 h-8 text-[#505050] mb-2" />
+                                        <p className="text-[11px] text-[#858585]">Drop files or click to upload</p>
+                                        <p className="text-[10px] text-[#606060] mt-1">Max {maxFileSizeMB}MB per file</p>
                                     </div>
-                                </div>
-                            )}
+                                ) : (
+                                    <div className="space-y-0.5 pl-4">
+                                        {files.map((file) => (
+                                            <div key={file.name} onClick={() => setSelectedFile(file)}
+                                                className={`group flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-[12px] ${selectedFile?.name === file.name ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#2a2d2e]'}`}>
+                                                <span className="text-xs">{getFileIcon(file.name)}</span>
+                                                <span className="flex-1 truncate font-mono text-[12px]">{file.name}</span>
+                                                <button onClick={(e) => { e.stopPropagation(); removeFile(file.name) }}
+                                                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/30 text-[#858585] hover:text-red-400">
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="px-3 py-2 border-t border-[#3c3c3c] text-[10px] text-[#858585]">
+                                <p>{files.length} file{files.length !== 1 ? 's' : ''} · {allowedExtensions.join(', ')}</p>
+                            </div>
+                        </div>
+                    )}
 
-                            {activeModal === 'submissions' && (
-                                <div>
-                                    {isLoadingSubmissions ? (
-                                        <div className="flex items-center justify-center py-12">
-                                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    {/* ===== Center: Editor + Bottom Panel ===== */}
+                    <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                        {/* Editor Tabs */}
+                        <div className="bg-[#252526] border-b border-[#3c3c3c] flex items-center min-h-[35px] overflow-x-auto shrink-0">
+                            {files.map((file) => (
+                                <div key={file.name} onClick={() => setSelectedFile(file)}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-[12px] border-r border-[#3c3c3c] shrink-0 ${selectedFile?.name === file.name ? 'bg-[#1e1e1e] text-white border-t-2 border-t-[#0e639c]' : 'bg-[#2d2d2d] text-[#969696] hover:bg-[#2d2d2d]/80'}`}>
+                                    <span className="text-xs">{getFileIcon(file.name)}</span>
+                                    <span className="font-mono">{file.name}</span>
+                                    <button onClick={(e) => { e.stopPropagation(); removeFile(file.name) }} className="ml-1 p-0.5 rounded hover:bg-[#505050]">
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            ))}
+                            {files.length === 0 && <div className="px-3 py-1.5 text-[12px] text-[#858585]">No files open</div>}
+                        </div>
+
+                        {/* Editor + Bottom Panel */}
+                        <div className="flex-1 flex flex-col min-h-0">
+                            {/* Code Editor */}
+                            <div className={`${panelOpen ? 'flex-[6]' : 'flex-1'} min-h-0 overflow-hidden`}>
+                                {selectedFile ? (
+                                    <div className="h-full flex">
+                                        <div className="bg-[#1e1e1e] text-[#858585] text-right pr-3 pl-4 pt-2 select-none overflow-hidden font-mono text-[13px] leading-[20px] border-r border-[#3c3c3c] min-w-[50px]">
+                                            {editorLines.map((_, i) => <div key={i} className="h-[20px]">{i + 1}</div>)}
                                         </div>
-                                    ) : submissions.length === 0 ? (
-                                        <div className="text-center py-12">
-                                            <History className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
-                                            <p className="text-lg font-medium text-muted-foreground">No submissions yet</p>
-                                            <p className="text-sm text-muted-foreground mt-2">Your submission history will appear here</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            <p className="text-sm text-muted-foreground mb-4 flex items-center gap-2">
-                                                <Info className="w-4 h-4" />
-                                                Total submissions: <strong className="text-foreground">{submissions.length}</strong>
+                                        <textarea
+                                            value={selectedFile.content}
+                                            onChange={(e) => updateFileContent(e.target.value)}
+                                            className="flex-1 bg-[#1e1e1e] text-[#d4d4d4] p-2 pl-4 font-mono text-[13px] leading-[20px] outline-none resize-none"
+                                            placeholder="// Start typing your code..."
+                                            spellCheck={false} autoCapitalize="off" autoCorrect="off" data-gramm="false"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center bg-[#1e1e1e]">
+                                        <div className="text-center space-y-4">
+                                            <Code className="w-16 h-16 mx-auto text-[#505050]" />
+                                            <p className="text-sm text-[#858585]">
+                                                {files.length > 0 ? 'Select a file to start editing' : 'Upload or create a file to get started'}
                                             </p>
-                                            {submissions.map((sub: any, index: number) => (
-                                                <Card key={sub.id} className="border-l-4 border-l-primary hover:shadow-md transition-shadow">
-                                                    <CardHeader>
-                                                        <div className="flex items-start justify-between">
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2 mb-2">
-                                                                    <CardTitle className="text-lg">
-                                                                        Submission #{submissions.length - index}
-                                                                    </CardTitle>
-                                                                    {index === 0 && (
-                                                                        <Badge variant="info" className="text-xs">Latest</Badge>
-                                                                    )}
-                                                                </div>
-                                                                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                                                                    <Calendar className="w-3 h-3" />
-                                                                    {format(new Date(sub.created_at), 'MMM dd, yyyy · hh:mm a')}
-                                                                </p>
+                                            {files.length === 0 && (
+                                                <div className="flex gap-2 justify-center">
+                                                    <Button onClick={handleNewFile} size="sm" className="bg-[#0e639c] hover:bg-[#1177bb] text-white text-xs h-7">
+                                                        <Plus className="w-3 h-3 mr-1" /> New File
+                                                    </Button>
+                                                    <Button onClick={() => fileInputRef.current?.click()} size="sm" variant="outline" className="text-[#cccccc] border-[#505050] hover:bg-[#505050] text-xs h-7">
+                                                        <UploadIcon className="w-3 h-3 mr-1" /> Upload
+                                                    </Button>
+                                                </div>
+                                            )}
+                                            <div className="text-[11px] text-[#606060] space-y-1">
+                                                <p><kbd className="px-1 py-0.5 rounded bg-[#333] text-[#aaa]">⌘+Enter</kbd> run &nbsp; <kbd className="px-1 py-0.5 rounded bg-[#333] text-[#aaa]">⌘+Shift+Enter</kbd> submit</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Bottom Panel */}
+                            {panelOpen && (
+                                <div className="flex-[4] min-h-[100px] border-t border-[#3c3c3c] flex flex-col bg-[#1e1e1e]">
+                                    <div className="flex items-center bg-[#252526] border-b border-[#3c3c3c] px-2 shrink-0">
+                                        <button onClick={() => setActivePanel('output')}
+                                            className={`px-3 py-1.5 text-[11px] font-medium border-b-2 ${activePanel === 'output' ? 'border-[#0e639c] text-white' : 'border-transparent text-[#858585] hover:text-[#cccccc]'}`}>
+                                            <Terminal className="w-3 h-3 inline mr-1" /> OUTPUT
+                                        </button>
+                                        <button onClick={() => setActivePanel('tests')}
+                                            className={`px-3 py-1.5 text-[11px] font-medium border-b-2 ${activePanel === 'tests' ? 'border-[#0e639c] text-white' : 'border-transparent text-[#858585] hover:text-[#cccccc]'}`}>
+                                            <Target className="w-3 h-3 inline mr-1" /> TESTS
+                                            {runResult && runResult.results.length > 0 && (
+                                                <span className={`ml-1 px-1.5 py-0 text-[9px] rounded-full ${runResult.tests_passed === runResult.tests_total ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                                    {runResult.tests_passed}/{runResult.tests_total}
+                                                </span>
+                                            )}
+                                        </button>
+                                        <div className="flex-1" />
+                                        <button onClick={() => setPanelOpen(false)} className="p-1 rounded hover:bg-[#505050] text-[#858585]"><X className="w-3 h-3" /></button>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto p-3 font-mono text-[12px]">
+                                        {activePanel === 'output' ? (
+                                            <div>
+                                                {isRunning ? (
+                                                    <div className="flex items-center gap-2 text-[#569cd6]">
+                                                        <Loader2 className="w-4 h-4 animate-spin" /> Running your code...
+                                                    </div>
+                                                ) : runResult ? (
+                                                    <div className="space-y-3">
+                                                        {/* Compilation Status Banner */}
+                                                        <div className={`flex items-center gap-3 p-3 rounded-lg ${
+                                                            runResult.compilation_status === 'Compiled Successfully'
+                                                                ? 'bg-[#0d2818] border border-[#2ea04366]'
+                                                                : runResult.compilation_status === 'Time Exceeds'
+                                                                ? 'bg-[#332b00] border border-[#665500]'
+                                                                : 'bg-[#2d0000] border border-[#5c1e1e]'
+                                                        }`}>
+                                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                                                                runResult.compilation_status === 'Compiled Successfully'
+                                                                    ? 'bg-[#2ea043]/20'
+                                                                    : runResult.compilation_status === 'Time Exceeds'
+                                                                    ? 'bg-[#dcdcaa]/20'
+                                                                    : 'bg-[#f44747]/20'
+                                                            }`}>
+                                                                {runResult.compilation_status === 'Compiled Successfully'
+                                                                    ? <CheckCircle2 className="w-5 h-5 text-[#4ec9b0]" />
+                                                                    : runResult.compilation_status === 'Time Exceeds'
+                                                                    ? <Clock className="w-5 h-5 text-[#dcdcaa]" />
+                                                                    : <XCircle className="w-5 h-5 text-[#f44747]" />
+                                                                }
                                                             </div>
-                                                            <div className="text-right">
-                                                                <p className="text-3xl font-bold text-primary">
-                                                                    {sub.final_score ?? '—'}
+                                                            <div>
+                                                                <p className={`text-[13px] font-semibold ${
+                                                                    runResult.compilation_status === 'Compiled Successfully' ? 'text-[#4ec9b0]'
+                                                                    : runResult.compilation_status === 'Time Exceeds' ? 'text-[#dcdcaa]'
+                                                                    : 'text-[#f44747]'
+                                                                }`}>
+                                                                    {runResult.compilation_status || (runResult.success ? 'Compiled Successfully' : 'Not Compiled Successfully')}
                                                                 </p>
-                                                                <p className="text-xs text-muted-foreground">
-                                                                    out of {assignment.max_score || 100}
-                                                                </p>
-                                                                {sub.final_score !== null && (
-                                                                    <Badge
-                                                                        variant={sub.final_score >= (assignment.max_score * 0.7) ? 'default' : 'destructive'}
-                                                                        className="mt-1"
-                                                                    >
-                                                                        {((sub.final_score / assignment.max_score) * 100).toFixed(0)}%
-                                                                    </Badge>
+                                                                {runResult.results.length === 0 && runResult.compilation_status === 'Compiled Successfully' && (
+                                                                    <p className="text-[11px] text-[#858585] mt-0.5">Your code ran without errors.</p>
+                                                                )}
+                                                                {runResult.compilation_status === 'Time Exceeds' && (
+                                                                    <p className="text-[11px] text-[#858585] mt-0.5">Your code exceeded the time limit.</p>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                    </CardHeader>
-                                                </Card>
-                                            ))}
-                                        </div>
-                                    )}
+                                                        {runResult.message && runResult.compilation_status !== 'Compiled Successfully' && (
+                                                            <pre className="text-[#f44747] whitespace-pre-wrap text-[11px] leading-relaxed bg-[#2d0000] p-3 rounded border border-[#5c1e1e]">{runResult.message}</pre>
+                                                        )}
+                                                        {runResult.results.length > 0 && (
+                                                            <div className="pt-2 border-t border-[#3c3c3c]">
+                                                                <div className="text-[#858585] text-[11px] mb-2">Test Results: {runResult.tests_passed}/{runResult.tests_total} passed</div>
+                                                                {runResult.results.map((r) => (
+                                                                    <div key={r.id} className={`flex items-center gap-2 py-0.5 ${r.passed ? 'text-[#4ec9b0]' : 'text-[#f44747]'}`}>
+                                                                        {r.passed ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
+                                                                        <span>{r.name} {r.passed ? 'passed' : 'failed'}{r.error && r.error !== 'Output does not match expected' ? ` — ${r.error}` : ''}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-[#858585] space-y-1">
+                                                        <p>{'>'} Ready. Press <span className="text-[#569cd6]">Run Code</span> or <kbd className="px-1 py-0.5 rounded bg-[#333] text-[#aaa] text-[10px]">⌘+Enter</kbd></p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                {isRunning ? (
+                                                    <div className="flex items-center gap-2 text-[#569cd6]"><Loader2 className="w-4 h-4 animate-spin" /> Running tests...</div>
+                                                ) : runResult && runResult.results.length > 0 ? (
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center gap-3 mb-3 pb-2 border-b border-[#3c3c3c]">
+                                                            <div className={`text-sm font-bold ${runResult.tests_passed === runResult.tests_total ? 'text-[#4ec9b0]' : 'text-[#f44747]'}`}>
+                                                                {runResult.tests_passed === runResult.tests_total ? 'All Tests Passed!' : `${runResult.tests_passed}/${runResult.tests_total} Passed`}
+                                                            </div>
+                                                            <div className="flex-1 h-2 bg-[#333] rounded-full overflow-hidden">
+                                                                <div className={`h-full rounded-full transition-all duration-500 ${runResult.tests_passed === runResult.tests_total ? 'bg-[#4ec9b0]' : 'bg-[#f44747]'}`}
+                                                                    style={{ width: `${runResult.tests_total > 0 ? (runResult.tests_passed / runResult.tests_total) * 100 : 0}%` }} />
+                                                            </div>
+                                                            <span className="text-[10px] text-[#858585]">{runResult.total_score}/{runResult.max_score} pts</span>
+                                                        </div>
+                                                        {runResult.results.map((test) => (
+                                                            <div key={test.id} className={`flex items-center gap-3 px-3 py-2 rounded border ${test.passed ? 'border-[#2ea04366] bg-[#2ea04310]' : 'border-[#f4474766] bg-[#f4474710]'}`}>
+                                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${test.passed ? 'bg-[#2ea043] text-white' : 'bg-[#f44747] text-white'}`}>
+                                                                    {test.passed ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <div className={`text-[12px] font-medium ${test.passed ? 'text-[#4ec9b0]' : 'text-[#f44747]'}`}>
+                                                                        {test.name} &mdash; {test.passed ? 'passed' : 'failed'}
+                                                                    </div>
+                                                                    {test.error && test.error !== 'Output does not match expected' && (
+                                                                        <div className="text-[10px] text-[#f44747] mt-0.5">{test.error}</div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="text-[10px] text-[#858585]">{test.score}/{test.max_score} pts</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : runResult && runResult.results.length === 0 ? (
+                                                    <div className="text-center py-8 space-y-3">
+                                                        <div className={`w-14 h-14 mx-auto rounded-full flex items-center justify-center ${
+                                                            runResult.compilation_status === 'Compiled Successfully'
+                                                                ? 'bg-[#2ea043]/20' : 'bg-[#f44747]/20'
+                                                        }`}>
+                                                            {runResult.compilation_status === 'Compiled Successfully'
+                                                                ? <CheckCircle2 className="w-7 h-7 text-[#4ec9b0]" />
+                                                                : <XCircle className="w-7 h-7 text-[#f44747]" />
+                                                            }
+                                                        </div>
+                                                        <p className={`text-[13px] font-semibold ${
+                                                            runResult.compilation_status === 'Compiled Successfully' ? 'text-[#4ec9b0]' : 'text-[#f44747]'
+                                                        }`}>
+                                                            {runResult.compilation_status || (runResult.success ? 'Compiled Successfully' : 'Not Compiled Successfully')}
+                                                        </p>
+                                                        <p className="text-[11px] text-[#858585]">
+                                                            No test cases for this assignment.
+                                                            {runResult.compilation_status === 'Compiled Successfully'
+                                                                ? ' Your code compiled and ran without errors.'
+                                                                : ' Check the output panel for details.'}
+                                                        </p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-center py-8">
+                                                        <Target className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                        <p className="text-[12px] text-[#858585]">No test results yet</p>
+                                                        <p className="text-[11px] text-[#606060] mt-1">Run your code to see results</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </div>
-                    </DialogContent>
-                </Dialog>
+                    </div>
 
-                {/* ================ Submit Confirmation Dialog ================ */}
-                <Dialog open={showSubmitConfirm} onOpenChange={setShowSubmitConfirm}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle className="text-xl flex items-center gap-2">
-                                <Send className="w-5 h-5 text-primary" />
-                                Confirm Submission
-                            </DialogTitle>
-                            <DialogDescription className="text-base pt-2">
-                                You are about to submit <strong>{files.length} file{files.length !== 1 ? 's' : ''}</strong> for grading.
-                            </DialogDescription>
-                        </DialogHeader>
-
-                        {isOverdue && (
-                            <Alert variant="destructive" className="border-2">
-                                <AlertCircle className="h-4 w-4" />
-                                <AlertDescription>
-                                    <strong>Late Submission Warning:</strong> The due date was {dueDate ? format(dueDate, 'MMM dd, yyyy · hh:mm a') : 'N/A'}. Late penalties may apply.
-                                </AlertDescription>
-                            </Alert>
-                        )}
-
-                        <div className="space-y-3 py-2">
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="font-semibold">Files to submit:</span>
-                                <Badge variant="outline">{files.length} file{files.length !== 1 ? 's' : ''}</Badge>
+                    {/* ===== Right Panel (Copilot-style) ===== */}
+                    {rightPanel && (
+                        <div className="w-80 bg-[#252526] border-l border-[#3c3c3c] flex flex-col min-h-0 shrink-0">
+                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#3c3c3c] shrink-0">
+                                <div className="flex items-center gap-2 text-[13px] font-semibold text-white">
+                                    {rightPanel === 'description' && <><BookOpen className="w-4 h-4 text-[#569cd6]" /> Description</>}
+                                    {rightPanel === 'instructions' && <><Info className="w-4 h-4 text-[#dcdcaa]" /> Instructions</>}
+                                    {rightPanel === 'rubric' && <><ClipboardList className="w-4 h-4 text-[#c586c0]" /> Rubric</>}
+                                    {rightPanel === 'history' && <><History className="w-4 h-4 text-[#4ec9b0]" /> Submissions</>}
+                                </div>
+                                <button onClick={() => setRightPanel(null)} className="p-1 rounded hover:bg-[#505050] text-[#858585]">
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
                             </div>
-                            <Card className="max-h-48 overflow-y-auto">
-                                <CardContent className="p-3">
-                                    <ul className="space-y-2">
-                                        {files.map(f => (
-                                            <li key={f.name} className="flex items-center justify-between gap-2 p-2 rounded bg-muted/50">
-                                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                    <FileCode className="w-4 h-4 flex-shrink-0 text-primary" />
-                                                    <span className="text-sm truncate font-medium">{f.name}</span>
-                                                </div>
-                                                <div className="flex items-center gap-2 flex-shrink-0">
-                                                    <Badge variant="outline" className="text-xs">
-                                                        {(f.size / 1024).toFixed(1)} KB
-                                                    </Badge>
-                                                    <Badge variant="outline" className="text-xs">
-                                                        {f.content.split('\n').length} lines
-                                                    </Badge>
-                                                </div>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </CardContent>
-                            </Card>
-                        </div>
 
-                        <Alert className="bg-blue-50 border-blue-200">
-                            <Info className="h-4 w-4 text-blue-700" />
-                            <AlertDescription className="text-blue-900 text-sm">
-                                Once submitted, your assignment will be graded automatically. You can submit multiple times.
-                            </AlertDescription>
-                        </Alert>
-
-                        <DialogFooter className="gap-2 sm:gap-0">
-                            <Button
-                                variant="outline"
-                                onClick={() => setShowSubmitConfirm(false)}
-                                disabled={isSubmitting}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                onClick={submitCode}
-                                disabled={isSubmitting || files.length === 0}
-                            >
-                                {isSubmitting ? (
-                                    <>
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        Submitting...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Send className="w-4 h-4 mr-2" />
-                                        Submit Now
-                                    </>
+                            <div className="flex-1 overflow-y-auto p-4 text-[13px] leading-relaxed">
+                                {rightPanel === 'description' && (
+                                    <div className="space-y-4">
+                                        <p className="text-[#cccccc] whitespace-pre-wrap">{assignment.description || 'No description provided.'}</p>
+                                        <div className="grid grid-cols-2 gap-2 mt-4">
+                                            <div className="bg-[#1e1e1e] p-2.5 rounded border border-[#3c3c3c]">
+                                                <p className="text-[10px] text-[#858585] uppercase">Language</p>
+                                                <p className="text-[12px] text-white font-medium mt-0.5">{assignment.language?.display_name || 'N/A'}</p>
+                                            </div>
+                                            <div className="bg-[#1e1e1e] p-2.5 rounded border border-[#3c3c3c]">
+                                                <p className="text-[10px] text-[#858585] uppercase">Max Score</p>
+                                                <p className="text-[12px] text-white font-medium mt-0.5">{assignment.max_score} pts</p>
+                                            </div>
+                                            <div className="bg-[#1e1e1e] p-2.5 rounded border border-[#3c3c3c]">
+                                                <p className="text-[10px] text-[#858585] uppercase">Difficulty</p>
+                                                <p className="text-[12px] text-white font-medium mt-0.5 capitalize">{assignment.difficulty || 'Medium'}</p>
+                                            </div>
+                                            <div className="bg-[#1e1e1e] p-2.5 rounded border border-[#3c3c3c]">
+                                                <p className="text-[10px] text-[#858585] uppercase">Attempts</p>
+                                                <p className="text-[12px] text-white font-medium mt-0.5">{maxAttempts > 0 ? `${submissions.length}/${maxAttempts}` : `${submissions.length} (∞)`}</p>
+                                            </div>
+                                        </div>
+                                        {assignment.allow_late && (
+                                            <div className="bg-[#332b00] border border-[#665500] p-3 rounded">
+                                                <p className="text-[11px] font-medium text-[#dcdcaa]">Late Policy</p>
+                                                <p className="text-[11px] text-[#cccccc] mt-1">{assignment.late_penalty_per_day}% penalty/day, up to {assignment.max_late_days} days</p>
+                                            </div>
+                                        )}
+                                        {assignment.required_files && assignment.required_files.length > 0 && (
+                                            <div className="bg-[#1e1e1e] border border-[#3c3c3c] p-3 rounded">
+                                                <p className="text-[11px] font-medium text-[#569cd6]">Required Files</p>
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {assignment.required_files.map(f => {
+                                                        const exists = files.some(uf => uf.name === f)
+                                                        return (
+                                                            <span key={f} className={`text-[10px] px-1.5 py-0.5 rounded ${exists ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                                                {exists ? '✓' : '✗'} {f}
+                                                            </span>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
 
-            </DashboardLayout>
+                                {rightPanel === 'instructions' && (
+                                    <div>
+                                        {assignment.instructions ? (
+                                            <pre className="whitespace-pre-wrap text-[12px] text-[#cccccc] leading-relaxed font-sans">{assignment.instructions}</pre>
+                                        ) : (
+                                            <div className="text-center py-8">
+                                                <Info className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                <p className="text-[#858585]">No instructions provided.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {rightPanel === 'rubric' && (
+                                    <div>
+                                        {assignment.rubric ? (
+                                            <div className="space-y-3">
+                                                <div className="bg-[#1e1e1e] p-3 rounded border border-[#3c3c3c]">
+                                                    <p className="text-[11px] text-[#858585]">Grading Weight</p>
+                                                    <div className="flex gap-4 mt-1">
+                                                        <span className="text-[12px] text-[#4ec9b0]">Tests: {assignment.test_weight}%</span>
+                                                        <span className="text-[12px] text-[#c586c0]">Rubric: {assignment.rubric_weight}%</span>
+                                                    </div>
+                                                    <div className="flex h-2 mt-2 rounded-full overflow-hidden bg-[#333]">
+                                                        <div className="bg-[#4ec9b0]" style={{ width: `${assignment.test_weight}%` }} />
+                                                        <div className="bg-[#c586c0]" style={{ width: `${assignment.rubric_weight}%` }} />
+                                                    </div>
+                                                </div>
+                                                <p className="text-[11px] text-[#858585]">Detailed rubric criteria are evaluated during grading.</p>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center py-8">
+                                                <ClipboardList className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                <p className="text-[#858585]">No rubric for this assignment.</p>
+                                                <p className="text-[10px] text-[#606060] mt-1">Grading: {assignment.test_weight}% tests</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {rightPanel === 'history' && (
+                                    <div>
+                                        {isLoadingSubs ? (
+                                            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-[#0e639c]" /></div>
+                                        ) : submissions.length === 0 ? (
+                                            <div className="text-center py-8">
+                                                <History className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                <p className="text-[#858585]">No submissions yet</p>
+                                                <p className="text-[10px] text-[#606060] mt-1">Submit your code to see history</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <p className="text-[11px] text-[#858585] mb-3">
+                                                    {submissions.length} submission{submissions.length !== 1 ? 's' : ''}
+                                                    {maxAttempts > 0 && ` · ${attemptsLeft} left`}
+                                                </p>
+                                                {submissions.map((sub, i) => (
+                                                    <div key={sub.id} className={`p-3 rounded border ${i === 0 ? 'border-[#0e639c]/50 bg-[#0e639c]/10' : 'border-[#3c3c3c] bg-[#1e1e1e]'}`}>
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[12px] font-medium text-white">#{sub.attempt_number}</span>
+                                                                {i === 0 && <span className="text-[9px] px-1 py-0 bg-[#0e639c] text-white rounded">Latest</span>}
+                                                                {sub.is_late && <span className="text-[9px] px-1 py-0 bg-[#665500] text-[#dcdcaa] rounded">Late</span>}
+                                                            </div>
+                                                            <span className="text-[14px] font-bold text-white">
+                                                                {sub.final_score !== null ? sub.final_score.toFixed(1) : '—'}
+                                                                <span className="text-[10px] text-[#858585] font-normal">/{assignment.max_score}</span>
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-[10px] text-[#858585] mt-1">
+                                                            {format(new Date(sub.submitted_at || sub.created_at), 'MMM dd, yyyy · hh:mm a')}
+                                                            {sub.tests_total > 0 && ` · ${sub.tests_passed}/${sub.tests_total} tests`}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* ===== Status Bar ===== */}
+                <div className="flex items-center justify-between bg-[#007acc] px-3 py-0.5 text-white text-[11px] select-none shrink-0">
+                    <div className="flex items-center gap-3">
+                        {isRunning ? (
+                            <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Running...</span>
+                        ) : runResult ? (
+                            <span className="flex items-center gap-1">
+                                {runResult.compilation_status === 'Compiled Successfully' ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                                {runResult.compilation_status}
+                                {runResult.results.length > 0 && ` · ${runResult.tests_passed}/${runResult.tests_total} tests`}
+                            </span>
+                        ) : <span>Ready</span>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span>{files.length} file{files.length !== 1 ? 's' : ''}</span>
+                        {selectedFile && (
+                            <><span>Ln {editorLines.length}</span><span>{(selectedFile.size / 1024).toFixed(1)} KB</span></>
+                        )}
+                        <span>{assignment.language?.display_name || 'N/A'}</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* ===== Error Toast ===== */}
+            {error && (
+                <div className="fixed bottom-4 right-4 z-50 max-w-md bg-[#5c1e1e] text-[#f44747] border border-[#f44747]/30 px-4 py-3 rounded-lg shadow-xl flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <p className="text-sm flex-1">{error}</p>
+                    <button onClick={() => setError(null)}><X className="w-4 h-4" /></button>
+                </div>
+            )}
+
+            {/* ===== Submit Dialog (Confirm → Loading → Success) ===== */}
+            <Dialog open={showSubmitDialog} onOpenChange={(open) => { if (!open && submitPhase !== 'loading') setShowSubmitDialog(false) }}>
+                <DialogContent className="sm:max-w-md p-0 overflow-hidden border-0">
+                    {submitPhase === 'confirm' && (
+                        <div className="p-6 space-y-4">
+                            <DialogHeader>
+                                <DialogTitle className="text-lg flex items-center gap-2">
+                                    <Send className="w-5 h-5 text-primary" /> Confirm Submission
+                                </DialogTitle>
+                                <DialogDescription className="pt-2">
+                                    Submit <strong>{files.length} file{files.length !== 1 ? 's' : ''}</strong> for grading?
+                                    {maxAttempts > 0 && <span className="block mt-1 text-xs">This will use attempt <strong>{submissions.length + 1}</strong> of <strong>{maxAttempts}</strong>.</span>}
+                                </DialogDescription>
+                            </DialogHeader>
+                            {isOverdue && (
+                                <div className="bg-destructive/10 border border-destructive/30 p-3 rounded-lg">
+                                    <div className="flex items-center gap-2 text-destructive text-sm font-medium"><AlertCircle className="w-4 h-4" /> Late Submission</div>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        Due date was {dueDate ? format(dueDate, 'MMM dd, yyyy · hh:mm a') : 'N/A'}. A {assignment.late_penalty_per_day}%/day penalty applies.
+                                    </p>
+                                </div>
+                            )}
+                            <div className="space-y-2">
+                                <p className="text-sm font-medium">Files:</p>
+                                <div className="max-h-40 overflow-y-auto space-y-1">
+                                    {files.map(f => (
+                                        <div key={f.name} className="flex items-center justify-between p-2 rounded bg-muted/50 text-sm">
+                                            <div className="flex items-center gap-2">
+                                                <span>{getFileIcon(f.name)}</span>
+                                                <span className="font-mono text-xs">{f.name}</span>
+                                            </div>
+                                            <span className="text-xs text-muted-foreground">{(f.size / 1024).toFixed(1)} KB</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <DialogFooter className="gap-2 pt-2">
+                                <Button variant="outline" onClick={() => setShowSubmitDialog(false)}>Cancel</Button>
+                                <Button onClick={submitCode} className="bg-[#862733] hover:bg-[#a03040] text-white">
+                                    <Send className="w-4 h-4 mr-2" /> Submit Now
+                                </Button>
+                            </DialogFooter>
+                        </div>
+                    )}
+
+                    {submitPhase === 'loading' && (
+                        <div className="flex flex-col items-center justify-center py-16 px-8 space-y-6">
+                            <div className="relative">
+                                <div className="w-20 h-20 rounded-full border-4 border-[#862733]/20 border-t-[#862733] animate-spin" />
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <Send className="w-7 h-7 text-[#862733]" />
+                                </div>
+                            </div>
+                            <div className="text-center space-y-2">
+                                <h3 className="text-lg font-semibold">Submitting Your Code...</h3>
+                                <p className="text-sm text-muted-foreground">
+                                    Uploading {files.length} file{files.length !== 1 ? 's' : ''} for grading
+                                </p>
+                            </div>
+                            <div className="w-48 h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-[#862733] rounded-full animate-pulse" style={{ width: '80%' }} />
+                            </div>
+                        </div>
+                    )}
+
+                    {submitPhase === 'success' && (
+                        <div className="flex flex-col items-center justify-center py-14 px-8 space-y-6">
+                            <div className="relative">
+                                <div className="w-24 h-24 rounded-full bg-[#862733]/10 flex items-center justify-center animate-in zoom-in-50 duration-500">
+                                    <div className="w-16 h-16 rounded-full bg-[#862733]/20 flex items-center justify-center">
+                                        <CheckCircle2 className="w-10 h-10 text-[#862733]" />
+                                    </div>
+                                </div>
+                                <div className="absolute -top-2 -right-2">
+                                    <PartyPopper className="w-8 h-8 text-[#daa520] animate-in spin-in-180 duration-700" />
+                                </div>
+                            </div>
+                            <div className="text-center space-y-2">
+                                <h3 className="text-xl font-bold">Thanks for Submission!</h3>
+                                <p className="text-sm text-muted-foreground max-w-xs">
+                                    Your code has been successfully submitted for grading. You'll see your results once grading is complete.
+                                </p>
+                            </div>
+                            {maxAttempts > 0 && (
+                                <p className="text-xs text-muted-foreground bg-muted px-3 py-1.5 rounded-full">
+                                    Attempt {submissions.length}/{maxAttempts} used
+                                </p>
+                            )}
+                            <div className="flex gap-3 pt-2">
+                                <Button onClick={() => setShowSubmitDialog(false)} className="bg-[#862733] hover:bg-[#a03040] text-white">
+                                    Continue Working
+                                </Button>
+                                <Button onClick={() => router.push('/student/courses')} variant="outline">
+                                    Back to Courses
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
         </ProtectedRoute>
     )
 }

@@ -1,5 +1,6 @@
 import os
-import json
+import re
+import glob
 import subprocess
 import tempfile
 import shutil
@@ -25,28 +26,14 @@ class SandboxExecutor:
         test_input: Optional[str] = None,
         command_args: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Execute code in sandbox
-        
-        Args:
-            code_path: Path to code files
-            language: Programming language
-            test_input: stdin input for the program
-            command_args: Command line arguments
-            
-        Returns:
-            Dict with stdout, stderr, exit_code, runtime, memory_used
-        """
         start_time = datetime.utcnow()
         
         try:
-            # Prepare execution command based on language
             exec_command = self._get_exec_command(language, code_path, command_args)
-            
-            # Execute in Docker container
             result = self._run_in_docker(exec_command, code_path, test_input)
             
             runtime = (datetime.utcnow() - start_time).total_seconds()
+            timed_out = result.get("exit_code") == -1 and "timed out" in result.get("stderr", "").lower()
             
             return {
                 "stdout": result.get("stdout", ""),
@@ -54,7 +41,7 @@ class SandboxExecutor:
                 "exit_code": result.get("exit_code", -1),
                 "runtime": runtime,
                 "memory_used": result.get("memory_used", 0),
-                "timed_out": runtime >= self.timeout,
+                "timed_out": timed_out or runtime >= self.timeout,
                 "success": result.get("exit_code", -1) == 0
             }
             
@@ -69,25 +56,85 @@ class SandboxExecutor:
                 "timed_out": False,
                 "success": False
             }
-    
-    def _get_exec_command(self, language: str, code_path: str, args: Optional[str] = None) -> str:
-        """Get execution command based on language"""
-        import glob
-        
-        # For Python, find the first .py file
-        python_files = glob.glob(os.path.join(code_path, "*.py"))
-        python_file = os.path.basename(python_files[0]) if python_files else "main.py"
-        
-        commands = {
-            "python": f"python3 {python_file} {args or ''}",
-            "java": f"javac *.java && java Main {args or ''}",
-            "cpp": f"g++ -o program *.cpp && ./program {args or ''}",
-            "c": f"gcc -o program *.c && ./program {args or ''}",
-            "javascript": f"node *.js {args or ''}",
-            "typescript": f"ts-node *.ts {args or ''}"
-        }
-        return commands.get(language, "echo 'Unsupported language'")
 
+    def _find_java_main_class(self, code_path: str) -> str:
+        """Scan .java files to find the class containing public static void main."""
+        java_files = glob.glob(os.path.join(code_path, "*.java"))
+        main_pattern = re.compile(
+            r'public\s+static\s+void\s+main\s*\(\s*String',
+            re.DOTALL
+        )
+        class_pattern = re.compile(
+            r'(?:public\s+)?class\s+(\w+)'
+        )
+        
+        for jf in java_files:
+            try:
+                with open(jf, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                if main_pattern.search(content):
+                    match = class_pattern.search(content)
+                    if match:
+                        return match.group(1)
+            except Exception:
+                continue
+        
+        # Fallback: use filename without extension of first .java file
+        if java_files:
+            return os.path.splitext(os.path.basename(java_files[0]))[0]
+        return "Main"
+
+    def _get_exec_command(self, language: str, code_path: str, args: Optional[str] = None) -> str:
+        """Build execution command based on language, handling arbitrary filenames."""
+        a = args or ""
+        lang = language.lower().strip()
+        
+        if lang == "python":
+            py_files = glob.glob(os.path.join(code_path, "*.py"))
+            if not py_files:
+                return "echo 'No .py files found'"
+            entry = os.path.basename(py_files[0])
+            # Prefer main.py if it exists
+            for pf in py_files:
+                if os.path.basename(pf).lower() == "main.py":
+                    entry = "main.py"
+                    break
+            return f"python3 {entry} {a}".strip()
+        
+        elif lang == "java":
+            main_class = self._find_java_main_class(code_path)
+            return f"javac *.java && java {main_class} {a}".strip()
+        
+        elif lang == "cpp" or lang == "c++":
+            return f"g++ -std=c++17 -o program *.cpp && ./program {a}".strip()
+        
+        elif lang == "c":
+            return f"gcc -std=c11 -o program *.c && ./program {a}".strip()
+        
+        elif lang == "javascript":
+            js_files = glob.glob(os.path.join(code_path, "*.js"))
+            if not js_files:
+                return "echo 'No .js files found'"
+            entry = os.path.basename(js_files[0])
+            for jf in js_files:
+                if os.path.basename(jf).lower() in ("main.js", "index.js"):
+                    entry = os.path.basename(jf)
+                    break
+            return f"node {entry} {a}".strip()
+        
+        elif lang == "typescript":
+            ts_files = glob.glob(os.path.join(code_path, "*.ts"))
+            if not ts_files:
+                return "echo 'No .ts files found'"
+            entry = os.path.basename(ts_files[0])
+            return f"ts-node {entry} {a}".strip()
+        
+        elif lang in ("csharp", "c#"):
+            cs_files = glob.glob(os.path.join(code_path, "*.cs"))
+            cs_file = os.path.basename(cs_files[0]) if cs_files else "Program.cs"
+            return f"mcs -out:program.exe {cs_file} && mono program.exe {a}".strip()
+        
+        return "echo 'Unsupported language'"
     
     def _run_in_docker(
         self,
@@ -95,28 +142,20 @@ class SandboxExecutor:
         code_path: str,
         stdin_input: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Run command in Docker container"""
-        
-        # If we're already inside a Docker container (backend container),
-        # use local execution instead of trying Docker-in-Docker
         if os.path.exists("/.dockerenv"):
-            logger.info("Running inside Docker container, using local execution")
             return self._run_local(command, code_path, stdin_input)
         
-        # For development without Docker, use subprocess directly
         if settings.ENVIRONMENT == "development":
-            logger.info("Development mode, using local execution")
             return self._run_local(command, code_path, stdin_input)
         
-        # Docker execution (only for production on host machine)
         docker_cmd = [
             "docker", "run",
             "--rm",
-            "--network", "none",  # No network access
+            "--network", "none",
             "--memory", self.memory_limit,
             "--cpus", str(self.cpu_limit),
-            "--user", "1000:1000",  # Non-root user
-            "-v", f"{code_path}:/workspace:ro",  # Read-only mount
+            "--user", "1000:1000",
+            "-v", f"{code_path}:/workspace:ro",
             "-w", "/workspace",
             self.sandbox_image,
             "sh", "-c", command
@@ -129,12 +168,11 @@ class SandboxExecutor:
                 capture_output=True,
                 timeout=self.timeout
             )
-            
             return {
                 "stdout": process.stdout.decode(),
                 "stderr": process.stderr.decode(),
                 "exit_code": process.returncode,
-                "memory_used": 0  # Would need Docker stats for accurate value
+                "memory_used": 0
             }
         except subprocess.TimeoutExpired:
             return {
@@ -152,7 +190,6 @@ class SandboxExecutor:
             }
     
     def _run_local(self, command: str, code_path: str, stdin_input: Optional[str] = None) -> Dict[str, Any]:
-        """Run locally for development (not secure for production)"""
         try:
             process = subprocess.run(
                 command,
@@ -162,12 +199,11 @@ class SandboxExecutor:
                 capture_output=True,
                 timeout=self.timeout
             )
-            
             return {
                 "stdout": process.stdout.decode('utf-8', errors='replace'),
                 "stderr": process.stderr.decode('utf-8', errors='replace'),
                 "exit_code": process.returncode,
-                "memory_used": 0  # Not available in local mode
+                "memory_used": 0
             }
         except subprocess.TimeoutExpired:
             logger.warning(f"Process timed out after {self.timeout} seconds")

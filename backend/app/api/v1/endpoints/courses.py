@@ -1,12 +1,13 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from pydantic import BaseModel, EmailStr
 
 from app.api.deps import get_db, get_current_user, require_roles
-from app.models import User, UserRole, Course, CourseStatus, Enrollment, EnrollmentStatus, Assignment, AuditLog
+from app.models import User, UserRole, Course, CourseStatus, Enrollment, EnrollmentStatus, Assignment, TestCase, AuditLog
 from app.schemas.course import Course as CourseSchema, CourseCreate, CourseUpdate, Enrollment as EnrollmentSchema
+from app.schemas.assignment import Assignment as AssignmentSchema
 
 router = APIRouter()
 
@@ -129,15 +130,15 @@ def list_courses(
     result = []
     for course in courses:
         # Count students
-        students_count = db.query(func.count(Enrollment.id)).filter(
+        students_count = db.query(Enrollment).filter(
             Enrollment.course_id == course.id,
             Enrollment.status == EnrollmentStatus.ACTIVE
-        ).scalar() or 0
+        ).count()
         
         # Count assignments
-        assignments_count = db.query(func.count(Assignment.id)).filter(
+        assignments_count = db.query(Assignment).filter(
             Assignment.course_id == course.id
-        ).scalar() or 0
+        ).count()
         
         result.append(CourseWithStats(
             id=course.id,
@@ -158,7 +159,7 @@ def list_courses(
     return result
 
 
-@router.get("/{course_id}")
+@router.get("/{course_id}", response_model=CourseWithStats)
 def get_course(
     course_id: int,
     current_user: User = Depends(get_current_user),
@@ -200,25 +201,22 @@ def get_course(
         Assignment.course_id == course_id
     ).count()
     
-    # Build response dict
-    return {
-        'id': course.id,
-        'code': course.code,
-        'name': course.name,
-        'description': course.description,
-        'section': course.section,
-        'semester': course.semester,
-        'year': course.year,
-        'instructor_id': course.instructor_id,
-        'status': course.status.value if hasattr(course.status, 'value') else str(course.status),
-        'is_active': course.is_active,
-        'allow_late_submissions': course.allow_late_submissions,
-        'default_late_penalty': course.default_late_penalty,
-        'created_at': course.created_at,
-        'updated_at': course.updated_at,
-        'students_count': students_count,
-        'assignments_count': assignments_count,
-    }
+    # Build response
+    return CourseWithStats(
+        id=course.id,
+        code=course.code,
+        name=course.name,
+        description=course.description,
+        section=course.section,
+        semester=course.semester,
+        year=course.year,
+        instructor_id=course.instructor_id,
+        is_active=course.is_active,
+        status=course.status.value if hasattr(course.status, 'value') else str(course.status),
+        students_count=students_count,
+        assignments_count=assignments_count,
+        created_at=course.created_at.isoformat()
+    )
 
 
 @router.patch("/{course_id}", response_model=CourseSchema)
@@ -551,6 +549,54 @@ def get_course_students(
             ))
     
     return students
+
+
+@router.get("/{course_id}/assignments", response_model=List[AssignmentSchema])
+def get_course_assignments(
+    course_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    include_unpublished: bool = False
+):
+    """Get all assignments for a course with test cases eager-loaded"""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Course not found"
+        )
+    
+    # Check access
+    if current_user.role == UserRole.STUDENT:
+        enrollment = db.query(Enrollment).filter(
+            Enrollment.student_id == current_user.id,
+            Enrollment.course_id == course_id,
+            Enrollment.status == EnrollmentStatus.ACTIVE
+        ).first()
+        if not enrollment:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enrolled in this course"
+            )
+    elif current_user.role == UserRole.FACULTY and course.instructor_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this course"
+        )
+    
+    # Query assignments with test_cases eager-loaded to avoid lazy loading issues
+    query = db.query(Assignment).options(
+        joinedload(Assignment.test_cases),
+        joinedload(Assignment.course)
+    ).filter(Assignment.course_id == course_id)
+    
+    # Students only see published assignments
+    if current_user.role == UserRole.STUDENT or not include_unpublished:
+        query = query.filter(Assignment.is_published == True)
+    
+    assignments = query.order_by(Assignment.due_date).all()
+    
+    return assignments
 
 
 @router.delete("/{course_id}/students/{student_id}")

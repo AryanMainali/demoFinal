@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from pydantic import BaseModel
 from app.models.submission import SubmissionStatus
@@ -59,7 +59,10 @@ class Submission(BaseModel):
     ai_checked: bool
     ai_score: Optional[float] = None
     ai_flagged: bool
+    ai_report: Optional[Any] = None
+    plagiarism_report: Optional[Any] = None
     error_message: Optional[str] = None
+    error_details: Optional[Any] = None
     created_at: datetime
     updated_at: datetime
     
@@ -72,7 +75,10 @@ class SubmissionFileOut(BaseModel):
     filename: str
     original_filename: Optional[str] = None
     file_path: str
+    file_hash: Optional[str] = None
     is_main_file: Optional[bool] = None
+    language_detected: Optional[str] = None
+    line_count: Optional[int] = None
     uploaded_at: Optional[datetime] = None
 
     class Config:
@@ -87,7 +93,34 @@ class TestResultOut(BaseModel):
     actual_output: Optional[str] = None
     expected_output: Optional[str] = None
     error_message: Optional[str] = None
+    error_type: Optional[str] = None
+    stack_trace: Optional[str] = None
+    timed_out: bool = False
+    memory_exceeded: bool = False
     executed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PlagiarismMatchOut(BaseModel):
+    id: int
+    submission_id: int
+    matched_submission_id: Optional[int] = None
+    similarity_percentage: float
+    matched_source: Optional[str] = None
+    matched_source_url: Optional[str] = None
+    source_code_snippet: Optional[str] = None
+    matched_code_snippet: Optional[str] = None
+    source_line_start: Optional[int] = None
+    source_line_end: Optional[int] = None
+    matched_line_start: Optional[int] = None
+    matched_line_end: Optional[int] = None
+    is_reviewed: bool = False
+    is_confirmed: Optional[bool] = None
+    reviewer_notes: Optional[str] = None
+    detected_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -96,6 +129,31 @@ class TestResultOut(BaseModel):
 class SubmissionDetail(Submission):
     files: List[SubmissionFileOut] = []
     test_results: List[TestResultOut] = []
+    plagiarism_matches: List[PlagiarismMatchOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class StudentInfo(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    student_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SubmissionWithStudent(Submission):
+    student: Optional[StudentInfo] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SubmissionDetailWithStudent(SubmissionDetail):
+    student: Optional[StudentInfo] = None
 
     class Config:
         from_attributes = True

@@ -112,11 +112,13 @@ def run_code_task(
                 max_score += test_case.points
                 
                 try:
-                    # Execute code
+                    raw_input = test_case.input_data or ""
+                    stdin_input = raw_input.replace(",", "\n") if raw_input else ""
+                    
                     execution_result = sandbox_executor.execute_code(
                         code_path=temp_dir,
                         language=language,
-                        test_input=test_case.input_data,
+                        test_input=stdin_input,
                         command_args=None
                     )
                     

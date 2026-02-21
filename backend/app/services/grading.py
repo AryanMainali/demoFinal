@@ -33,19 +33,26 @@ class GradingService:
         logger.info(f"Starting grading for submission {submission_id}")
         
         try:
-            submission.status = SubmissionStatus.PROCESSING
+            submission.status = SubmissionStatus.PENDING
             self.db.commit()
             
             assignment = submission.assignment
+            
+            # Query test cases directly instead of using lazy loading
+            from app.models.assignment import TestCase
+            test_cases = self.db.query(TestCase).filter(
+                TestCase.assignment_id == assignment.id
+            ).order_by(TestCase.order).all()
+            
             test_results = []
             
             # Run all test cases directly (no more TestSuite)
-            for test_case in assignment.test_cases:
+            for test_case in test_cases:
                 result = await self._run_test_case(submission, test_case)
                 test_results.append(result)
             
             # Calculate test score
-            total_points = sum(tc.points for tc in assignment.test_cases)
+            total_points = sum(tc.points for tc in test_cases)
             earned_points = sum(r.get('score', 0) for r in test_results)
             
             if total_points > 0:
@@ -79,7 +86,7 @@ class GradingService:
             submission.rubric_score = rubric_score
             submission.raw_score = raw_score
             submission.final_score = final_score
-            submission.status = SubmissionStatus.GRADED
+            submission.status = SubmissionStatus.AUTOGRADED
             submission.graded_at = datetime.utcnow()
             
             self.db.commit()
@@ -123,8 +130,8 @@ class GradingService:
             # Build execution command based on language
             cmd = self._build_execution_command(language, test_case)
             
-            # Prepare input
-            input_data = test_case.input_data or ""
+            raw_input = test_case.input_data or ""
+            input_data = raw_input.replace(",", "\n") if raw_input else ""
             
             # Run in sandbox (using Docker or subprocess based on config)
             start_time = datetime.utcnow()
@@ -139,11 +146,11 @@ class GradingService:
             
             execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000  # ms
             
-            # Check if test passed
             passed = self._check_test_output(
                 actual=result.get('output', ''),
                 expected=test_case.expected_output or '',
                 ignore_whitespace=test_case.ignore_whitespace,
+                ignore_case=test_case.ignore_case,
                 use_regex=test_case.use_regex
             )
             
@@ -165,8 +172,8 @@ class GradingService:
             return self._create_test_result(
                 submission, test_case,
                 passed=False, score=0,
-                output="", error="Test case timed out",
-                execution_time=30000  # 30s in ms
+                output="", error="Time Exceeds",
+                execution_time=30000
             )
         except Exception as e:
             logger.error(f"Error running test case {test_case.id}: {str(e)}")
@@ -182,15 +189,15 @@ class GradingService:
         execution_time: float = 0, memory_used: float = 0
     ) -> Dict[str, Any]:
         """Create and save a test result"""
+        timed_out = "Time Exceeds" in error if error else False
         test_result = TestResult(
             submission_id=submission.id,
             test_case_id=test_case.id,
             passed=passed,
-            score=score,
+            points_awarded=score,
             actual_output=output,
-            error_output=error,
-            execution_time_ms=execution_time,
-            memory_used_mb=memory_used
+            error_message=error if error else None,
+            timed_out=timed_out,
         )
         self.db.add(test_result)
         self.db.commit()
@@ -297,7 +304,8 @@ class GradingService:
         except asyncio.TimeoutError:
             return {
                 "output": "",
-                "error": "Execution timed out"
+                "error": "Time Exceeds",
+                "timed_out": True
             }
         except Exception as e:
             return {
@@ -308,22 +316,30 @@ class GradingService:
     def _check_test_output(
         self, actual: str, expected: str,
         ignore_whitespace: bool = False,
+        ignore_case: bool = False,
         use_regex: bool = False
     ) -> bool:
         """Check if test output matches expected output"""
         if not expected:
-            return True  # No expected output means any output is ok
+            return True
         
         if use_regex:
             import re
-            return bool(re.search(expected, actual))
+            flags = re.IGNORECASE if ignore_case else 0
+            return bool(re.search(expected, actual, flags))
+        
+        a = actual.strip()
+        e = expected.strip()
         
         if ignore_whitespace:
-            actual_clean = ' '.join(actual.split())
-            expected_clean = ' '.join(expected.split())
-            return actual_clean == expected_clean
+            a = ' '.join(a.split())
+            e = ' '.join(e.split())
         
-        return actual.strip() == expected.strip()
+        if ignore_case:
+            a = a.lower()
+            e = e.lower()
+        
+        return a == e
     
     def _calculate_rubric_score(self, submission: Submission, test_score: float) -> float:
         """Calculate rubric score based on test results and rubric items"""

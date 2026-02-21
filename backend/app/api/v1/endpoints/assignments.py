@@ -1,16 +1,14 @@
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import joinedload
 from pydantic import BaseModel, Field
 import tempfile
 import os
 import shutil
 from pathlib import Path
 import asyncio
-from celery.result import AsyncResult
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models import (
@@ -23,12 +21,16 @@ from app.schemas.assignment import (
     Assignment as AssignmentSchema,
     AssignmentDetail,
     RubricCreate,
-    RubricUpdate
+    RubricUpdate,
+    TestCaseCreate,
+    TestCase as TestCaseSchema,
 )
+
 from app.core.logging import logger
 from app.services.autograding import autograding_service
 from app.services.sandbox import sandbox_executor
 from app.tasks.code_execution import run_code_task, compile_check_task
+from app.services.s3_storage import s3_service
 
 router = APIRouter()
 
@@ -43,6 +45,7 @@ class CodeFile(BaseModel):
 class RunCodeRequest(BaseModel):
     """Request to run code without submission"""
     files: List[CodeFile] = Field(..., min_items=1, description="Code files to run")
+    test_case_ids: Optional[List[int]] = Field(None, description="Specific test case IDs to run; omit or empty to run all")
 
 class TestResult(BaseModel):
     """Individual test result"""
@@ -65,6 +68,7 @@ class RunCodeResponse(BaseModel):
     tests_passed: int
     tests_total: int
     message: Optional[str] = None
+    compilation_status: Optional[str] = None
 
 
 @router.get("", response_model=List[AssignmentSchema])
@@ -100,8 +104,12 @@ def list_assignments(
         if published_only:
             query = query.filter(Assignment.is_published == True)
         
-        # Filter by enrolled courses
-        enrolled_course_ids = [e.course_id for e in current_user.enrollments if e.status == EnrollmentStatus.ACTIVE]
+        # Filter by enrolled courses - query enrollments directly
+        enrolled_courses_query = db.query(Enrollment.course_id).filter(
+            Enrollment.student_id == current_user.id,
+            Enrollment.status == EnrollmentStatus.ACTIVE
+        ).all()
+        enrolled_course_ids = [cid[0] for cid in enrolled_courses_query]
         query = query.filter(Assignment.course_id.in_(enrolled_course_ids))
     
     assignments = query.all()
@@ -116,7 +124,12 @@ def get_assignment(
     current_user: User = Depends(get_current_user)
 ):
     """Get assignment details including rubric and test cases"""
-    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    assignment = db.query(Assignment).options(
+        subqueryload(Assignment.rubric).subqueryload(Rubric.categories).subqueryload(RubricCategory.items),
+        subqueryload(Assignment.test_cases),
+        joinedload(Assignment.language),
+        joinedload(Assignment.course)
+    ).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
     
@@ -135,22 +148,33 @@ def get_assignment(
     return assignment
 
 
+
+# --- New version: Accept files and upload to S3 ---
+from fastapi import Form
+from fastapi import UploadFile, File as FastAPIFile
+from typing import List
+import io
+
 @router.post("", response_model=AssignmentSchema, status_code=status.HTTP_201_CREATED)
-def create_assignment(
-    assignment_in: AssignmentCreate,
+async def create_assignment(
+    assignment_data: str = Form(...),
+    files: List[UploadFile] = FastAPIFile([]),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
 ):
-    """Create a new assignment (faculty only)"""
+    """Create a new assignment (faculty only, with file upload to S3)"""
+    import json
     try:
+        # Parse assignment data
+        assignment_in = AssignmentCreate(**json.loads(assignment_data))
+
         # Verify course ownership
         course = db.query(Course).filter(Course.id == assignment_in.course_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
-        
         if current_user.role == UserRole.FACULTY and course.instructor_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized for this course")
-        
+
         # Verify language exists
         language_obj = db.query(Language).filter(Language.id == assignment_in.language_id).first()
         if not language_obj:
@@ -158,26 +182,71 @@ def create_assignment(
 
         # Get available columns from the model directly
         available_columns = {c.name for c in Assignment.__table__.columns}
-
-        # Prepare assignment data from the input schema
-        assignment_data_in = assignment_in.model_dump(exclude={"rubric", "test_suites"})
-        
-        # Filter the data to only include columns that exist in the database table
-        assignment_data = {
-            key: value for key, value in assignment_data_in.items() if key in available_columns
-        }
-        
+        assignment_data_in = assignment_in.model_dump(exclude={"rubric", "test_cases", "test_suites"})
+        assignment_data = {key: value for key, value in assignment_data_in.items() if key in available_columns}
         if 'difficulty' in assignment_data:
             assignment_data['difficulty'] = str(assignment_data['difficulty']).lower()
 
         # Create assignment
-        assignment = Assignment(
-            **assignment_data,
-        )
-        
+        assignment = Assignment(**assignment_data)
         db.add(assignment)
         db.flush()  # Get assignment.id
-        
+
+        # --- S3 file upload (store refs in starter_code as JSON) ---
+        if files:
+            s3_file_infos = []
+            s3_prefix = f"assignments/{current_user.id}/{assignment.id}/"
+            for upload_file in files:
+                file_content = await upload_file.read()
+                file_size = len(file_content)
+                file_stream = io.BytesIO(file_content)
+                s3_key = s3_prefix + upload_file.filename
+                s3_service.s3_client.upload_fileobj(
+                    file_stream,
+                    s3_service.bucket_name,
+                    s3_key,
+                    ExtraArgs={
+                        'ContentType': upload_file.content_type or 'application/octet-stream',
+                        'Metadata': {
+                            'assignment_id': str(assignment.id),
+                            'faculty_id': str(current_user.id),
+                            'original_filename': upload_file.filename
+                        }
+                    }
+                )
+                s3_url = f"https://{s3_service.bucket_name}.s3.{s3_service.s3_client.meta.region_name}.amazonaws.com/{s3_key}"
+                s3_file_infos.append({
+                    'filename': upload_file.filename,
+                    's3_key': s3_key,
+                    's3_url': s3_url,
+                    'size': file_size,
+                    'content_type': upload_file.content_type or 'application/octet-stream'
+                })
+            existing_code = assignment.starter_code or ""
+            assignment.starter_code = json.dumps({
+                "code": existing_code,
+                "attachments": s3_file_infos
+            })
+
+        # Create test cases if provided
+        if assignment_in.test_cases:
+            for idx, tc_data in enumerate(assignment_in.test_cases):
+                test_case = TestCase(
+                    assignment_id=assignment.id,
+                    name=tc_data.name,
+                    description=tc_data.description,
+                    input_data=tc_data.input_data,
+                    expected_output=tc_data.expected_output,
+                    points=tc_data.points,
+                    is_hidden=tc_data.is_hidden,
+                    is_sample=tc_data.is_sample,
+                    ignore_whitespace=tc_data.ignore_whitespace,
+                    ignore_case=tc_data.ignore_case,
+                    time_limit_seconds=tc_data.time_limit_seconds,
+                    order=tc_data.order if tc_data.order is not None else idx
+                )
+                db.add(test_case)
+
         # Create default rubric if provided
         if assignment_in.rubric:
             rubric_data = assignment_in.rubric
@@ -187,8 +256,6 @@ def create_assignment(
             )
             db.add(rubric)
             db.flush()
-            
-            # Create categories and items
             for cat_data in rubric_data.categories:
                 category = RubricCategory(
                     rubric_id=rubric.id,
@@ -198,7 +265,6 @@ def create_assignment(
                 )
                 db.add(category)
                 db.flush()
-                
                 for item_data in cat_data.items:
                     item = RubricItem(
                         category_id=category.id,
@@ -208,7 +274,7 @@ def create_assignment(
                         order=item_data.order
                     )
                     db.add(item)
-        
+
         # Audit log
         audit = AuditLog(
             user_id=current_user.id,
@@ -216,23 +282,18 @@ def create_assignment(
             description=f"Assignment '{assignment.title}' created",
         )
         db.add(audit)
-        
         db.commit()
         db.refresh(assignment)
-
-        # Manually attach the course object to prevent serialization errors from lazy loading
         assignment.course = course
-        
         logger.info(f"Assignment {assignment.id} created by user {current_user.id}")
         return assignment
-    
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating assignment: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Failed to create assignment: {str(e)}"
         )
 
@@ -437,16 +498,18 @@ async def run_assignment_code(
                 detail=f"Invalid file name: {file.name}"
             )
     
-    # Get test cases (only public/sample tests for practice runs)
-    test_cases = db.query(TestCase).filter(
-        and_(
-            TestCase.assignment_id == assignment_id,
-            or_(
-                TestCase.is_sample == True,
-                TestCase.is_hidden == False
-            )
+    # Get test cases — faculty can see all; students only see visible ones
+    tc_query = db.query(TestCase).filter(TestCase.assignment_id == assignment_id)
+
+    if current_user.role == UserRole.STUDENT:
+        tc_query = tc_query.filter(
+            or_(TestCase.is_sample == True, TestCase.is_hidden == False)
         )
-    ).order_by(TestCase.order).all()
+
+    if request.test_case_ids:
+        tc_query = tc_query.filter(TestCase.id.in_(request.test_case_ids))
+
+    test_cases = tc_query.order_by(TestCase.order).all()
     
     # Create temporary directory for code files
     temp_dir = None
@@ -464,42 +527,45 @@ async def run_assignment_code(
             logger.info(f"No test cases for assignment {assignment_id}, attempting compilation/run for user {current_user.id}")
             
             try:
-                # Try to compile/run the code
                 execution_result = await asyncio.to_thread(
                     sandbox_executor.execute_code,
                     code_path=temp_dir,
                     language=assignment.language.name.lower(),
-                    test_input="",  # No input
+                    test_input="",
                     command_args=None
                 )
                 
-                # Check if compilation/execution succeeded
-                if execution_result.get("success", False) or execution_result.get("exit_code") == 0:
-                    message = "✓ Your code compiled and ran successfully!"
-                    if execution_result.get("stdout"):
-                        message += f"\n\nOutput:\n{execution_result.get('stdout', '')[:500]}"
+                timed_out = execution_result.get("timed_out", False)
+                compiled_ok = execution_result.get("success", False) or execution_result.get("exit_code") == 0
+                
+                if timed_out:
+                    compilation_status = "Time Exceeds"
+                    message = "Time Exceeds"
+                elif compiled_ok:
+                    compilation_status = "Compiled Successfully"
+                    message = "Compiled Successfully"
                 else:
-                    # Compilation or runtime error
+                    compilation_status = "Not Compiled Successfully"
                     error_msg = execution_result.get("stderr", "Unknown error")
-                    message = f"⚠ Compilation/Runtime Error:\n{error_msg[:500]}"
+                    message = f"Not Compiled Successfully\n{error_msg[:500]}"
                     
-                # Audit log
                 audit = AuditLog(
                     user_id=current_user.id,
                     event_type="code_run_no_tests",
-                    description=f"Code compilation check for assignment {assignment_id}: {'success' if execution_result.get('success') else 'failed'}"
+                    description=f"Code compilation check for assignment {assignment_id}: {compilation_status}"
                 )
                 db.add(audit)
                 db.commit()
                 
                 return RunCodeResponse(
-                    success=execution_result.get("success", False) or execution_result.get("exit_code") == 0,
+                    success=compiled_ok and not timed_out,
                     results=[],
                     total_score=0,
                     max_score=0,
                     tests_passed=0,
                     tests_total=0,
-                    message=message
+                    message=message,
+                    compilation_status=compilation_status
                 )
                 
             except Exception as e:
@@ -511,10 +577,10 @@ async def run_assignment_code(
                     max_score=0,
                     tests_passed=0,
                     tests_total=0,
-                    message=f"Error during compilation: {str(e)}"
+                    message=f"Not Compiled Successfully\n{str(e)}",
+                    compilation_status="Not Compiled Successfully"
                 )
             finally:
-                # Clean up
                 if temp_dir and os.path.exists(temp_dir):
                     try:
                         shutil.rmtree(temp_dir)
@@ -530,51 +596,100 @@ async def run_assignment_code(
         tests_passed = 0
         tests_total = len(test_cases)
         
+        compilation_status = "Compiled Successfully"
+        
         for test_case in test_cases:
             max_score += test_case.points
             
             try:
-                # Execute code with test input
+                raw_input = test_case.input_data or ""
+                stdin_input = raw_input.replace(",", "\n") if raw_input else ""
+                
                 execution_result = await asyncio.to_thread(
                     sandbox_executor.execute_code,
                     code_path=temp_dir,
                     language=assignment.language.name.lower(),
-                    test_input=test_case.input_data,
+                    test_input=stdin_input,
                     command_args=None
                 )
                 
-                # Compare output
-                actual_output = execution_result.get("stdout", "").strip()
+                timed_out = execution_result.get("timed_out", False)
+                exec_success = execution_result.get("success", False) or execution_result.get("exit_code") == 0
+                
+                if timed_out:
+                    compilation_status = "Time Exceeds"
+                    all_results.append(TestResult(
+                        id=test_case.id,
+                        name=test_case.name,
+                        passed=False,
+                        score=0,
+                        max_score=test_case.points,
+                        output=None,
+                        error="Time Exceeds",
+                        expected_output=None,
+                        execution_time=execution_result.get("runtime", 0)
+                    ))
+                    continue
+                
+                if not exec_success:
+                    stderr = execution_result.get("stderr", "")
+                    stdout = execution_result.get("stdout", "")
+                    if "compile" in stderr.lower() or "error" in stderr.lower():
+                        compilation_status = "Not Compiled Successfully"
+                    all_results.append(TestResult(
+                        id=test_case.id,
+                        name=test_case.name,
+                        passed=False,
+                        score=0,
+                        max_score=test_case.points,
+                        output=stdout[:2000] if stdout else None,
+                        error=stderr[:2000] if stderr else "Runtime error",
+                        expected_output=None,
+                        execution_time=execution_result.get("runtime", 0)
+                    ))
+                    continue
+                
+                raw_stdout = execution_result.get("stdout", "").strip()
+                raw_stderr = execution_result.get("stderr", "").strip()
+                actual_output = raw_stdout
                 expected_output = (test_case.expected_output or "").strip()
                 
-                # Apply comparison settings
+                compare_actual = actual_output
+                compare_expected = expected_output
+                
                 if test_case.ignore_whitespace:
-                    actual_output = " ".join(actual_output.split())
-                    expected_output = " ".join(expected_output.split())
+                    compare_actual = " ".join(compare_actual.split())
+                    compare_expected = " ".join(compare_expected.split())
                 
                 if test_case.ignore_case:
-                    actual_output = actual_output.lower()
-                    expected_output = expected_output.lower()
+                    compare_actual = compare_actual.lower()
+                    compare_expected = compare_expected.lower()
                 
-                passed = (
-                    execution_result.get("success", False) and 
-                    actual_output == expected_output
-                )
+                passed = compare_actual == compare_expected
                 
                 if passed:
                     tests_passed += 1
                     total_score += test_case.points
                 
-                # Build test result
+                is_faculty = current_user.role in (UserRole.FACULTY, UserRole.ADMIN)
+                show_details = is_faculty or test_case.is_sample or not test_case.is_hidden
+                
+                error_detail = None
+                if not passed:
+                    if raw_stderr:
+                        error_detail = raw_stderr[:2000]
+                    else:
+                        error_detail = "Output does not match expected"
+                
                 test_result = TestResult(
                     id=test_case.id,
                     name=test_case.name,
                     passed=passed,
                     score=test_case.points if passed else 0,
                     max_score=test_case.points,
-                    output=execution_result.get("stdout", "")[:1000],  # Limit output
-                    error=execution_result.get("stderr", "")[:1000] if not execution_result.get("success") else None,
-                    expected_output=expected_output if not passed else None,
+                    output=raw_stdout[:2000] if show_details else None,
+                    error=error_detail if show_details else ("failed" if not passed else None),
+                    expected_output=(test_case.expected_output or "").strip()[:2000] if (is_faculty or (show_details and not passed)) else None,
                     execution_time=execution_result.get("runtime", 0)
                 )
                 
@@ -604,13 +719,14 @@ async def run_assignment_code(
         db.commit()
         
         return RunCodeResponse(
-            success=True,
+            success=tests_passed == tests_total and compilation_status == "Compiled Successfully",
             results=all_results,
             total_score=total_score,
             max_score=max_score,
             tests_passed=tests_passed,
             tests_total=tests_total,
-            message=f"Tests completed: {tests_passed}/{tests_total} passed"
+            message=f"Tests completed: {tests_passed}/{tests_total} passed",
+            compilation_status=compilation_status
         )
         
     except HTTPException:
@@ -658,3 +774,118 @@ def unpublish_assignment(
     db.commit()
     
     return {"message": "Assignment unpublished successfully"}
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Test Case CRUD
+# ───────────────────────────────────────────────────────────────────────────
+
+@router.get("/{assignment_id}/test-cases", response_model=List[TestCaseSchema])
+def list_test_cases(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return db.query(TestCase).filter(TestCase.assignment_id == assignment_id).order_by(TestCase.order).all()
+
+
+@router.post("/{assignment_id}/test-cases", response_model=TestCaseSchema, status_code=status.HTTP_201_CREATED)
+def create_test_case(
+    assignment_id: int,
+    tc_in: TestCaseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    max_order = db.query(TestCase).filter(TestCase.assignment_id == assignment_id).count()
+    tc = TestCase(
+        assignment_id=assignment_id,
+        name=tc_in.name,
+        description=tc_in.description,
+        input_data=tc_in.input_data,
+        expected_output=tc_in.expected_output,
+        test_code=tc_in.test_code,
+        setup_code=tc_in.setup_code,
+        teardown_code=tc_in.teardown_code,
+        points=tc_in.points,
+        is_hidden=tc_in.is_hidden,
+        is_sample=tc_in.is_sample,
+        ignore_whitespace=tc_in.ignore_whitespace,
+        ignore_case=tc_in.ignore_case,
+        use_regex=tc_in.use_regex,
+        time_limit_seconds=tc_in.time_limit_seconds,
+        memory_limit_mb=tc_in.memory_limit_mb,
+        order=tc_in.order if tc_in.order != 0 else max_order,
+    )
+    db.add(tc)
+    db.commit()
+    db.refresh(tc)
+    return tc
+
+
+@router.put("/{assignment_id}/test-cases/{test_case_id}", response_model=TestCaseSchema)
+def update_test_case(
+    assignment_id: int,
+    test_case_id: int,
+    tc_in: TestCaseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    tc = db.query(TestCase).filter(
+        and_(TestCase.id == test_case_id, TestCase.assignment_id == assignment_id)
+    ).first()
+    if not tc:
+        raise HTTPException(status_code=404, detail="Test case not found")
+
+    for field in [
+        "name", "description", "input_data", "expected_output", "test_code",
+        "setup_code", "teardown_code", "points", "is_hidden", "is_sample",
+        "ignore_whitespace", "ignore_case", "use_regex", "time_limit_seconds",
+        "memory_limit_mb", "order",
+    ]:
+        setattr(tc, field, getattr(tc_in, field))
+
+    tc.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(tc)
+    return tc
+
+
+@router.delete("/{assignment_id}/test-cases/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_test_case(
+    assignment_id: int,
+    test_case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+):
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    tc = db.query(TestCase).filter(
+        and_(TestCase.id == test_case_id, TestCase.assignment_id == assignment_id)
+    ).first()
+    if not tc:
+        raise HTTPException(status_code=404, detail="Test case not found")
+
+    db.delete(tc)
+    db.commit()
+    return None

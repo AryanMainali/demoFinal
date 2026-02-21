@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
     default-jdk \
     g++ \
     gcc \
+    mono-mcs \
+    mono-runtime \
     nodejs \
     npm \
     && rm -rf /var/lib/apt/lists/*

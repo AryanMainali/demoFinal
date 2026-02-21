@@ -34,7 +34,7 @@ def seed_database():
         print("🌱 Seeding database...")
         
         # ========== 1. Create Languages ==========
-        print("\n📝 Creating programming languages...")
+        print("\n Creating programming languages...")
         allowed_lang_keys = {
             "name", "display_name", "version", "file_extension",
             "compile_command", "run_command", "docker_image",
@@ -44,6 +44,8 @@ def seed_database():
             lang = db.query(Language).filter(Language.name == lang_data["name"]).first()
             if not lang:
                 filtered = {k: v for k, v in lang_data.items() if k in allowed_lang_keys}
+                # Remove 'version' if present, since Language model does not accept it
+                filtered.pop('version', None)
                 lang = Language(**filtered)
                 db.add(lang)
                 print(f"  ✅ Created language: {filtered.get('display_name', lang_data['name'])}")

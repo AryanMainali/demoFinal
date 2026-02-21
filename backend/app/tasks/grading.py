@@ -118,3 +118,23 @@ def batch_grade_submissions_task(self, submission_ids: List[int]):
     except Exception as e:
         logger.error(f"Batch grading error: {str(e)}", exc_info=True)
         return {"error": str(e)}
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.grading.check_plagiarism_task",
+    max_retries=2,
+    default_retry_delay=60,
+)
+def check_plagiarism_task(self, submission_id: int):
+    """Run plagiarism detection on a submission after grading completes."""
+    try:
+        from app.services.plagiarism import PlagiarismService
+        service = PlagiarismService(self.db)
+        result = service.check_submission(submission_id, force=False)
+        logger.info(f"Plagiarism check for submission {submission_id}: score={result.get('plagiarism_score')}")
+        return result
+    except Exception as e:
+        logger.error(f"Plagiarism check failed for submission {submission_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))

@@ -3,6 +3,7 @@
 ## Overview
 
 This Kriterion deployment uses **Celery** for distributed task processing, specifically for:
+
 - **Code Execution**: Running student code against test cases
 - **Automated Grading**: Processing submissions asynchronously
 - **Background Jobs**: Long-running tasks that shouldn't block the API
@@ -26,13 +27,15 @@ This Kriterion deployment uses **Celery** for distributed task processing, speci
 ## Components
 
 ### 1. Redis
+
 - **Purpose**: Message broker and result backend
 - **Port**: 6379
 - **Container**: `kriterion-redis`
 
 ### 2. Celery Worker
+
 - **Purpose**: Executes background tasks
-- **Queues**: 
+- **Queues**:
   - `default`: General tasks
   - `code_execution`: Code running tasks
   - `grading`: Submission grading tasks
@@ -40,12 +43,14 @@ This Kriterion deployment uses **Celery** for distributed task processing, speci
 - **Container**: `kriterion-celery-worker`
 
 ### 3. Celery Beat
+
 - **Purpose**: Periodic task scheduler (cron-like)
 - **Container**: `kriterion-celery-beat`
 
 ## API Endpoints
 
 ### Run Code (Async with Celery)
+
 **POST** `/api/v1/assignments/{assignment_id}/run-async`
 
 ```json
@@ -60,6 +65,7 @@ This Kriterion deployment uses **Celery** for distributed task processing, speci
 ```
 
 **Response:**
+
 ```json
 {
   "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -69,9 +75,11 @@ This Kriterion deployment uses **Celery** for distributed task processing, speci
 ```
 
 ### Check Task Status
+
 **GET** `/api/v1/assignments/task/{task_id}`
 
 **Response (Pending):**
+
 ```json
 {
   "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -81,6 +89,7 @@ This Kriterion deployment uses **Celery** for distributed task processing, speci
 ```
 
 **Response (Complete):**
+
 ```json
 {
   "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
@@ -106,17 +115,18 @@ This Kriterion deployment uses **Celery** for distributed task processing, speci
 ```
 
 ### Cancel Task
+
 **DELETE** `/api/v1/assignments/task/{task_id}`
 
 ## Task States
 
-| State | Description |
-|-------|-------------|
+| State     | Description                              |
+| --------- | ---------------------------------------- |
 | `PENDING` | Task waiting to be picked up by a worker |
-| `STARTED` | Task is currently running |
-| `SUCCESS` | Task completed successfully |
-| `FAILURE` | Task encountered an error |
-| `RETRY` | Task failed and is being retried |
+| `STARTED` | Task is currently running                |
+| `SUCCESS` | Task completed successfully              |
+| `FAILURE` | Task encountered an error                |
+| `RETRY`   | Task failed and is being retried         |
 
 ## Configuration
 
@@ -148,26 +158,31 @@ celery_app.conf.update(
 ## Docker Commands
 
 ### Start All Services
+
 ```bash
 docker-compose up -d
 ```
 
 ### View Celery Worker Logs
+
 ```bash
 docker-compose logs -f celery_worker
 ```
 
 ### View Celery Beat Logs
+
 ```bash
 docker-compose logs -f celery_beat
 ```
 
 ### Restart Celery Worker
+
 ```bash
 docker-compose restart celery_worker
 ```
 
 ### Monitor Redis
+
 ```bash
 docker-compose exec redis redis-cli
 > KEYS *
@@ -179,17 +194,20 @@ docker-compose exec redis redis-cli
 ### Running Celery Locally
 
 #### Start Redis
+
 ```bash
 redis-server
 ```
 
 #### Start Celery Worker
+
 ```bash
 cd backend
 celery -A app.core.celery_app worker --loglevel=info --queues=default,code_execution,grading --concurrency=4
 ```
 
 #### Start Celery Beat (for periodic tasks)
+
 ```bash
 cd backend
 celery -A app.core.celery_app beat --loglevel=info
@@ -198,6 +216,7 @@ celery -A app.core.celery_app beat --loglevel=info
 ### Monitoring
 
 #### Flower (Celery Monitoring Tool)
+
 Add to `docker-compose.yml`:
 
 ```yaml
@@ -284,6 +303,7 @@ def get_result(task_id: str):
 ## Troubleshooting
 
 ### Task Not Running
+
 ```bash
 # Check worker is running
 docker-compose ps celery_worker
@@ -296,6 +316,7 @@ docker-compose exec redis redis-cli ping
 ```
 
 ### Task Stuck in PENDING
+
 - Worker may not be running
 - Task may be in a different queue
 - Redis connection issue
@@ -309,6 +330,7 @@ docker-compose exec celery_worker celery -A app.core.celery_app purge
 ```
 
 ### High Memory Usage
+
 ```bash
 # Reduce worker concurrency
 celery -A app.core.celery_app worker --concurrency=2

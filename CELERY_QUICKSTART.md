@@ -22,9 +22,10 @@ docker-compose ps
 ```
 
 You should see:
+
 - ✅ `kriterion-backend` - FastAPI server
 - ✅ `kriterion-frontend` - Next.js app
-- ✅ `kriterion-db` - PostgreSQL database  
+- ✅ `kriterion-db` - PostgreSQL database
 - ✅ `kriterion-redis` - Redis message broker
 - ✅ `kriterion-celery-worker` - Celery task worker
 - ✅ `kriterion-celery-beat` - Celery scheduler
@@ -61,6 +62,7 @@ curl -X POST "http://localhost:8000/api/v1/assignments/1/run-async" \
 ```
 
 Response:
+
 ```json
 {
   "task_id": "abc123...",
@@ -80,20 +82,22 @@ curl "http://localhost:8000/api/v1/assignments/task/{task_id}" \
 
 ### For Students/Testing
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/assignments/{id}/run-async` | POST | Run code asynchronously |
-| `/api/v1/assignments/task/{task_id}` | GET | Check task status |
-| `/api/v1/assignments/task/{task_id}` | DELETE | Cancel running task |
+| Endpoint                             | Method | Description             |
+| ------------------------------------ | ------ | ----------------------- |
+| `/api/v1/assignments/{id}/run-async` | POST   | Run code asynchronously |
+| `/api/v1/assignments/task/{task_id}` | GET    | Check task status       |
+| `/api/v1/assignments/task/{task_id}` | DELETE | Cancel running task     |
 
 ### Old Endpoint (Still Available)
 
 The old synchronous endpoint still works:
+
 - `/api/v1/assignments/{id}/run` - Runs code synchronously (blocks until complete)
 
 **Recommendation**: Use `/run-async` for production as it:
+
 - ✅ Doesn't block the API
-- ✅ Has retry capability  
+- ✅ Has retry capability
 - ✅ Better resource management
 - ✅ Can handle long-running tasks
 
@@ -142,12 +146,12 @@ Update your frontend to use the async endpoint:
 ```typescript
 // 1. Submit code
 const response = await fetch(`/api/v1/assignments/${assignmentId}/run-async`, {
-  method: 'POST',
+  method: "POST",
   headers: {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
   },
-  body: JSON.stringify({ files })
+  body: JSON.stringify({ files }),
 });
 
 const { task_id } = await response.json();
@@ -155,18 +159,18 @@ const { task_id } = await response.json();
 // 2. Poll for results
 const pollInterval = setInterval(async () => {
   const statusResponse = await fetch(`/api/v1/assignments/task/${task_id}`, {
-    headers: { 'Authorization': `Bearer ${token}` }
+    headers: { Authorization: `Bearer ${token}` },
   });
-  
+
   const status = await statusResponse.json();
-  
-  if (status.status === 'SUCCESS') {
+
+  if (status.status === "SUCCESS") {
     // Task complete! Show results
-    console.log('Results:', status.results);
+    console.log("Results:", status.results);
     clearInterval(pollInterval);
-  } else if (status.status === 'FAILURE') {
+  } else if (status.status === "FAILURE") {
     // Task failed
-    console.error('Error:', status.error);
+    console.error("Error:", status.error);
     clearInterval(pollInterval);
   }
 }, 2000); // Poll every 2 seconds
@@ -207,6 +211,7 @@ docker-compose restart redis
 ## Configuration
 
 All Celery settings are in:
+
 - `/backend/app/core/celery_app.py` - Task configuration
 - `/backend/app/core/config.py` - Connection settings
 - `docker-compose.yml` - Service definitions
@@ -218,7 +223,7 @@ All Celery settings are in:
 task_time_limit=300        # 5 min hard limit
 task_soft_time_limit=240   # 4 min soft limit
 
-# Worker settings  
+# Worker settings
 worker_prefetch_multiplier=1
 worker_max_tasks_per_child=50
 
@@ -242,6 +247,7 @@ result_expires=3600  # 1 hour
 ## Help
 
 If you encounter issues:
+
 1. Check `docker-compose logs celery_worker`
 2. Verify Redis is running: `docker-compose ps redis`
 3. Test Redis connection: `docker-compose exec redis redis-cli ping`
