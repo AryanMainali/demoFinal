@@ -4,6 +4,7 @@ import { useState } from "react";
 import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
 import ScrollReveal from "@/components/landing/ScrollReveal";
+import PageTransition from "@/components/landing/PageTransition";
 import { Mail, MessageSquare, MapPin, Send, Check, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -32,6 +33,7 @@ export default function ContactPage() {
   };
 
   return (
+    <PageTransition>
     <main className="min-h-screen bg-white">
       <Navbar />
 
@@ -172,6 +174,7 @@ export default function ContactPage() {
 
       <Footer />
     </main>
+    </PageTransition>
   );
 }
 

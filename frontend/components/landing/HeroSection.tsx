@@ -62,7 +62,7 @@ export default function HeroSection() {
             className="flex flex-col sm:flex-row gap-3"
           >
             <Link
-              href="/register"
+              href="/contact"
               className="group inline-flex items-center justify-center gap-2 bg-primary text-white font-semibold text-sm px-7 py-3.5 rounded-xl hover:bg-primary-800 transition-all shadow-lg shadow-primary/20"
             >
               Start for Free

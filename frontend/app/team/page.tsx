@@ -3,6 +3,7 @@
 import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
 import ScrollReveal from "@/components/landing/ScrollReveal";
+import PageTransition from "@/components/landing/PageTransition";
 import { Github, Linkedin, Mail } from "lucide-react";
 
 const TEAM = [
@@ -38,6 +39,7 @@ const TEAM = [
 
 export default function TeamPage() {
   return (
+    <PageTransition>
     <main className="min-h-screen bg-white">
       <Navbar />
 
@@ -111,5 +113,6 @@ export default function TeamPage() {
 
       <Footer />
     </main>
+    </PageTransition>
   );
 }

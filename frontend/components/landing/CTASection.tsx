@@ -21,7 +21,7 @@ export default function CTASection() {
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
-              href="/register"
+              href="/contact"
               className="group inline-flex items-center gap-2 bg-white text-primary font-semibold text-sm px-8 py-3.5 rounded-xl hover:bg-white/90 transition-all shadow-lg shadow-black/10"
             >
               Create Your Account

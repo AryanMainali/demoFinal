@@ -5,17 +5,20 @@ import FeaturesSection from "@/components/landing/FeaturesSection";
 import LanguagesSection from "@/components/landing/LanguagesSection";
 import CTASection from "@/components/landing/CTASection";
 import Footer from "@/components/landing/Footer";
+import PageTransition from "@/components/landing/PageTransition";
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen">
-      <Navbar />
-      <HeroSection />
-      <DeviceShowcase />
-      <FeaturesSection />
-      <LanguagesSection />
-      <CTASection />
-      <Footer />
-    </main>
+    <PageTransition>
+      <main className="min-h-screen">
+        <Navbar />
+        <HeroSection />
+        <DeviceShowcase />
+        <FeaturesSection />
+        <LanguagesSection />
+        <CTASection />
+        <Footer />
+      </main>
+    </PageTransition>
   );
 }

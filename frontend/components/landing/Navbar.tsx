@@ -77,7 +77,7 @@ export default function Navbar() {
               Sign in
             </Link>
             <Link
-              href="/register"
+              href="/contact"
               className="text-[13px] font-semibold text-white bg-primary hover:bg-primary-800 px-5 py-2 rounded-lg transition-colors"
             >
               Get Started
@@ -116,7 +116,7 @@ export default function Navbar() {
                 <Link href="/login" className="flex-1 text-center text-sm font-medium text-gray-600 border border-gray-200 rounded-lg py-2.5 hover:bg-gray-50 transition-colors">
                   Sign in
                 </Link>
-                <Link href="/register" className="flex-1 text-center text-sm font-semibold text-white bg-primary rounded-lg py-2.5 hover:bg-primary-800 transition-colors">
+                <Link href="/contact" className="flex-1 text-center text-sm font-semibold text-white bg-primary rounded-lg py-2.5 hover:bg-primary-800 transition-colors">
                   Get Started
                 </Link>
               </div>

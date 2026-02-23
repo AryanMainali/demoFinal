@@ -3,6 +3,7 @@
 import Navbar from "@/components/landing/Navbar";
 import Footer from "@/components/landing/Footer";
 import ScrollReveal from "@/components/landing/ScrollReveal";
+import PageTransition from "@/components/landing/PageTransition";
 import { ArrowRight, ArrowDown, BookOpen, Code2, Upload, Cpu, BarChart3, Shield, Database, Server, Container, Workflow, Globe, Lock } from "lucide-react";
 import Link from "next/link";
 
@@ -88,6 +89,7 @@ const TECH = [
 
 export default function HowItWorksPage() {
   return (
+    <PageTransition>
     <main className="min-h-screen bg-white">
       <Navbar />
 
@@ -255,7 +257,7 @@ export default function HowItWorksPage() {
               Create an account and set up your first assignment in under five minutes.
             </p>
             <Link
-              href="/register"
+              href="/contact"
               className="group inline-flex items-center gap-2 bg-primary text-white font-semibold text-sm px-8 py-3.5 rounded-xl hover:bg-primary-800 transition-all shadow-lg shadow-primary/20"
             >
               Get Started
@@ -267,6 +269,7 @@ export default function HowItWorksPage() {
 
       <Footer />
     </main>
+    </PageTransition>
   );
 }
 
