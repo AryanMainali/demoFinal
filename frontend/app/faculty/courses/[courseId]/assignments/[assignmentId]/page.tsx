@@ -38,6 +38,7 @@ import {
     Inbox,
     Plus,
     Save,
+    Download,
 } from 'lucide-react';
 
 /* ====================================================================
@@ -129,6 +130,7 @@ interface SubmissionItem {
     plagiarism_checked: boolean;
     plagiarism_score: number | null;
     plagiarism_flagged: boolean;
+    plagiarism_report: any;
     ai_checked: boolean;
     ai_score: number | null;
     ai_flagged: boolean;
@@ -203,7 +205,7 @@ export default function AssignmentDetailPage() {
     const courseId = useMemo(() => parseInt(courseIdStr, 10), [courseIdStr]);
     const assignmentId = useMemo(() => parseInt(assignmentIdStr, 10), [assignmentIdStr]);
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'submissions'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism'>('overview');
     const [searchQuery, setSearchQuery] = useState('');
 
     // Test case management state
@@ -214,6 +216,9 @@ export default function AssignmentDetailPage() {
     const [tcForm, setTCForm] = useState<Partial<TestCaseItem>>({});
     const [tcError, setTCError] = useState<string | null>(null);
     const [expandedStudents, setExpandedStudents] = useState<Set<number>>(new Set());
+    const [expandedPlagiarismStudent, setExpandedPlagiarismStudent] = useState<number | null>(null);
+    const [plagiarismMatchesMap, setPlagiarismMatchesMap] = useState<Record<number, any[]>>({});
+    const [loadingMatches, setLoadingMatches] = useState<number | null>(null);
     const [sortBy, setSortBy] = useState<'name' | 'score' | 'date' | 'attempts'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -226,7 +231,7 @@ export default function AssignmentDetailPage() {
     const { data: submissions = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
         queryKey: ['assignment-submissions', assignmentId],
         queryFn: () => apiClient.getAssignmentSubmissions(assignmentId),
-        enabled: !!assignmentId && activeTab === 'submissions',
+        enabled: !!assignmentId && (activeTab === 'submissions' || activeTab === 'plagiarism'),
     });
 
     const publishMutation = useMutation({
@@ -248,6 +253,8 @@ export default function AssignmentDetailPage() {
         try {
             const result = await apiClient.checkPlagiarismAll(assignmentId);
             setPlagiarismResult(result);
+            setPlagiarismMatchesMap({});
+            setExpandedPlagiarismStudent(null);
             queryClient.invalidateQueries({ queryKey: ['assignment-submissions', assignmentId] });
         } catch (err: any) {
             setPlagiarismResult({ error: err?.response?.data?.detail || 'Plagiarism check failed' });
@@ -255,6 +262,56 @@ export default function AssignmentDetailPage() {
             setPlagiarismRunning(false);
         }
     };
+
+    const downloadPlagiarismReport = useCallback(() => {
+        if (!assignment || submissions.length === 0) return;
+
+        const studentMap = new Map<number, SubmissionItem>();
+        for (const sub of submissions) {
+            const existing = studentMap.get(sub.student_id);
+            if (!existing || new Date(sub.submitted_at) > new Date(existing.submitted_at)) {
+                studentMap.set(sub.student_id, sub);
+            }
+        }
+        const studentSubs = Array.from(studentMap.values())
+            .sort((a, b) => (b.plagiarism_score ?? 0) - (a.plagiarism_score ?? 0));
+
+        const rows: string[] = [];
+        rows.push([
+            'Student Name', 'Student Email', 'Student ID', 'Submission ID',
+            'Similarity %', 'Flagged', 'Status', 'Matched With', 'Score', 'Submitted At'
+        ].join(','));
+
+        for (const sub of studentSubs) {
+            const name = sub.student?.full_name || `Student #${sub.student_id}`;
+            const email = sub.student?.email || '';
+            const sid = sub.student?.student_id || '';
+            const similarity = sub.plagiarism_checked ? (sub.plagiarism_score ?? 0).toFixed(1) : 'Not Checked';
+            const flagged = sub.plagiarism_flagged ? 'YES' : 'No';
+            const matchedWith = (sub.plagiarism_report?.matches || [])
+                .map((m: any) => `${m.student_name} (${m.similarity_percentage.toFixed(1)}%)`)
+                .join('; ') || 'None';
+            const score = sub.final_score !== null ? `${sub.final_score.toFixed(1)}/${sub.max_score}` : 'Not Graded';
+            const submitted = format(new Date(sub.submitted_at), 'yyyy-MM-dd HH:mm');
+
+            const escapeCsv = (v: string) => `"${v.replace(/"/g, '""')}"`;
+            rows.push([
+                escapeCsv(name), escapeCsv(email), escapeCsv(sid), String(sub.id),
+                similarity, flagged, sub.status, escapeCsv(matchedWith), score, submitted
+            ].join(','));
+        }
+
+        const csv = rows.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `plagiarism-report-${assignment.title.replace(/[^a-zA-Z0-9]/g, '_')}-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }, [assignment, submissions]);
 
     // Test case helpers
     const testCases: TestCaseItem[] = assignment?.test_cases ?? [];
@@ -320,6 +377,16 @@ export default function AssignmentDetailPage() {
             queryClient.invalidateQueries({ queryKey: ['assignment', assignmentId] });
         } catch { /* ignore */ }
         finally { setDeletingTCId(null); }
+    };
+
+    const loadMatchesForSubmission = async (submissionId: number) => {
+        if (plagiarismMatchesMap[submissionId]) return;
+        setLoadingMatches(submissionId);
+        try {
+            const matches = await apiClient.getPlagiarismMatches(submissionId);
+            setPlagiarismMatchesMap(prev => ({ ...prev, [submissionId]: matches || [] }));
+        } catch { /* ignore */ }
+        finally { setLoadingMatches(null); }
     };
 
     // Group submissions by student
@@ -567,6 +634,18 @@ export default function AssignmentDetailPage() {
                                 </span>
                             )}
                         </button>
+                        {assignment.enable_plagiarism_check && (
+                            <button
+                                onClick={() => setActiveTab('plagiarism')}
+                                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                                    activeTab === 'plagiarism'
+                                        ? 'bg-white text-gray-900 shadow-sm'
+                                        : 'text-gray-500 hover:text-gray-700'
+                                }`}
+                            >
+                                <Shield className="w-4 h-4" /> Plagiarism Report
+                            </button>
+                        )}
                     </div>
 
                     {/* ─── Tab Content ─── */}
@@ -1165,7 +1244,7 @@ export default function AssignmentDetailPage() {
                                         const hasFlagged = group.submissions.some(s => s.plagiarism_flagged || s.ai_flagged);
 
                                         return (
-                                            <Card key={group.student.id} className={`overflow-hidden transition-shadow hover:shadow-md ${hasFlagged ? 'border-l-4 border-l-red-400' : ''}`}>
+                                            <Card key={group.student.id} className={`overflow-hidden transition-shadow hover:shadow-md ${hasFlagged ? 'border-l-4 border-l-red-500' : ''}`}>
                                                 {/* Student Row */}
                                                 <div
                                                     className="flex items-center gap-4 p-4 cursor-pointer hover:bg-gray-50/50 transition-colors"
@@ -1178,15 +1257,22 @@ export default function AssignmentDetailPage() {
                                                         }
                                                     </button>
 
-                                                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                        <User className="w-5 h-5 text-primary" />
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                                                        latest.plagiarism_flagged ? 'bg-red-100' : 'bg-primary/10'
+                                                    }`}>
+                                                        <User className={`w-5 h-5 ${latest.plagiarism_flagged ? 'text-red-500' : 'text-primary'}`} />
                                                     </div>
 
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 flex-wrap">
                                                             <p className="font-semibold text-gray-900 truncate">{group.student.full_name}</p>
-                                                            {hasFlagged && (
-                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700">
+                                                            {latest.plagiarism_flagged && (
+                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700 border border-red-200">
+                                                                    <Shield className="w-3 h-3" /> PLAGIARISM
+                                                                </span>
+                                                            )}
+                                                            {!latest.plagiarism_flagged && hasFlagged && (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-700">
                                                                     <AlertTriangle className="w-3 h-3" /> Flagged
                                                                 </span>
                                                             )}
@@ -1200,6 +1286,22 @@ export default function AssignmentDetailPage() {
                                                             {group.student.email}
                                                             {group.student.student_id && <> · ID: {group.student.student_id}</>}
                                                         </p>
+                                                        {/* Inline plagiarism match info */}
+                                                        {latest.plagiarism_checked && latest.plagiarism_score !== null && latest.plagiarism_score > 0 && latest.plagiarism_report?.matches?.length > 0 && (
+                                                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                                                <span className="text-[10px] text-gray-400">Matched with:</span>
+                                                                {latest.plagiarism_report.matches.slice(0, 3).map((pm: any, i: number) => (
+                                                                    <span key={i} className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                                                        pm.similarity_percentage >= (assignment.plagiarism_threshold ?? 30) ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-amber-50 text-amber-600 border border-amber-200'
+                                                                    }`}>
+                                                                        {pm.student_name} ({pm.similarity_percentage.toFixed(0)}%)
+                                                                    </span>
+                                                                ))}
+                                                                {latest.plagiarism_report.matches.length > 3 && (
+                                                                    <span className="text-[10px] text-gray-400">+{latest.plagiarism_report.matches.length - 3} more</span>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
 
                                                     <div className="hidden sm:flex items-center gap-6 text-sm shrink-0">
@@ -1222,12 +1324,18 @@ export default function AssignmentDetailPage() {
                                                         </div>
                                                     </div>
 
+                                                    {/* Plagiarism similarity column */}
                                                     {latest.plagiarism_checked && latest.plagiarism_score !== null && latest.plagiarism_score > 0 && (
-                                                        <div className="hidden lg:block text-center min-w-[60px] shrink-0">
-                                                            <p className="text-xs text-gray-500">Similarity</p>
-                                                            <p className={`text-sm font-bold ${latest.plagiarism_score >= (assignment.plagiarism_threshold ?? 30) ? 'text-red-600' : latest.plagiarism_score >= 20 ? 'text-amber-600' : 'text-gray-500'}`}>
+                                                        <div className="hidden lg:flex flex-col items-center min-w-[70px] shrink-0">
+                                                            <p className="text-xs text-gray-500 mb-0.5">Similarity</p>
+                                                            <p className={`text-lg font-bold ${latest.plagiarism_score >= (assignment.plagiarism_threshold ?? 30) ? 'text-red-600' : latest.plagiarism_score >= 20 ? 'text-amber-600' : 'text-gray-500'}`}>
                                                                 {latest.plagiarism_score.toFixed(0)}%
                                                             </p>
+                                                            <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden mt-0.5">
+                                                                <div className={`h-full rounded-full ${
+                                                                    latest.plagiarism_score >= (assignment.plagiarism_threshold ?? 30) ? 'bg-red-500' : latest.plagiarism_score >= 20 ? 'bg-amber-500' : 'bg-gray-400'
+                                                                }`} style={{ width: `${Math.min(latest.plagiarism_score, 100)}%` }} />
+                                                            </div>
                                                         </div>
                                                     )}
 
@@ -1336,6 +1444,383 @@ export default function AssignmentDetailPage() {
                                     })}
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {/* ─── Plagiarism Report Tab ─── */}
+                    {activeTab === 'plagiarism' && (
+                        <div className="space-y-6">
+                            {(() => {
+                                const checkedSubs = submissions.filter(s => s.plagiarism_checked);
+                                const flaggedSubs = submissions.filter(s => s.plagiarism_flagged);
+                                const avgScore = checkedSubs.length > 0
+                                    ? checkedSubs.reduce((sum, s) => sum + (s.plagiarism_score ?? 0), 0) / checkedSubs.length
+                                    : 0;
+
+                                // Group by student, pick latest submission per student
+                                const studentMap = new Map<number, SubmissionItem>();
+                                for (const sub of submissions) {
+                                    const existing = studentMap.get(sub.student_id);
+                                    if (!existing || new Date(sub.submitted_at) > new Date(existing.submitted_at)) {
+                                        studentMap.set(sub.student_id, sub);
+                                    }
+                                }
+                                const studentSubs = Array.from(studentMap.values())
+                                    .sort((a, b) => (b.plagiarism_score ?? 0) - (a.plagiarism_score ?? 0));
+
+                                return (
+                                    <>
+                                        {/* Header Card */}
+                                        <Card className="border-purple-200 bg-gradient-to-r from-purple-50 to-white">
+                                            <CardContent className="p-6">
+                                                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center">
+                                                            <Shield className="w-7 h-7 text-purple-700" />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-lg font-bold text-gray-900">Plagiarism Report</h3>
+                                                            <p className="text-sm text-gray-500">
+                                                                N-gram fingerprinting with Jaccard similarity · Threshold: {assignment.plagiarism_threshold ?? 30}%
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <Button
+                                                            onClick={runPlagiarismCheckAll}
+                                                            disabled={plagiarismRunning || submissions.length < 2}
+                                                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                                                        >
+                                                            {plagiarismRunning
+                                                                ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analyzing...</>)
+                                                                : (<><Shield className="w-4 h-4 mr-2" /> {checkedSubs.length > 0 ? 'Re-run All' : 'Run Plagiarism Check'}</>)
+                                                            }
+                                                        </Button>
+                                                        {checkedSubs.length > 0 && (
+                                                            <Button
+                                                                onClick={downloadPlagiarismReport}
+                                                                variant="outline"
+                                                                className="border-purple-300 text-purple-700 hover:bg-purple-50"
+                                                            >
+                                                                <Download className="w-4 h-4 mr-2" /> Download Report
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Stats Row */}
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <Card>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className="text-3xl font-bold text-gray-900">{studentSubs.length}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Students</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className="text-3xl font-bold text-purple-600">{checkedSubs.length}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Checked</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card className={flaggedSubs.length > 0 ? 'border-red-200 bg-red-50/30' : ''}>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className={`text-3xl font-bold ${flaggedSubs.length > 0 ? 'text-red-600' : 'text-gray-900'}`}>{flaggedSubs.length}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Flagged</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className={`text-3xl font-bold ${avgScore >= (assignment.plagiarism_threshold ?? 30) ? 'text-red-600' : avgScore >= 15 ? 'text-amber-600' : 'text-green-600'}`}>
+                                                        {avgScore.toFixed(1)}%
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mt-1">Avg Similarity</p>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+
+                                        {/* Plagiarism result toast */}
+                                        {plagiarismResult && !plagiarismResult.error && (
+                                            <div className="rounded-xl bg-green-50 border border-green-200 p-4 flex items-center gap-3">
+                                                <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
+                                                <p className="text-sm text-green-800">
+                                                    Plagiarism check complete — <strong>{plagiarismResult.total_checked}</strong> submissions analyzed.
+                                                    {flaggedSubs.length > 0
+                                                        ? <span className="text-red-600 font-semibold ml-1">{flaggedSubs.length} flagged for review.</span>
+                                                        : <span className="text-green-700 ml-1">No suspicious submissions found.</span>
+                                                    }
+                                                </p>
+                                            </div>
+                                        )}
+                                        {plagiarismResult?.error && (
+                                            <div className="rounded-xl bg-red-50 border border-red-200 p-4 flex items-center gap-3">
+                                                <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+                                                <p className="text-sm text-red-700">{plagiarismResult.error}</p>
+                                            </div>
+                                        )}
+
+                                        {/* No submissions */}
+                                        {studentSubs.length === 0 && (
+                                            <Card>
+                                                <CardContent className="py-16 text-center">
+                                                    <Shield className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+                                                    <h3 className="text-lg font-semibold text-gray-900 mb-1">No submissions to check</h3>
+                                                    <p className="text-sm text-gray-500">Plagiarism reports will appear here once students submit their work.</p>
+                                                </CardContent>
+                                            </Card>
+                                        )}
+
+                                        {/* Student-by-student report */}
+                                        {studentSubs.length > 0 && (
+                                            <div className="space-y-3">
+                                                {studentSubs.map((sub) => {
+                                                    const isExpanded = expandedPlagiarismStudent === sub.id;
+                                                    const matches = plagiarismMatchesMap[sub.id] || [];
+                                                    const threshold = assignment.plagiarism_threshold ?? 30;
+                                                    const score = sub.plagiarism_score ?? 0;
+                                                    const scoreColor = sub.plagiarism_flagged ? 'text-red-600' : score >= threshold * 0.6 ? 'text-amber-600' : 'text-green-600';
+                                                    const barColor = sub.plagiarism_flagged ? 'bg-red-500' : score >= threshold * 0.6 ? 'bg-amber-500' : 'bg-green-500';
+
+                                                    return (
+                                                        <Card key={sub.id} className={`overflow-hidden transition-all ${sub.plagiarism_flagged ? 'border-l-4 border-l-red-500 shadow-md' : ''}`}>
+                                                            <div
+                                                                className="flex items-center gap-4 p-4 cursor-pointer hover:bg-gray-50/60 transition-colors"
+                                                                onClick={() => {
+                                                                    if (isExpanded) {
+                                                                        setExpandedPlagiarismStudent(null);
+                                                                    } else {
+                                                                        setExpandedPlagiarismStudent(sub.id);
+                                                                        loadMatchesForSubmission(sub.id);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <button className="shrink-0 text-gray-400">
+                                                                    {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                                                                </button>
+
+                                                                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: sub.plagiarism_flagged ? '#fef2f2' : '#f0fdf4' }}>
+                                                                    <User className={`w-5 h-5 ${sub.plagiarism_flagged ? 'text-red-500' : 'text-green-600'}`} />
+                                                                </div>
+
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <p className="font-semibold text-gray-900 truncate">{sub.student?.full_name || `Student #${sub.student_id}`}</p>
+                                                                        {sub.plagiarism_flagged && (
+                                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700 border border-red-200">
+                                                                                <AlertTriangle className="w-3 h-3" /> FLAGGED
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className="text-xs text-gray-500 truncate">
+                                                                        {sub.student?.email}
+                                                                        {sub.student?.student_id && <> · ID: {sub.student.student_id}</>}
+                                                                        {' · Attempt #'}{sub.attempt_number}
+                                                                    </p>
+                                                                </div>
+
+                                                                {/* Score bar */}
+                                                                <div className="hidden sm:flex items-center gap-3 shrink-0 min-w-[200px]">
+                                                                    <div className="flex-1">
+                                                                        <div className="flex items-center justify-between mb-1">
+                                                                            <span className="text-[10px] text-gray-500">Similarity</span>
+                                                                            <span className={`text-sm font-bold ${scoreColor}`}>
+                                                                                {sub.plagiarism_checked ? `${score.toFixed(1)}%` : '—'}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(score, 100)}%` }} />
+                                                                        </div>
+                                                                        {/* threshold marker */}
+                                                                        <div className="relative h-0">
+                                                                            <div className="absolute top-[-10px] border-l-2 border-dashed border-gray-400 h-[10px]" style={{ left: `${threshold}%` }} />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {!sub.plagiarism_checked && (
+                                                                    <span className="text-xs text-gray-400 italic shrink-0">Not checked</span>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Expanded Detail */}
+                                                            {isExpanded && (
+                                                                <div className="border-t bg-gray-50/70 p-5">
+                                                                    {/* Quick info row */}
+                                                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                                                                        <div className="bg-white rounded-xl p-3 border border-gray-200">
+                                                                            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Similarity</p>
+                                                                            <p className={`text-xl font-bold ${scoreColor}`}>{sub.plagiarism_checked ? `${score.toFixed(1)}%` : 'N/A'}</p>
+                                                                        </div>
+                                                                        <div className="bg-white rounded-xl p-3 border border-gray-200">
+                                                                            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Status</p>
+                                                                            <p className={`text-sm font-semibold ${sub.plagiarism_flagged ? 'text-red-600' : 'text-green-600'}`}>
+                                                                                {sub.plagiarism_flagged ? 'Flagged' : sub.plagiarism_checked ? 'Clean' : 'Pending'}
+                                                                            </p>
+                                                                        </div>
+                                                                        <div className="bg-white rounded-xl p-3 border border-gray-200">
+                                                                            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Submission Score</p>
+                                                                            <p className="text-sm font-semibold text-gray-900">{sub.final_score !== null ? `${sub.final_score.toFixed(1)}/${sub.max_score}` : '—'}</p>
+                                                                        </div>
+                                                                        <div className="bg-white rounded-xl p-3 border border-gray-200">
+                                                                            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Submitted</p>
+                                                                            <p className="text-sm font-semibold text-gray-900">{formatDate(sub.submitted_at)}</p>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Matches */}
+                                                                    {loadingMatches === sub.id ? (
+                                                                        <div className="text-center py-8">
+                                                                            <Loader2 className="w-6 h-6 animate-spin mx-auto text-purple-500 mb-2" />
+                                                                            <p className="text-sm text-gray-500">Loading match details...</p>
+                                                                        </div>
+                                                                    ) : matches.length > 0 ? (
+                                                                        <div>
+                                                                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                                                                                Code Matches ({matches.length})
+                                                                            </p>
+                                                                            <div className="space-y-3">
+                                                                                {matches.map((m: any) => (
+                                                                                    <div key={m.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                                                                                        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                                                                                            <div className="flex items-center gap-3">
+                                                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                                                                                    m.similarity_percentage >= threshold ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
+                                                                                                }`}>
+                                                                                                    <Shield className="w-4 h-4" />
+                                                                                                </div>
+                                                                                                <div>
+                                                                                                    <p className="text-sm font-semibold text-gray-900">
+                                                                                                        {m.matched_source || `Submission #${m.matched_submission_id}`}
+                                                                                                    </p>
+                                                                                                    <p className="text-[10px] text-gray-500">
+                                                                                                        Lines {m.source_line_start}–{m.source_line_end} → Lines {m.matched_line_start}–{m.matched_line_end}
+                                                                                                    </p>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                            <div className="flex items-center gap-3">
+                                                                                                <span className={`text-lg font-bold ${
+                                                                                                    m.similarity_percentage >= threshold ? 'text-red-600' : 'text-amber-600'
+                                                                                                }`}>
+                                                                                                    {m.similarity_percentage.toFixed(1)}%
+                                                                                                </span>
+                                                                                                {m.is_reviewed && (
+                                                                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                                                                                        m.is_confirmed
+                                                                                                            ? 'bg-red-100 text-red-700 border border-red-200'
+                                                                                                            : 'bg-green-100 text-green-700 border border-green-200'
+                                                                                                    }`}>
+                                                                                                        {m.is_confirmed ? 'Confirmed' : 'Dismissed'}
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+
+                                                                                        {/* Side-by-side code */}
+                                                                                        {(m.source_code_snippet || m.matched_code_snippet) && (
+                                                                                            <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200">
+                                                                                                <div className="p-3">
+                                                                                                    <div className="flex items-center justify-between mb-2">
+                                                                                                        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">This Student</p>
+                                                                                                        <span className="text-[10px] text-gray-400">L{m.source_line_start}–{m.source_line_end}</span>
+                                                                                                    </div>
+                                                                                                    <pre className="text-[11px] text-gray-800 bg-red-50 border border-red-100 rounded-lg p-3 font-mono overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap leading-relaxed">{m.source_code_snippet}</pre>
+                                                                                                </div>
+                                                                                                <div className="p-3">
+                                                                                                    <div className="flex items-center justify-between mb-2">
+                                                                                                        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Matched Student</p>
+                                                                                                        <span className="text-[10px] text-gray-400">L{m.matched_line_start}–{m.matched_line_end}</span>
+                                                                                                    </div>
+                                                                                                    <pre className="text-[11px] text-gray-800 bg-amber-50 border border-amber-100 rounded-lg p-3 font-mono overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap leading-relaxed">{m.matched_code_snippet}</pre>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )}
+
+                                                                                        {/* Actions row */}
+                                                                                        <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-200 flex items-center gap-2 flex-wrap">
+                                                                                            <Button
+                                                                                                size="sm"
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    navigateToGrading(sub.student_id);
+                                                                                                }}
+                                                                                                className="h-7 px-3 text-[11px] gap-1.5 bg-purple-600 hover:bg-purple-700 text-white"
+                                                                                            >
+                                                                                                <Code className="w-3 h-3" /> Compare in Grading View
+                                                                                            </Button>
+                                                                                            {!m.is_reviewed && (
+                                                                                                <>
+                                                                                                    <button
+                                                                                                        onClick={async (e) => {
+                                                                                                            e.stopPropagation();
+                                                                                                            await apiClient.reviewPlagiarismMatch(m.id, true, '');
+                                                                                                            setPlagiarismMatchesMap(prev => ({
+                                                                                                                ...prev,
+                                                                                                                [sub.id]: (prev[sub.id] || []).map((x: any) =>
+                                                                                                                    x.id === m.id ? { ...x, is_reviewed: true, is_confirmed: true } : x
+                                                                                                                ),
+                                                                                                            }));
+                                                                                                        }}
+                                                                                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+                                                                                                    >
+                                                                                                        <AlertTriangle className="w-3 h-3" /> Confirm Plagiarism
+                                                                                                    </button>
+                                                                                                    <button
+                                                                                                        onClick={async (e) => {
+                                                                                                            e.stopPropagation();
+                                                                                                            await apiClient.reviewPlagiarismMatch(m.id, false, '');
+                                                                                                            setPlagiarismMatchesMap(prev => ({
+                                                                                                                ...prev,
+                                                                                                                [sub.id]: (prev[sub.id] || []).map((x: any) =>
+                                                                                                                    x.id === m.id ? { ...x, is_reviewed: true, is_confirmed: false } : x
+                                                                                                                ),
+                                                                                                            }));
+                                                                                                        }}
+                                                                                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 transition-colors"
+                                                                                                    >
+                                                                                                        <CheckCircle2 className="w-3 h-3" /> Dismiss
+                                                                                                    </button>
+                                                                                                </>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : sub.plagiarism_checked ? (
+                                                                        <div className="text-center py-8 bg-white rounded-xl border border-gray-200">
+                                                                            <CheckCircle2 className="w-10 h-10 mx-auto text-green-500 mb-3" />
+                                                                            <p className="text-sm font-medium text-gray-700">No suspicious matches</p>
+                                                                            <p className="text-xs text-gray-500 mt-1">This submission appears to be original work.</p>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="text-center py-8 bg-white rounded-xl border border-dashed border-gray-300">
+                                                                            <Shield className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+                                                                            <p className="text-sm text-gray-500">Not yet checked</p>
+                                                                            <p className="text-xs text-gray-400 mt-1">Run the plagiarism check to generate a report.</p>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Link to grading page */}
+                                                                    <div className="mt-4 flex justify-end">
+                                                                        <Button
+                                                                            size="sm"
+                                                                            onClick={(e) => { e.stopPropagation(); navigateToGrading(sub.student_id); }}
+                                                                            className="h-8 px-4 text-xs gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white"
+                                                                        >
+                                                                            <Edit className="w-3.5 h-3.5" /> Open in Grading View
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </Card>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </>
+                                );
+                            })()}
                         </div>
                     )}
                 </div>

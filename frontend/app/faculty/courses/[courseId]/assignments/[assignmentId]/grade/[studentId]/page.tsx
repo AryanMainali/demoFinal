@@ -38,6 +38,8 @@ import {
     FileText,
     Calendar,
     Shield,
+    ArrowLeftRight,
+    Users,
 } from 'lucide-react';
 
 /* ====================================================================
@@ -236,6 +238,22 @@ export default function GradingPage() {
         finalScore: '',
     });
 
+    // Compare mode for plagiarism side-by-side
+    const [compareMode, setCompareMode] = useState<{
+        matchId: number;
+        matchedSubId: number;
+        matchedStudentName: string;
+        similarity: number;
+        sourceSnippet?: string;
+        matchedSnippet?: string;
+    } | null>(null);
+    const [compareFiles, setCompareFiles] = useState<Record<number, FileContent>>({});
+    const [compareFileList, setCompareFileList] = useState<SubmissionFileOut[]>([]);
+    const [compareSelectedFileId, setCompareSelectedFileId] = useState<number | null>(null);
+    const [loadingCompare, setLoadingCompare] = useState(false);
+    const compareGutterRef = useRef<HTMLDivElement>(null);
+    const compareEditorRef = useRef<HTMLDivElement>(null);
+
     // API
     const { data: assignment, isLoading: loadingAssignment } = useQuery<Assignment>({
         queryKey: ['assignment', assignmentId],
@@ -345,6 +363,71 @@ export default function GradingPage() {
         }
     };
 
+    /* ===== Plagiarism Compare Mode ===== */
+    const enterCompareMode = async (match: any) => {
+        if (!match.matched_submission_id) {
+            toast({ title: 'Cannot compare', description: 'No matched submission to compare.', variant: 'destructive' });
+            return;
+        }
+
+        // Resolve matched student name from allSubs
+        const matchedSub = allSubs.find(s => s.id === match.matched_submission_id);
+        const matchedStudentName = matchedSub?.student?.full_name || match.matched_source || `Submission #${match.matched_submission_id}`;
+
+        setCompareMode({
+            matchId: match.id,
+            matchedSubId: match.matched_submission_id,
+            matchedStudentName,
+            similarity: match.similarity_percentage,
+            sourceSnippet: match.source_code_snippet,
+            matchedSnippet: match.matched_code_snippet,
+        });
+
+        setLoadingCompare(true);
+        try {
+            const detail = await apiClient.getSubmission(match.matched_submission_id);
+            const files: SubmissionFileOut[] = detail.files || [];
+            setCompareFileList(files);
+
+            if (files.length > 0) {
+                const mainFile = files.find((f: SubmissionFileOut) => f.is_main_file) || files[0];
+                const content = await apiClient.getSubmissionFileContent(match.matched_submission_id, mainFile.id);
+                setCompareFiles({ [mainFile.id]: content });
+                setCompareSelectedFileId(mainFile.id);
+            }
+        } catch {
+            toast({ title: 'Error', description: 'Failed to load matched submission.', variant: 'destructive' });
+            setCompareMode(null);
+        } finally {
+            setLoadingCompare(false);
+        }
+    };
+
+    const exitCompareMode = () => {
+        setCompareMode(null);
+        setCompareFiles({});
+        setCompareFileList([]);
+        setCompareSelectedFileId(null);
+    };
+
+    const loadCompareFile = async (fileId: number) => {
+        if (!compareMode) return;
+        setCompareSelectedFileId(fileId);
+        if (compareFiles[fileId]) return;
+        setLoadingCompare(true);
+        try {
+            const content = await apiClient.getSubmissionFileContent(compareMode.matchedSubId, fileId);
+            setCompareFiles(prev => ({ ...prev, [fileId]: content }));
+        } catch {
+            toast({ title: 'Error', description: 'Failed to load file.', variant: 'destructive' });
+        } finally {
+            setLoadingCompare(false);
+        }
+    };
+
+    const currentCompareFile = compareSelectedFileId ? compareFiles[compareSelectedFileId] : null;
+    const compareEditorLines = (currentCompareFile?.content || '').split('\n');
+
     const runPlagiarismCheck = async () => {
         if (!selectedSub) return;
         setCheckingPlagiarism(true);
@@ -413,7 +496,7 @@ export default function GradingPage() {
             const msg = err?.response?.data?.detail || 'Run failed';
             setRunResult({
                 success: false, results: [], compilation_status: 'Not Compiled Successfully',
-                message: msg, tests_passed: 0, tests_total: 0,
+                message: msg, tests_passed: 0, tests_total: 0, total_score: 0, max_score: 0,
             });
             toast({ title: 'Run Failed', description: msg, variant: 'destructive' });
         } finally {
@@ -477,6 +560,67 @@ export default function GradingPage() {
     const editorLines = (currentFile?.content || '').split('\n');
     const subFiles = selectedSub?.files || [];
     const subTestResults = selectedSub?.test_results || [];
+
+    // Plagiarism-highlighted line numbers for the current student's code
+    const sourceFlaggedLines = useMemo(() => {
+        const lines = new Set<number>();
+        for (const m of plagiarismMatches) {
+            if (m.source_line_start != null && m.source_line_end != null) {
+                for (let i = m.source_line_start; i <= m.source_line_end; i++) lines.add(i);
+            }
+        }
+        return lines;
+    }, [plagiarismMatches]);
+
+    // Plagiarism-highlighted line numbers for the matched student's code (compare mode)
+    const matchedFlaggedLines = useMemo(() => {
+        if (!compareMode) return new Set<number>();
+        const lines = new Set<number>();
+        for (const m of plagiarismMatches) {
+            if (m.matched_submission_id === compareMode.matchedSubId &&
+                m.matched_line_start != null && m.matched_line_end != null) {
+                for (let i = m.matched_line_start; i <= m.matched_line_end; i++) lines.add(i);
+            }
+        }
+        return lines;
+    }, [plagiarismMatches, compareMode]);
+
+    // Unified plagiarism match list: merge DB records + report JSON into one clickable list
+    const unifiedPlagiarismMatches = useMemo(() => {
+        // Start with DB matches (have full snippet data)
+        const bySubId = new Map<number, any>();
+
+        // Group DB matches by matched_submission_id (pick highest similarity per student)
+        for (const m of plagiarismMatches) {
+            const key = m.matched_submission_id;
+            if (!key) continue;
+            const existing = bySubId.get(key);
+            if (!existing || m.similarity_percentage > existing.similarity_percentage) {
+                bySubId.set(key, { ...m, _source: 'db' });
+            }
+        }
+
+        // Merge report summary matches (fill in gaps the DB doesn't have)
+        const reportMatches = selectedSub?.plagiarism_report?.matches || [];
+        for (const rm of reportMatches) {
+            const key = rm.matched_submission_id;
+            if (!key) continue;
+            if (!bySubId.has(key)) {
+                bySubId.set(key, {
+                    id: `report-${key}`,
+                    matched_submission_id: rm.matched_submission_id,
+                    similarity_percentage: rm.similarity_percentage,
+                    matched_source: rm.student_name,
+                    student_name: rm.student_name,
+                    student_id_field: rm.student_id,
+                    _source: 'report',
+                });
+            }
+        }
+
+        return Array.from(bySubId.values())
+            .sort((a, b) => b.similarity_percentage - a.similarity_percentage);
+    }, [plagiarismMatches, selectedSub?.plagiarism_report]);
 
     /* ===== RENDER ===== */
 
@@ -698,24 +842,90 @@ export default function GradingPage() {
 
                     {/* ===== Center: Editor + Bottom Panel ===== */}
                     <div className="flex-1 flex flex-col min-h-0 min-w-0">
-                        {/* Editor Tabs */}
-                        <div className="bg-[#252526] border-b border-[#3c3c3c] flex items-center min-h-[35px] overflow-x-auto shrink-0">
-                            {subFiles.map(file => (
-                                <div key={file.id} onClick={() => selectFile(file.id)}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-[12px] border-r border-[#3c3c3c] shrink-0 ${
-                                        selectedFileId === file.id ? 'bg-[#1e1e1e] text-white border-t-2 border-t-[#862733]' : 'bg-[#2d2d2d] text-[#969696] hover:bg-[#2d2d2d]/80'
+
+                        {/* Compare Mode Banner */}
+                        {compareMode && (
+                            <div className="bg-gradient-to-r from-purple-900/40 via-[#252526] to-red-900/40 border-b border-purple-500/30 px-4 py-2 flex items-center gap-3 shrink-0">
+                                <ArrowLeftRight className="w-4 h-4 text-purple-400 shrink-0" />
+                                <div className="flex-1 flex items-center gap-2 min-w-0">
+                                    <span className="text-[11px] font-semibold text-white truncate">{student.full_name}</span>
+                                    <span className="text-[10px] text-[#858585]">vs</span>
+                                    <span className="text-[11px] font-semibold text-purple-300 truncate">{compareMode.matchedStudentName}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                                        compareMode.similarity >= 50 ? 'bg-[#f44747]/20 text-[#f44747]' :
+                                        compareMode.similarity >= 30 ? 'bg-[#dcdcaa]/20 text-[#dcdcaa]' :
+                                        'bg-[#858585]/20 text-[#858585]'
                                     }`}>
-                                    <FileCode className="w-3.5 h-3.5 text-[#858585]" />
-                                    <span className="font-mono">{file.filename}</span>
+                                        {compareMode.similarity.toFixed(1)}% similar
+                                    </span>
                                 </div>
-                            ))}
-                            {subFiles.length === 0 && (
-                                <div className="px-3 py-1.5 text-[12px] text-[#858585]">No files</div>
-                            )}
-                        </div>
+                                <button onClick={exitCompareMode}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#3c3c3c] hover:bg-[#505050] text-[11px] text-[#cccccc] transition-colors shrink-0">
+                                    <X className="w-3 h-3" /> Exit Compare
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Editor Tabs — normal mode */}
+                        {!compareMode && (
+                            <div className="bg-[#252526] border-b border-[#3c3c3c] flex items-center min-h-[35px] overflow-x-auto shrink-0">
+                                {subFiles.map(file => (
+                                    <div key={file.id} onClick={() => selectFile(file.id)}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-[12px] border-r border-[#3c3c3c] shrink-0 ${
+                                            selectedFileId === file.id ? 'bg-[#1e1e1e] text-white border-t-2 border-t-[#862733]' : 'bg-[#2d2d2d] text-[#969696] hover:bg-[#2d2d2d]/80'
+                                        }`}>
+                                        <FileCode className="w-3.5 h-3.5 text-[#858585]" />
+                                        <span className="font-mono">{file.filename}</span>
+                                    </div>
+                                ))}
+                                {subFiles.length === 0 && (
+                                    <div className="px-3 py-1.5 text-[12px] text-[#858585]">No files</div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Editor Tabs — compare mode (split headers) */}
+                        {compareMode && (
+                            <div className="flex shrink-0 border-b border-[#3c3c3c]">
+                                {/* Left tabs: current student */}
+                                <div className="flex-1 bg-[#252526] flex items-center min-h-[35px] overflow-x-auto border-r border-purple-500/30">
+                                    <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-[#858585] shrink-0 border-r border-[#3c3c3c]">
+                                        <User className="w-3 h-3 inline mr-1" />{student.full_name?.split(' ')[0]}
+                                    </div>
+                                    {subFiles.map(file => (
+                                        <div key={file.id} onClick={() => selectFile(file.id)}
+                                            className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer text-[11px] border-r border-[#3c3c3c] shrink-0 ${
+                                                selectedFileId === file.id ? 'bg-[#1e1e1e] text-white border-t-2 border-t-[#862733]' : 'bg-[#2d2d2d] text-[#969696] hover:bg-[#2d2d2d]/80'
+                                            }`}>
+                                            <FileCode className="w-3 h-3 text-[#858585]" />
+                                            <span className="font-mono">{file.filename}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                {/* Right tabs: matched student */}
+                                <div className="flex-1 bg-[#252526] flex items-center min-h-[35px] overflow-x-auto">
+                                    <div className="px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-purple-400 shrink-0 border-r border-[#3c3c3c]">
+                                        <Users className="w-3 h-3 inline mr-1" />{compareMode.matchedStudentName.split(' ')[0]}
+                                    </div>
+                                    {compareFileList.map(file => (
+                                        <div key={file.id} onClick={() => loadCompareFile(file.id)}
+                                            className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer text-[11px] border-r border-[#3c3c3c] shrink-0 ${
+                                                compareSelectedFileId === file.id ? 'bg-[#1e1e1e] text-white border-t-2 border-t-purple-500' : 'bg-[#2d2d2d] text-[#969696] hover:bg-[#2d2d2d]/80'
+                                            }`}>
+                                            <FileCode className="w-3 h-3 text-purple-400/60" />
+                                            <span className="font-mono">{file.filename}</span>
+                                        </div>
+                                    ))}
+                                    {compareFileList.length === 0 && loadingCompare && (
+                                        <div className="px-2 py-1.5 text-[11px] text-[#858585]"><Loader2 className="w-3 h-3 inline animate-spin" /> Loading...</div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         <div className="flex-1 flex flex-col min-h-0">
-                            {/* Code Editor (read-only for grading) */}
+                            {/* Code Editor — normal mode */}
+                            {!compareMode && (
                             <div className={`${panelOpen ? 'flex-[6]' : 'flex-1'} min-h-0 overflow-hidden`}>
                                 {loadingDetail ? (
                                     <div className="h-full flex items-center justify-center bg-[#1e1e1e]">
@@ -734,37 +944,64 @@ export default function GradingPage() {
                                             ref={gutterRef}
                                             className="bg-[#1e1e1e] text-[#858585] text-right pr-3 pl-4 pt-2 select-none overflow-hidden font-mono text-[13px] leading-[20px] border-r border-[#3c3c3c] min-w-[50px] shrink-0"
                                         >
-                                            {editorLines.map((_, i) => <div key={i} className="h-[20px]">{i + 1}</div>)}
+                                            {editorLines.map((_, i) => {
+                                                const lineNum = i + 1;
+                                                const isFlagged = sourceFlaggedLines.has(lineNum);
+                                                return (
+                                                    <div key={i} className="h-[20px] flex items-center justify-end" style={isFlagged ? { background: 'rgba(244,71,71,0.15)' } : undefined}>
+                                                        {isFlagged && <div className="w-[3px] h-full bg-[#f44747]/60 absolute left-0" style={{ position: 'absolute', left: 0 }} />}
+                                                        <span className={isFlagged ? 'text-[#f44747]/80' : ''}>{lineNum}</span>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                        <textarea
-                                            ref={editorRef}
-                                            value={currentFile.content}
-                                            onChange={(e) => updateFileContent(selectedFileId!, e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Tab') {
-                                                    e.preventDefault();
-                                                    const ta = e.currentTarget;
-                                                    const start = ta.selectionStart;
-                                                    const end = ta.selectionEnd;
-                                                    const val = ta.value;
-                                                    const newVal = val.substring(0, start) + '    ' + val.substring(end);
-                                                    updateFileContent(selectedFileId!, newVal);
-                                                    requestAnimationFrame(() => {
-                                                        ta.selectionStart = ta.selectionEnd = start + 4;
-                                                    });
-                                                }
-                                            }}
-                                            onScroll={() => {
-                                                if (editorRef.current && gutterRef.current) {
-                                                    gutterRef.current.scrollTop = editorRef.current.scrollTop;
-                                                }
-                                            }}
-                                            className="flex-1 bg-[#1e1e1e] text-[#d4d4d4] p-2 pl-4 font-mono text-[13px] leading-[20px] outline-none resize-none overflow-auto"
-                                            spellCheck={false}
-                                            autoCapitalize="off"
-                                            autoCorrect="off"
-                                            data-gramm="false"
-                                        />
+                                        <div className="flex-1 relative overflow-hidden">
+                                            {/* Highlight overlay behind textarea */}
+                                            <div
+                                                className="absolute inset-0 pt-2 pointer-events-none font-mono text-[13px] leading-[20px] overflow-hidden"
+                                                style={{ paddingLeft: '16px' }}
+                                                ref={(el) => {
+                                                    if (el && editorRef.current) {
+                                                        el.scrollTop = editorRef.current.scrollTop;
+                                                    }
+                                                }}
+                                            >
+                                                {editorLines.map((_, i) => {
+                                                    const isFlagged = sourceFlaggedLines.has(i + 1);
+                                                    return <div key={i} className="h-[20px]" style={isFlagged ? { background: 'rgba(244,71,71,0.10)' } : undefined} />;
+                                                })}
+                                            </div>
+                                            <textarea
+                                                ref={editorRef}
+                                                value={currentFile.content}
+                                                onChange={(e) => updateFileContent(selectedFileId!, e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Tab') {
+                                                        e.preventDefault();
+                                                        const ta = e.currentTarget;
+                                                        const start = ta.selectionStart;
+                                                        const end = ta.selectionEnd;
+                                                        const val = ta.value;
+                                                        const newVal = val.substring(0, start) + '    ' + val.substring(end);
+                                                        updateFileContent(selectedFileId!, newVal);
+                                                        requestAnimationFrame(() => {
+                                                            ta.selectionStart = ta.selectionEnd = start + 4;
+                                                        });
+                                                    }
+                                                }}
+                                                onScroll={() => {
+                                                    if (editorRef.current && gutterRef.current) {
+                                                        gutterRef.current.scrollTop = editorRef.current.scrollTop;
+                                                    }
+                                                }}
+                                                className="relative w-full h-full bg-transparent text-[#d4d4d4] p-2 pl-4 font-mono text-[13px] leading-[20px] outline-none resize-none overflow-auto"
+                                                style={{ background: 'transparent' }}
+                                                spellCheck={false}
+                                                autoCapitalize="off"
+                                                autoCorrect="off"
+                                                data-gramm="false"
+                                            />
+                                        </div>
                                     </div>
                                 ) : (
                                     <div className="h-full flex items-center justify-center bg-[#1e1e1e]">
@@ -775,6 +1012,102 @@ export default function GradingPage() {
                                     </div>
                                 )}
                             </div>
+                            )}
+
+                            {/* Code Editor — Compare (side-by-side) mode */}
+                            {compareMode && (
+                            <div className={`${panelOpen ? 'flex-[6]' : 'flex-1'} min-h-0 overflow-hidden flex`}>
+                                {/* Left pane: current student */}
+                                <div className="flex-1 flex flex-col min-w-0 border-r border-purple-500/30">
+                                    {loadingDetail || loadingFile ? (
+                                        <div className="flex-1 flex items-center justify-center bg-[#1e1e1e]">
+                                            <Loader2 className="w-6 h-6 animate-spin text-[#862733]" />
+                                        </div>
+                                    ) : currentFile ? (
+                                        <div className="flex-1 flex overflow-hidden">
+                                            <div
+                                                ref={gutterRef}
+                                                className="bg-[#1e1e1e] text-[#858585] text-right pr-2 pl-2 pt-2 select-none overflow-hidden font-mono text-[12px] leading-[19px] border-r border-[#3c3c3c] min-w-[40px] shrink-0"
+                                            >
+                                                {editorLines.map((_, i) => {
+                                                    const isFlagged = sourceFlaggedLines.has(i + 1);
+                                                    return (
+                                                        <div key={i} className="h-[19px]" style={isFlagged ? { background: 'rgba(244,71,71,0.18)' } : undefined}>
+                                                            <span className={isFlagged ? 'text-[#f44747]' : ''}>{i + 1}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div
+                                                className="flex-1 bg-[#1e1e1e] p-2 pl-3 font-mono text-[12px] leading-[19px] overflow-auto"
+                                                onScroll={(e) => {
+                                                    if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                                                }}
+                                            >
+                                                {editorLines.map((line, i) => {
+                                                    const isFlagged = sourceFlaggedLines.has(i + 1);
+                                                    return (
+                                                        <div key={i} className="h-[19px] whitespace-pre" style={isFlagged ? { background: 'rgba(244,71,71,0.10)', borderLeft: '2px solid rgba(244,71,71,0.5)', paddingLeft: '6px', marginLeft: '-8px' } : undefined}>
+                                                            <span className={isFlagged ? 'text-[#f4a0a0]' : 'text-[#d4d4d4]'}>{line}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center bg-[#1e1e1e]">
+                                            <p className="text-[12px] text-[#858585]">Select a file from the left tabs</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Right pane: matched student */}
+                                <div className="flex-1 flex flex-col min-w-0">
+                                    {loadingCompare ? (
+                                        <div className="flex-1 flex items-center justify-center bg-[#1e1e1e]">
+                                            <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
+                                        </div>
+                                    ) : currentCompareFile ? (
+                                        <div className="flex-1 flex overflow-hidden">
+                                            <div
+                                                ref={compareGutterRef}
+                                                className="bg-[#1e1e1e] text-[#858585] text-right pr-2 pl-2 pt-2 select-none overflow-hidden font-mono text-[12px] leading-[19px] border-r border-[#3c3c3c] min-w-[40px] shrink-0"
+                                            >
+                                                {compareEditorLines.map((_, i) => {
+                                                    const isFlagged = matchedFlaggedLines.has(i + 1);
+                                                    return (
+                                                        <div key={i} className="h-[19px]" style={isFlagged ? { background: 'rgba(192,120,255,0.18)' } : undefined}>
+                                                            <span className={isFlagged ? 'text-purple-400' : ''}>{i + 1}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div
+                                                className="flex-1 bg-[#1e1e1e] p-2 pl-3 font-mono text-[12px] leading-[19px] overflow-auto"
+                                                onScroll={(e) => {
+                                                    if (compareGutterRef.current) compareGutterRef.current.scrollTop = e.currentTarget.scrollTop;
+                                                }}
+                                            >
+                                                {compareEditorLines.map((line, i) => {
+                                                    const isFlagged = matchedFlaggedLines.has(i + 1);
+                                                    return (
+                                                        <div key={i} className="h-[19px] whitespace-pre" style={isFlagged ? { background: 'rgba(192,120,255,0.10)', borderLeft: '2px solid rgba(192,120,255,0.5)', paddingLeft: '6px', marginLeft: '-8px' } : undefined}>
+                                                            <span className={isFlagged ? 'text-purple-300' : 'text-[#d4d4d4]'}>{line}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center bg-[#1e1e1e]">
+                                            <p className="text-[12px] text-[#858585]">
+                                                {compareFileList.length === 0 ? 'No files in matched submission' : 'Select a file from the right tabs'}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            )}
 
                             {/* Bottom Panel */}
                             {panelOpen && (
@@ -1408,46 +1741,132 @@ export default function GradingPage() {
                                             : <><Shield className="w-3.5 h-3.5" /> {selectedSub.plagiarism_checked ? 'Re-run Check' : 'Run Plagiarism Check'}</>}
                                     </button>
 
-                                    {/* Matches */}
-                                    {plagiarismMatches.length > 0 ? (
+                                    {/* Compare mode indicator */}
+                                    {compareMode && (
+                                        <div className="rounded-lg p-2.5 bg-purple-900/30 border border-purple-500/30">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <ArrowLeftRight className="w-3.5 h-3.5 text-purple-400" />
+                                                <span className="text-[11px] font-semibold text-purple-300">Comparing in Editor</span>
+                                            </div>
+                                            <p className="text-[10px] text-[#858585]">
+                                                vs <span className="text-purple-300">{compareMode.matchedStudentName}</span> — {compareMode.similarity.toFixed(1)}%
+                                            </p>
+                                            <button onClick={exitCompareMode}
+                                                className="mt-2 w-full py-1 rounded bg-[#3c3c3c] hover:bg-[#505050] text-[10px] text-[#cccccc] transition-colors">
+                                                Exit Compare Mode
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Unified Matched Students List */}
+                                    {unifiedPlagiarismMatches.length > 0 ? (
                                         <div>
                                             <p className="text-[11px] text-[#858585] uppercase tracking-wider mb-2">
-                                                Matches ({plagiarismMatches.length})
+                                                Matched Students ({unifiedPlagiarismMatches.length})
                                             </p>
                                             <div className="space-y-2">
-                                                {plagiarismMatches.map((m: any) => (
-                                                    <div key={m.id} className="bg-[#1e1e1e] rounded-lg border border-[#3c3c3c] overflow-hidden">
-                                                        <div className="p-2.5 flex items-center justify-between">
-                                                            <div>
-                                                                <p className="text-[11px] font-medium text-[#cccccc]">
-                                                                    {m.matched_source || `Submission #${m.matched_submission_id}`}
-                                                                </p>
-                                                                <p className={`text-[13px] font-bold ${m.similarity_percentage >= 50 ? 'text-[#f44747]' : m.similarity_percentage >= 30 ? 'text-[#dcdcaa]' : 'text-[#858585]'}`}>
-                                                                    {m.similarity_percentage.toFixed(1)}% similar
-                                                                </p>
-                                                            </div>
-                                                            {m.is_reviewed && (
-                                                                <span className={`text-[9px] px-1.5 py-0.5 rounded ${m.is_confirmed ? 'bg-[#f44747]/20 text-[#f44747]' : 'bg-[#2ea043]/20 text-[#7ee787]'}`}>
-                                                                    {m.is_confirmed ? 'Confirmed' : 'Dismissed'}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        {m.source_code_snippet && (
-                                                            <div className="border-t border-[#3c3c3c]">
-                                                                <div className="grid grid-cols-2 divide-x divide-[#3c3c3c]">
-                                                                    <div className="p-2">
-                                                                        <p className="text-[9px] text-[#858585] mb-1">This submission (L{m.source_line_start}–{m.source_line_end})</p>
-                                                                        <pre className="text-[10px] text-[#d4d4d4] font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">{m.source_code_snippet}</pre>
+                                                {unifiedPlagiarismMatches.map((m: any) => {
+                                                    const matchedSub = allSubs.find(s => s.id === m.matched_submission_id);
+                                                    const matchedName = matchedSub?.student?.full_name || m.matched_source || m.student_name || `Submission #${m.matched_submission_id}`;
+                                                    const isActive = compareMode?.matchedSubId === m.matched_submission_id;
+
+                                                    return (
+                                                        <div key={m.id}
+                                                            className={`rounded-lg border overflow-hidden transition-all cursor-pointer ${
+                                                                isActive
+                                                                    ? 'bg-purple-900/30 border-purple-500/50 ring-1 ring-purple-500/30'
+                                                                    : 'bg-[#1e1e1e] border-[#3c3c3c] hover:border-[#505050]'
+                                                            }`}
+                                                            onClick={() => {
+                                                                if (!isActive && m.matched_submission_id) enterCompareMode(m);
+                                                            }}
+                                                        >
+                                                            <div className="p-2.5">
+                                                                {/* Student header */}
+                                                                <div className="flex items-center gap-2 mb-1.5">
+                                                                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
+                                                                        m.similarity_percentage >= 50
+                                                                            ? 'bg-[#f44747]/20 text-[#f44747]'
+                                                                            : m.similarity_percentage >= 30
+                                                                            ? 'bg-[#dcdcaa]/20 text-[#dcdcaa]'
+                                                                            : 'bg-[#4ec9b0]/20 text-[#4ec9b0]'
+                                                                    }`}>
+                                                                        {matchedName.charAt(0).toUpperCase()}
                                                                     </div>
-                                                                    <div className="p-2">
-                                                                        <p className="text-[9px] text-[#858585] mb-1">Match (L{m.matched_line_start}–{m.matched_line_end})</p>
-                                                                        <pre className="text-[10px] text-[#ffa198] font-mono whitespace-pre-wrap max-h-20 overflow-y-auto">{m.matched_code_snippet}</pre>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-[11px] font-medium text-[#cccccc] truncate">{matchedName}</p>
+                                                                        {matchedSub?.student?.student_id && (
+                                                                            <p className="text-[9px] text-[#858585]">ID: {matchedSub.student.student_id}</p>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex flex-col items-end gap-0.5 shrink-0">
+                                                                        <span className={`text-[13px] font-bold ${
+                                                                            m.similarity_percentage >= 50 ? 'text-[#f44747]'
+                                                                            : m.similarity_percentage >= 30 ? 'text-[#dcdcaa]'
+                                                                            : 'text-[#4ec9b0]'
+                                                                        }`}>
+                                                                            {m.similarity_percentage.toFixed(1)}%
+                                                                        </span>
+                                                                        {m.is_reviewed && (
+                                                                            <span className={`text-[8px] px-1 py-0.5 rounded ${
+                                                                                m.is_confirmed ? 'bg-[#f44747]/20 text-[#f44747]' : 'bg-[#2ea043]/20 text-[#7ee787]'
+                                                                            }`}>
+                                                                                {m.is_confirmed ? 'Confirmed' : 'Dismissed'}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
                                                                 </div>
+
+                                                                {/* Similarity bar */}
+                                                                <div className="mb-2">
+                                                                    <div className="h-1.5 rounded-full bg-[#333] overflow-hidden">
+                                                                        <div
+                                                                            className={`h-full rounded-full transition-all ${
+                                                                                m.similarity_percentage >= 50 ? 'bg-[#f44747]'
+                                                                                : m.similarity_percentage >= 30 ? 'bg-[#dcdcaa]'
+                                                                                : 'bg-[#4ec9b0]'
+                                                                            }`}
+                                                                            style={{ width: `${Math.min(m.similarity_percentage, 100)}%` }}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Action row */}
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        if (isActive) exitCompareMode();
+                                                                        else if (m.matched_submission_id) enterCompareMode(m);
+                                                                    }}
+                                                                    className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-medium transition-colors ${
+                                                                        isActive
+                                                                            ? 'bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:bg-purple-600/40'
+                                                                            : 'bg-[#2a2d2e] border border-[#3c3c3c] text-[#cccccc] hover:bg-[#3c3c3c] hover:text-white'
+                                                                    }`}
+                                                                >
+                                                                    <ArrowLeftRight className="w-3 h-3" />
+                                                                    {isActive ? 'Exit Compare' : 'Compare Code Side-by-Side'}
+                                                                </button>
                                                             </div>
-                                                        )}
-                                                    </div>
-                                                ))}
+
+                                                            {/* Code snippet preview (only for DB matches with snippets, not in compare mode) */}
+                                                            {m.source_code_snippet && !isActive && (
+                                                                <div className="border-t border-[#3c3c3c]" onClick={(e) => e.stopPropagation()}>
+                                                                    <div className="grid grid-cols-2 divide-x divide-[#3c3c3c]">
+                                                                        <div className="p-2">
+                                                                            <p className="text-[9px] text-[#858585] mb-1">This student (L{m.source_line_start}–{m.source_line_end})</p>
+                                                                            <pre className="text-[10px] text-[#d4d4d4] font-mono whitespace-pre-wrap max-h-16 overflow-y-auto">{m.source_code_snippet}</pre>
+                                                                        </div>
+                                                                        <div className="p-2">
+                                                                            <p className="text-[9px] text-[#858585] mb-1">Match (L{m.matched_line_start}–{m.matched_line_end})</p>
+                                                                            <pre className="text-[10px] text-[#ffa198] font-mono whitespace-pre-wrap max-h-16 overflow-y-auto">{m.matched_code_snippet}</pre>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     ) : selectedSub.plagiarism_checked ? (
@@ -1457,23 +1876,6 @@ export default function GradingPage() {
                                             <p className="text-[10px] text-[#858585] mt-1">This submission appears to be original</p>
                                         </div>
                                     ) : null}
-
-                                    {/* Report summary from backend */}
-                                    {selectedSub.plagiarism_report?.matches && selectedSub.plagiarism_report.matches.length > 0 && plagiarismMatches.length === 0 && (
-                                        <div>
-                                            <p className="text-[11px] text-[#858585] uppercase tracking-wider mb-2">Report Summary</p>
-                                            <div className="space-y-1">
-                                                {selectedSub.plagiarism_report.matches.map((m: any, i: number) => (
-                                                    <div key={i} className="flex items-center justify-between bg-[#1e1e1e] rounded p-2 border border-[#3c3c3c]">
-                                                        <span className="text-[11px] text-[#cccccc] truncate">{m.student_name}</span>
-                                                        <span className={`text-[11px] font-bold ${m.similarity_percentage >= 50 ? 'text-[#f44747]' : 'text-[#dcdcaa]'}`}>
-                                                            {m.similarity_percentage.toFixed(1)}%
-                                                        </span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             )}
                         </div>
