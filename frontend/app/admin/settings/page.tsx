@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { InnerHeaderDesign } from '@/components/InnerHeaderDesign';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { AdminLayout } from '@/components/layouts/AdminLayout';
 import { useMutation } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -118,7 +117,6 @@ export default function SettingsPage() {
 
     return (
         <ProtectedRoute allowedRoles={['ADMIN']}>
-            <AdminLayout>
                 <div className="space-y-6">
                     <InnerHeaderDesign
                         title="System Settings"
@@ -640,7 +638,6 @@ export default function SettingsPage() {
                         </Button>
                     </ModalFooter>
                 </Modal>
-            </AdminLayout>
         </ProtectedRoute>
     );
 }

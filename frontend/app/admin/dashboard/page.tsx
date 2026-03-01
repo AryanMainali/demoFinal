@@ -5,17 +5,13 @@ import apiClient from '@/lib/api-client';
 import { StatsCard } from '@/components/ui/stats-card';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Avatar } from '@/components/ui/avatar';
 import Link from 'next/link';
 import {
     Users,
     BookOpen,
     CheckCircle,
-    ArrowRight,
-    BarChart3,
-    PieChart,
-    Shield
+    ArrowRight
 } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -53,14 +49,20 @@ export default function AdminDashboard() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <StatsCard
-                    title="Total Users"
-                    value={isLoading ? '...' : stats?.users?.total || 0}
-                    subtitle={`${stats?.users?.active || 0} active`}
+                    title="Faculty Members"
+                    value={isLoading ? '...' : stats?.users?.faculty || 0}
+                    subtitle={`${stats?.users?.total || 0} total users`}
                     icon={Users}
                     variant="primary"
-                    trend={{ value: 12, label: 'vs last month' }}
+                />
+                <StatsCard
+                    title="Students"
+                    value={isLoading ? '...' : stats?.users?.students || 0}
+                    subtitle={`${stats?.users?.total || 0} total users`}
+                    icon={Users}
+                    variant="success"
                 />
                 <StatsCard
                     title="Courses"
@@ -72,68 +74,7 @@ export default function AdminDashboard() {
 
             </div>
 
-            {/* Second Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Activity Chart */}
-                <Card className="lg:col-span-2">
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle>Activity Overview</CardTitle>
-                                <CardDescription>Submissions and logins over the past week</CardDescription>
-                            </div>
-                            <select className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#862733]">
-                                <option>Last 7 days</option>
-                                <option>Last 30 days</option>
-                                <option>Last 90 days</option>
-                            </select>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="h-64 flex items-center justify-center bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
-                            <div className="text-center">
-                                <BarChart3 className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-                                <p className="text-gray-500 text-sm">Activity chart visualization</p>
-                                <p className="text-gray-400 text-xs mt-1">
-                                    {stats?.recent_activity?.logins_24h || 0} logins • {stats?.recent_activity?.submissions_24h || 0} submissions today
-                                </p>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* User Distribution */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle>User Distribution</CardTitle>
-                        <CardDescription>Breakdown by role</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-3 h-3 rounded-full bg-green-500" />
-                                    <span className="text-sm text-gray-600">Admins</span>
-                                </div>
-                                <span className="text-sm font-medium">{stats?.users?.admins || 0}</span>
-                            </div>
-                            <Progress
-                                value={stats?.users?.admins || 0}
-                                max={stats?.users?.total || 1}
-                                variant="success"
-                            />
-                        </div>
-
-                        <div className="mt-6 pt-4 border-t border-gray-100">
-                            <div className="flex items-center justify-center">
-                                <PieChart className="w-32 h-32 text-gray-300" />
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Third Row */}
+            {/* Activity & Health */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Recent Activity */}
                 <Card className="lg:col-span-2">

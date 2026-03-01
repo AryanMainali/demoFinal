@@ -224,7 +224,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     const topNavItems = getTopNavItems(user.role);
     const isAdmin = user.role === 'ADMIN';
     const showSidebar = false;
-    const showAdminTopNav = isAdmin && (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/'));
+    const showAdminTopNav = isAdmin && pathname.startsWith('/admin');
 
     // For students, remove the primary learning nav from the sidebar since we show it in the top nav
     // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu

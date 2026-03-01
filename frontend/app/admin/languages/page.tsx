@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { AdminLayout } from '@/components/layouts/AdminLayout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
 import { DataTable } from '@/components/ui/data-table';
@@ -313,7 +312,6 @@ export default function LanguagesPage() {
 
     return (
         <ProtectedRoute allowedRoles={['ADMIN']}>
-            <AdminLayout>
                 <div className="space-y-6">
                     {/* Header */}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -530,7 +528,6 @@ export default function LanguagesPage() {
                         </Button>
                     </ModalFooter>
                 </Modal>
-            </AdminLayout>
         </ProtectedRoute>
     );
 }
