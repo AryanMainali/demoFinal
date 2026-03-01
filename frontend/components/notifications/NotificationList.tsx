@@ -35,7 +35,12 @@ interface NotificationRowProps {
 
 function NotificationRow({ notification, onClick }: NotificationRowProps) {
     const typeLabel = NOTIFICATION_TYPE_CONFIG[notification.type].label;
-    const timeLabel = formatDistanceToNow(new Date(notification.created_at), { addSuffix: true });
+    
+    // Parse timestamp - backend sends UTC, append 'Z' if not present to ensure proper parsing
+    const timestamp = notification.created_at.endsWith('Z') 
+        ? notification.created_at 
+        : `${notification.created_at}Z`;
+    const timeLabel = formatDistanceToNow(new Date(timestamp), { addSuffix: true });
 
     return (
         <button

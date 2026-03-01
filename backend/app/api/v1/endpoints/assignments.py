@@ -437,19 +437,6 @@ async def create_assignment(
         db.add(audit)
         db.commit()
         
-        # Send notifications to enrolled students
-        try:
-            notify_course_students_assignment_posted(
-                db=db,
-                course_id=assignment.course_id,
-                assignment_id=assignment.id,
-                assignment_title=assignment.title,
-                course_code=course.code,
-            )
-            db.commit()
-        except Exception as notif_err:
-            logger.warning(f"Failed to send assignment notifications: {str(notif_err)}")
-        
         db.refresh(assignment)
         assignment.course = course
         logger.info(f"Assignment {assignment.id} created by user {current_user.id}")
@@ -549,7 +536,7 @@ def publish_assignment(
     current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
 ):
     """Publish an assignment to make it visible to students"""
-    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    assignment = db.query(Assignment).options(joinedload(Assignment.course)).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
     
@@ -566,6 +553,20 @@ def publish_assignment(
         description=f"Assignment '{assignment.title}' published"
     )
     db.add(audit)
+    
+    # Send notifications to enrolled students
+    try:
+        notify_course_students_assignment_posted(
+            db=db,
+            course_id=assignment.course_id,
+            assignment_id=assignment.id,
+            assignment_title=assignment.title,
+            course_code=assignment.course.code,
+        )
+    except Exception as notif_err:
+        logger.warning(f"Failed to send assignment notifications: {str(notif_err)}")
+    
+    # Commit all changes together
     db.commit()
     
     return {"message": "Assignment published successfully"}

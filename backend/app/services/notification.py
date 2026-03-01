@@ -69,12 +69,13 @@ def notify_course_students_assignment_posted(
             )
             count += 1
 
+        db.flush()  # Flush to prepare for commit
         logger.info(f"Created {count} assignment posted notifications for course {course_id}")
         return count
 
     except Exception as e:
         logger.error(f"Failed to create assignment notifications: {str(e)}")
-        return 0
+        raise
 
 
 def notify_faculty_submission_received(
