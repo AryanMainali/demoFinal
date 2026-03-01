@@ -602,6 +602,31 @@ class ApiClient {
         return response.data;
     }
 
+    // Notification endpoints
+    async getNotifications(skip: number = 0, limit: number = 50) {
+        const response = await this.client.get('/notifications', {
+            params: { skip, limit }
+        });
+        return response.data;
+    }
+
+    async getUnreadNotificationCount() {
+        const response = await this.client.get('/notifications/unread/count');
+        return response.data;
+    }
+
+    async markNotificationAsRead(notificationId: number, isRead: boolean = true) {
+        const response = await this.client.patch(`/notifications/${notificationId}`, {
+            is_read: isRead
+        });
+        return response.data;
+    }
+
+    async markAllNotificationsAsRead() {
+        const response = await this.client.post('/notifications/mark-all-as-read');
+        return response.data;
+    }
+
     // Storage / S3 uploads
     async getPresignedUpload(fileName: string, fileType: string, folder?: string): Promise<{ url?: string; uploadUrl?: string; key: string; publicUrl?: string; }> {
         // Endpoint to be provided by backend. Common patterns:

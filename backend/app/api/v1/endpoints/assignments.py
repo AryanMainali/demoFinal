@@ -29,6 +29,7 @@ from app.schemas.assignment import (
 from app.core.logging import logger
 from app.services.autograding import autograding_service
 from app.services.sandbox import sandbox_executor
+from app.services.notification import notify_course_students_assignment_posted
 from app.tasks.code_execution import run_code_task, compile_check_task
 from app.services.s3_storage import s3_service
 
@@ -435,6 +436,20 @@ async def create_assignment(
         )
         db.add(audit)
         db.commit()
+        
+        # Send notifications to enrolled students
+        try:
+            notify_course_students_assignment_posted(
+                db=db,
+                course_id=assignment.course_id,
+                assignment_id=assignment.id,
+                assignment_title=assignment.title,
+                course_code=course.code,
+            )
+            db.commit()
+        except Exception as notif_err:
+            logger.warning(f"Failed to send assignment notifications: {str(notif_err)}")
+        
         db.refresh(assignment)
         assignment.course = course
         logger.info(f"Assignment {assignment.id} created by user {current_user.id}")
