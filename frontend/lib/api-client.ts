@@ -554,6 +554,37 @@ class ApiClient {
         return response.data;
     }
 
+    async getNotifications(unreadOnly: boolean = false, limit: number = 20) {
+        const response = await this.client.get('/notifications', {
+            params: {
+                unread_only: unreadOnly,
+                limit,
+            },
+        });
+        return response.data as Array<{
+            id: number;
+            type: string;
+            title: string;
+            message: string;
+            link?: string | null;
+            course_id?: number | null;
+            assignment_id?: number | null;
+            submission_id?: number | null;
+            is_read: boolean;
+            created_at: string;
+        }>;
+    }
+
+    async markNotificationRead(notificationId: number) {
+        const response = await this.client.put(`/notifications/${notificationId}/read`);
+        return response.data;
+    }
+
+    async markAllNotificationsRead() {
+        const response = await this.client.put('/notifications/read-all');
+        return response.data;
+    }
+
     // Admin settings endpoints
     async getSettings() {
         const response = await this.client.get('/admin/settings');
