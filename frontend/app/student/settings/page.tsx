@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { InnerHeaderDesign } from '@/components/InnerHeaderDesign';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { DashboardLayout } from '@/components/layouts/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -121,12 +120,11 @@ export default function StudentSettingsPage() {
 
     return (
         <ProtectedRoute allowedRoles={['STUDENT']}>
-            <DashboardLayout>
-                <div className="space-y-6">
-                    <InnerHeaderDesign
-                        title="Settings"
-                        subtitle="Manage your account settings and preferences"
-                    />
+            <div className="space-y-6">
+                <InnerHeaderDesign
+                    title="Settings"
+                    subtitle="Manage your account settings and preferences"
+                />
 
                     {successMessage && (
                         <Alert type="success" title="Success">
@@ -523,7 +521,6 @@ export default function StudentSettingsPage() {
                         </Card>
                     )}
                 </div>
-            </DashboardLayout>
-        </ProtectedRoute>
-    );
-}
+            </ProtectedRoute>
+        );
+    }
