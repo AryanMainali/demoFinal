@@ -12,15 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Alert } from '@/components/ui/alert';
 import { Avatar } from '@/components/ui/avatar';
 import { Tabs } from '@/components/ui/tabs';
-import { Toggle } from '@/components/ui/toggle';
 import {
     User,
-    Mail,
     Phone,
     Lock,
-    Bell,
-    Moon,
-    Sun,
     Globe,
     Shield,
     Save,
@@ -30,7 +25,6 @@ import {
     Loader2,
     CheckCircle,
     Settings,
-    Palette
 } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -59,19 +53,6 @@ const getRoleAvatarFallback = (role: UserRole, name?: string) => {
     return fallbacks[role] || 'U';
 };
 
-const getSubmissionNotificationText = (role: UserRole) => {
-    if (role === 'ASSISTANT') {
-        return {
-            label: 'Submission Updates',
-            desc: 'Get reminded when student submissions are pending review',
-        };
-    }
-    return {
-        label: 'Due Date Reminders',
-        desc: 'Get reminded before assignment deadlines',
-    };
-};
-
 export function SettingsPage({ allowedRoles }: SettingsPageProps) {
     const { user } = useAuth();
     const queryClient = useQueryClient();
@@ -97,29 +78,9 @@ export function SettingsPage({ allowedRoles }: SettingsPageProps) {
         confirm_password: '',
     });
 
-    // Notification settings
-    const [notifications, setNotifications] = useState({
-        email_assignments: true,
-        email_grades: true,
-        email_announcements: true,
-        push_due_dates: true,
-        push_grades: true,
-        push_messages: false,
-    });
-
-    // Appearance settings
-    const [appearance, setAppearance] = useState({
-        theme: 'light',
-        language: 'en',
-        code_font_size: '14',
-        code_theme: 'vs-dark',
-    });
-
     const tabs = [
         { id: 'profile', label: 'Profile', icon: <User className="w-4 h-4" /> },
         { id: 'security', label: 'Security', icon: <Shield className="w-4 h-4" /> },
-        { id: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" /> },
-        { id: 'appearance', label: 'Appearance', icon: <Palette className="w-4 h-4" /> },
     ];
 
     const updateProfileMutation = useMutation({
@@ -155,8 +116,6 @@ export function SettingsPage({ allowedRoles }: SettingsPageProps) {
         }
         updatePasswordMutation.mutate(passwordForm);
     };
-
-    const submissionNotification = getSubmissionNotificationText(user?.role || 'STUDENT');
 
     return (
         <ProtectedRoute allowedRoles={allowedRoles}>
@@ -384,182 +343,6 @@ export function SettingsPage({ allowedRoles }: SettingsPageProps) {
                                         <Badge variant="success">Active</Badge>
                                     </div>
                                 </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* Notifications Tab */}
-                {activeTab === 'notifications' && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Notification Preferences</CardTitle>
-                            <CardDescription>Choose how you want to be notified</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div>
-                                <h3 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
-                                    <Mail className="w-5 h-5" />
-                                    Email Notifications
-                                </h3>
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <p className="font-medium text-gray-700">New Assignments</p>
-                                            <p className="text-sm text-gray-500">Get notified when new assignments are posted</p>
-                                        </div>
-                                        <Toggle
-                                            checked={notifications.email_assignments}
-                                            onChange={(checked: boolean) => setNotifications({ ...notifications, email_assignments: checked })}
-                                        />
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <p className="font-medium text-gray-700">Grade Updates</p>
-                                            <p className="text-sm text-gray-500">Get notified when assignments are graded</p>
-                                        </div>
-                                        <Toggle
-                                            checked={notifications.email_grades}
-                                            onChange={(checked: boolean) => setNotifications({ ...notifications, email_grades: checked })}
-                                        />
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <p className="font-medium text-gray-700">Course Announcements</p>
-                                            <p className="text-sm text-gray-500">Get notified about important announcements</p>
-                                        </div>
-                                        <Toggle
-                                            checked={notifications.email_announcements}
-                                            onChange={(checked: boolean) => setNotifications({ ...notifications, email_announcements: checked })}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="pt-6 border-t">
-                                <h3 className="font-medium text-gray-900 mb-4 flex items-center gap-2">
-                                    <Bell className="w-5 h-5" />
-                                    Push Notifications
-                                </h3>
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <p className="font-medium text-gray-700">{submissionNotification.label}</p>
-                                            <p className="text-sm text-gray-500">{submissionNotification.desc}</p>
-                                        </div>
-                                        <Toggle
-                                            checked={notifications.push_due_dates}
-                                            onChange={(checked: boolean) => setNotifications({ ...notifications, push_due_dates: checked })}
-                                        />
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <p className="font-medium text-gray-700">Grade Notifications</p>
-                                            <p className="text-sm text-gray-500">Instant notification for grading activities</p>
-                                        </div>
-                                        <Toggle
-                                            checked={notifications.push_grades}
-                                            onChange={(checked: boolean) => setNotifications({ ...notifications, push_grades: checked })}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end pt-4">
-                                <Button>
-                                    <Save className="w-4 h-4 mr-2" />
-                                    Save Preferences
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {/* Appearance Tab */}
-                {activeTab === 'appearance' && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Appearance Settings</CardTitle>
-                            <CardDescription>Customize how the application looks</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-3">Theme</label>
-                                <div className="flex gap-4">
-                                    <button
-                                        type="button"
-                                        onClick={() => setAppearance({ ...appearance, theme: 'light' })}
-                                        className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-colors ${appearance.theme === 'light' ? 'border-[#862733] bg-[#862733]/5' : 'border-gray-200'
-                                            }`}
-                                    >
-                                        <Sun className="w-5 h-5" />
-                                        <span className="font-medium">Light</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setAppearance({ ...appearance, theme: 'dark' })}
-                                        className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-colors ${appearance.theme === 'dark' ? 'border-[#862733] bg-[#862733]/5' : 'border-gray-200'
-                                            }`}
-                                    >
-                                        <Moon className="w-5 h-5" />
-                                        <span className="font-medium">Dark</span>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Code Editor Theme
-                                </label>
-                                <select
-                                    value={appearance.code_theme}
-                                    onChange={(e) => setAppearance({ ...appearance, code_theme: e.target.value })}
-                                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#862733]/20"
-                                >
-                                    <option value="vs-dark">VS Code Dark</option>
-                                    <option value="vs-light">VS Code Light</option>
-                                    <option value="monokai">Monokai</option>
-                                    <option value="dracula">Dracula</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Code Font Size
-                                </label>
-                                <select
-                                    value={appearance.code_font_size}
-                                    onChange={(e) => setAppearance({ ...appearance, code_font_size: e.target.value })}
-                                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#862733]/20"
-                                >
-                                    <option value="12">12px</option>
-                                    <option value="14">14px</option>
-                                    <option value="16">16px</option>
-                                    <option value="18">18px</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Language
-                                </label>
-                                <select
-                                    value={appearance.language}
-                                    onChange={(e) => setAppearance({ ...appearance, language: e.target.value })}
-                                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#862733]/20"
-                                >
-                                    <option value="en">English</option>
-                                    <option value="es">Español</option>
-                                    <option value="fr">Français</option>
-                                    <option value="de">Deutsch</option>
-                                </select>
-                            </div>
-
-                            <div className="flex justify-end pt-4">
-                                <Button>
-                                    <Save className="w-4 h-4 mr-2" />
-                                    Save Preferences
-                                </Button>
                             </div>
                         </CardContent>
                     </Card>
