@@ -299,8 +299,13 @@ class ApiClient {
         if (groupId) formData.append('group_id', groupId.toString());
         files.forEach((file) => formData.append('files', file));
 
+        // Must NOT send Content-Type for FormData - axios/browser sets multipart/form-data with boundary
         const response = await this.client.post('/submissions', formData, {
-            headers: { 'Content-Type': undefined as unknown as string },
+            headers: { 'Content-Type': undefined } as Record<string, string | undefined>,
+            transformRequest: [(data, headers) => {
+                if (data instanceof FormData && headers) delete headers['Content-Type'];
+                return data;
+            }],
         });
         return response.data;
     }

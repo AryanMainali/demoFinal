@@ -315,7 +315,10 @@ export default function StudentAssignmentPage() {
                 }
             }
         } catch (err: any) {
-            const msg = err?.response?.data?.detail || 'Failed to run code'
+            const raw = err?.response?.data?.detail
+            const msg = typeof raw === 'string' ? raw
+                : Array.isArray(raw) ? raw.map((e: { msg?: string }) => e?.msg || JSON.stringify(e)).join('. ') || 'Failed to run code'
+                : raw?.message || 'Failed to run code'
             setError(msg)
             setRunResult({
                 success: false, results: [], total_score: 0, max_score: 0,
@@ -368,7 +371,10 @@ export default function StudentAssignmentPage() {
                 router.push(`/student/courses/${assignment.course.id}`)
             }, 2500)
         } catch (err: any) {
-            const msg = err?.response?.data?.detail || 'Submission failed'
+            const raw = err?.response?.data?.detail
+            const msg = typeof raw === 'string' ? raw
+                : Array.isArray(raw) ? raw.map((e: { msg?: string; loc?: unknown[] }) => e?.msg || JSON.stringify(e)).join('. ') || 'Submission failed'
+                : raw?.message || 'Submission failed'
             setError(msg)
             toast({ title: 'Submission Failed', description: msg, variant: 'destructive' })
             setShowSubmitDialog(false)

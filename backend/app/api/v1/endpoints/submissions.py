@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
@@ -401,37 +402,40 @@ async def create_submission(
                     detail=f"File {upload_file.filename} is empty"
                 )
             
-            if settings.USE_S3_STORAGE:
-                # Upload to S3
+            use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
+            if use_s3:
                 from io import BytesIO
                 file_io = BytesIO(file_content)
-                
-                s3_data = s3_service.upload_submission_file(
-                    file_content=file_io,
-                    filename=upload_file.filename,
-                    submission_id=submission.id,
-                    student_id=current_user.id,
-                    assignment_id=assignment_id
-                )
-                
-                # Create file record with S3 data
+                try:
+                    s3_data = s3_service.upload_submission_file(
+                        file_content=file_io,
+                        filename=upload_file.filename,
+                        submission_id=submission.id,
+                        student_id=current_user.id,
+                        assignment_id=assignment_id
+                    )
+                except Exception as s3_err:
+                    logger.error(f"S3 upload failed for {upload_file.filename}: {s3_err}")
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"S3 storage failed: {str(s3_err)}. Check AWS credentials, bucket '{getattr(settings, 'AWS_S3_BUCKET_NAME', '')}' exists in region '{getattr(settings, 'AWS_REGION', '')}', and IAM has s3:PutObject."
+                    ) from s3_err
                 sub_file = SubmissionFile(
                     submission_id=submission.id,
                     filename=upload_file.filename,
                     original_filename=upload_file.filename,
-                    file_path=s3_data['s3_url'],  # Store S3 URL
-                    file_hash=s3_data['file_hash']
+                    file_path=s3_data['s3_url'],
+                    file_hash=s3_data['file_hash'],
+                    file_size_bytes=file_size
                 )
                 db.add(sub_file)
-                
                 uploaded_files_data.append({
                     'filename': upload_file.filename,
                     's3_url': s3_data['s3_url'],
                     's3_key': s3_data['s3_key']
                 })
-                
                 logger.info(f"File {upload_file.filename} uploaded to S3: {s3_data['s3_url']}")
-                
             else:
                 # Save to local storage
                 submission_dir = Path(settings.SUBMISSIONS_DIR) / str(submission.id)
@@ -452,7 +456,8 @@ async def create_submission(
                     filename=upload_file.filename,
                     original_filename=upload_file.filename,
                     file_path=str(file_path),
-                    file_hash=file_hash
+                    file_hash=file_hash,
+                    file_size_bytes=file_size
                 )
                 db.add(sub_file)
                 
@@ -485,24 +490,26 @@ async def create_submission(
     db.refresh(submission)
     
     logger.info(f"Submission {submission.id} created by user {current_user.id} for assignment {assignment_id}")
-    
-    try:
-        from app.tasks.grading import grade_submission_task, check_plagiarism_task
-        from celery import chain as celery_chain
-        task_chain = celery_chain(
-            grade_submission_task.si(submission.id),
-            check_plagiarism_task.si(submission.id),
-        )
-        task_chain.apply_async(queue="grading")
-        logger.info(f"Triggered Celery grading + plagiarism for submission {submission.id}")
-    except Exception as e:
-        logger.warning(f"Could not trigger Celery tasks for submission {submission.id}: {str(e)}")
+
+    # Dispatch Celery tasks in background so HTTP response returns immediately
+    # (avoids blocking on slow/unreachable Redis connection)
+    sub_id = submission.id
+
+    def _trigger_grading():
         try:
-            from app.tasks.grading import grade_submission_task
-            grade_submission_task.apply_async(args=[submission.id], queue="grading")
-        except Exception:
-            pass
-    
+            from app.tasks.grading import grade_submission_task, check_plagiarism_task
+            from celery import chain as celery_chain
+            chain = celery_chain(
+                grade_submission_task.si(sub_id),
+                check_plagiarism_task.si(sub_id),
+            )
+            chain.apply_async(queue="grading")
+            logger.info(f"Triggered Celery grading + plagiarism for submission {sub_id}")
+        except Exception as e:
+            logger.warning(f"Could not trigger Celery for submission {sub_id}: {e}")
+
+    threading.Thread(target=_trigger_grading, daemon=True).start()
+
     return submission
 
 
@@ -662,7 +669,9 @@ def get_file_content(
     content = ""
     if settings.USE_S3_STORAGE and file_record.file_path.startswith("http"):
         try:
-            s3_key = file_record.file_path.split(".amazonaws.com/")[-1] if ".amazonaws.com/" in file_record.file_path else file_record.file_path
+            from urllib.parse import unquote
+            raw = file_record.file_path.split(".amazonaws.com/")[-1] if ".amazonaws.com/" in file_record.file_path else file_record.file_path
+            s3_key = unquote(raw.split("?")[0])
             import tempfile as tmpf
             with tmpf.NamedTemporaryFile(delete=False, suffix=file_record.filename) as tmp:
                 s3_service.download_submission_file(s3_key, tmp.name)

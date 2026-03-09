@@ -37,7 +37,7 @@ services:
       dockerfile: Dockerfile
     container_name: kriterion-backend
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-kriterion}:${POSTGRES_PASSWORD:-kriterion_dev_password}@db:5432/${POSTGRES_DB:-kriterion}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-kriterion}:${POSTGRES_PASSWORD:-kriterion_dev_password}@db:5432/${POSTGRES_DB:-kriterion}}
       - SECRET_KEY=${SECRET_KEY}
       - BACKEND_CORS_ORIGINS=["http://localhost:3000","http://frontend:3000"]
       - ENVIRONMENT=${ENVIRONMENT:-development}
@@ -67,7 +67,7 @@ services:
       dockerfile: Dockerfile
     container_name: kriterion-celery-worker
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-kriterion}:${POSTGRES_PASSWORD:-kriterion_dev_password}@db:5432/${POSTGRES_DB:-kriterion}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-kriterion}:${POSTGRES_PASSWORD:-kriterion_dev_password}@db:5432/${POSTGRES_DB:-kriterion}}
       - SECRET_KEY=${SECRET_KEY}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
@@ -92,7 +92,7 @@ services:
       dockerfile: Dockerfile
     container_name: kriterion-celery-beat
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-kriterion}:${POSTGRES_PASSWORD:-kriterion_dev_password}@db:5432/${POSTGRES_DB:-kriterion}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-kriterion}:${POSTGRES_PASSWORD:-kriterion_dev_password}@db:5432/${POSTGRES_DB:-kriterion}}
       - SECRET_KEY=${SECRET_KEY}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0

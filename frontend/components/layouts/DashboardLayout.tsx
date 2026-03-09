@@ -222,6 +222,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     const navItems = getNavItems(user.role);
     const topNavItems = getTopNavItems(user.role);
     const isAdmin = user.role === 'ADMIN';
+    const isAdminDashboard = isAdmin && (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/'));
 
     // For students, remove the primary learning nav from the sidebar since we show it in the top nav
     // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu
@@ -258,8 +259,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
     return (
         <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-            {/* Sidebar (used only for admin; students and faculty use top nav only) */}
-            {user.role === 'ADMIN' && (
+            {/* Sidebar (used only for admin; students and faculty use top nav only).
+                Hide sidebar on the main admin dashboard for a cleaner, top-nav-only layout. */}
+            {user.role === 'ADMIN' && !isAdminDashboard && (
                 <>
                     {/* Mobile sidebar backdrop */}
                     {sidebarOpen && (
@@ -358,12 +360,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             )}
 
             {/* Main Content */}
-            <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${isAdmin ? 'lg:pl-72' : ''}`}>
+            <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${isAdmin && !isAdminDashboard ? 'lg:pl-72' : ''}`}>
                 {/* Top Header */}
                 <header className="flex-shrink-0 z-30 bg-white border-b border-gray-200 shadow-sm">
                     <div className="px-3 sm:px-4 lg:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 min-w-0">
                         {/* Left side */}
-                        {isAdmin ? (
+                        {isAdmin && !isAdminDashboard ? (
                             <button
                                 onClick={() => setSidebarOpen(true)}
                                 className="rounded-md p-2 text-gray-500 hover:bg-gray-100 lg:hidden"
