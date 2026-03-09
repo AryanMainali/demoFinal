@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from '@/lib/api-client';
 import { DataTable } from '@/components/ui/data-table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -58,22 +59,22 @@ export default function UsersPage() {
         queryFn: () => apiClient.getUsers(roleFilter || undefined),
     });
 
-    const deleteMutation = useMutation({
+    const deleteMutation = useMutationWithInvalidation({
         mutationFn: (userId: number) => apiClient.deleteUser(userId),
+        invalidateGroups: ['allUsers', 'allDashboards'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['users'] });
             setDeleteModal({ open: false });
         },
     });
 
-    const activateMutation = useMutation({
+    const activateMutation = useMutationWithInvalidation({
         mutationFn: (userId: number) => apiClient.activateUser(userId),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+        invalidateGroups: ['allUsers'],
     });
 
-    const deactivateMutation = useMutation({
+    const deactivateMutation = useMutationWithInvalidation({
         mutationFn: (userId: number) => apiClient.deactivateUser(userId),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+        invalidateGroups: ['allUsers'],
     });
 
     const resetPasswordMutation = useMutation({

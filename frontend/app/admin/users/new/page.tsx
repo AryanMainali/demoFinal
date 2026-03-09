@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AdminLayout } from "@/components/layouts/AdminLayout";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from "@/lib/api-client";
 import {
   Card,
@@ -23,7 +23,6 @@ import Link from "next/link";
 
 export default function NewUserPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [error, setError] = useState("");
 
   const [formData, setFormData] = useState({
@@ -36,7 +35,7 @@ export default function NewUserPage() {
     send_welcome_email: true,
   });
 
-    const createMutation = useMutation({
+    const createMutation = useMutationWithInvalidation({
         mutationFn: (data: typeof formData) => apiClient.createUser({
             email: data.email,
             password: data.password,
@@ -46,8 +45,8 @@ export default function NewUserPage() {
             is_active: data.is_active,
             send_welcome_email: data.send_welcome_email,
         }),
+        invalidateGroups: ['allUsers', 'allDashboards'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['users'] });
             router.push('/admin/users');
         },
         onError: (err: any) => {

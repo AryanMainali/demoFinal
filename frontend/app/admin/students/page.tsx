@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from '@/lib/api-client';
 import { DataTable } from '@/components/ui/data-table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -47,7 +48,6 @@ interface Student {
 }
 
 export default function StudentsPage() {
-    const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('all');
     const [selectedCourse, setSelectedCourse] = useState('');
@@ -64,9 +64,9 @@ export default function StudentsPage() {
         queryFn: () => apiClient.getCourses(),
     });
 
-    const deleteMutation = useMutation({
+    const deleteMutation = useMutationWithInvalidation({
         mutationFn: (userId: number) => apiClient.deleteUser(userId),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+        invalidateGroups: ['allUsers', 'allDashboards'],
     });
 
     const filteredStudents = students.filter((student: Student) =>

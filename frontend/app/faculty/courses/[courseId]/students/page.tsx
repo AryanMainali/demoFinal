@@ -3,7 +3,9 @@
 import React, { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
+import { queryKeys } from '@/lib/query-keys';
 import apiClient from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,7 +48,6 @@ const formatGrade = (grade: number | null | undefined) => {
 
 export default function CourseStudentsPage() {
     const params = useParams();
-    const queryClient = useQueryClient();
     const courseId = Number(params?.courseId);
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -86,15 +87,14 @@ export default function CourseStudentsPage() {
         enabled: !!courseId,
     });
 
-    const invalidateCourse = () => {
-        queryClient.invalidateQueries({ queryKey: ['course', courseId] });
-    };
-
-    const makeInactiveMutation = useMutation({
+    const makeInactiveMutation = useMutationWithInvalidation({
         mutationFn: (studentId: number) => apiClient.unenrollStudent(courseId, studentId),
+        invalidateKeys: [
+            queryKeys.courses.students(courseId),
+            queryKeys.courses.detail(courseId),
+        ],
+        invalidateGroups: ['allUsers'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['course-students', courseId] });
-            invalidateCourse();
             setInactiveTarget(null);
             showNotification('success', 'Student marked as inactive for this course.');
         },

@@ -395,13 +395,14 @@ class ApiClient {
         const assignments = await this.getAssignments();
         return (assignments || [])
             .filter((a: { is_published?: boolean; due_date?: string }) => a.is_published !== false && a.due_date)
-            .map((a: { id: number; title: string; due_date: string; course?: { code?: string; name?: string } }) => ({
+            .map((a: { id: number; title: string; due_date: string; course_id?: number; course?: { id?: number; code?: string; name?: string } }) => ({
                 id: a.id,
                 title: a.title,
                 date: (a.due_date || '').slice(0, 10),
                 event_type: 'deadline',
                 course_code: a.course?.code,
                 course_name: a.course?.name,
+                course_id: a.course_id || a.course?.id,
             }));
     }
 

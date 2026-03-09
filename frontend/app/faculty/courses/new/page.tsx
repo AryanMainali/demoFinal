@@ -9,7 +9,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -62,7 +63,6 @@ const initialForm: FormData = {
 export default function NewCoursePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const queryClient = useQueryClient();
     const editId = searchParams.get('edit') ? parseInt(searchParams.get('edit')!, 10) : null;
     const isEdit = Boolean(editId && !isNaN(editId));
 
@@ -99,7 +99,7 @@ export default function NewCoursePage() {
         }
     }, [isEdit, course]);
 
-    const createMutation = useMutation({
+    const createMutation = useMutationWithInvalidation({
         mutationFn: (data: FormData) => {
             const payload: Record<string, unknown> = {
                 code: data.code.trim().toUpperCase(),
@@ -117,8 +117,8 @@ export default function NewCoursePage() {
             if (data.end_date) payload.end_date = new Date(data.end_date).toISOString();
             return apiClient.createCourse(payload);
         },
+        invalidateGroups: ['allCourses', 'allDashboards'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['faculty-courses'] });
             router.push('/faculty/courses');
         },
         onError: (err: any) => {
@@ -138,7 +138,7 @@ export default function NewCoursePage() {
         },
     });
 
-    const updateMutation = useMutation({
+    const updateMutation = useMutationWithInvalidation({
         mutationFn: (data: FormData) => {
             const payload: Record<string, unknown> = {
                 code: data.code.trim().toUpperCase(),
@@ -159,8 +159,8 @@ export default function NewCoursePage() {
             else payload.end_date = null;
             return apiClient.updateCourse(editId!, payload);
         },
+        invalidateGroups: ['allCourses', 'allDashboards'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['faculty-courses'] });
             router.push('/faculty/courses');
         },
         onError: (err: any) => {
