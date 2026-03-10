@@ -302,6 +302,9 @@ async def create_assignment(
     try:
         assignment_in = AssignmentCreate(**json.loads(assignment_data))
 
+        if assignment_in.start_date and assignment_in.start_date > assignment_in.due_date:
+            raise HTTPException(status_code=422, detail="Start date must be on or before due date")
+
         course = db.query(Course).filter(Course.id == assignment_in.course_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -481,6 +484,11 @@ def update_assignment(
     
     if "difficulty" in update_data and isinstance(update_data["difficulty"], str):
         update_data["difficulty"] = update_data["difficulty"].lower()
+
+    effective_start_date = update_data.get("start_date", assignment.start_date)
+    effective_due_date = update_data.get("due_date", assignment.due_date)
+    if effective_start_date and effective_due_date and effective_start_date > effective_due_date:
+        raise HTTPException(status_code=422, detail="Start date must be on or before due date")
         
     for field, value in update_data.items():
         setattr(assignment, field, value)

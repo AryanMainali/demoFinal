@@ -28,7 +28,7 @@ class Assignment(Base):
     __tablename__ = "assignments"
     
     id = Column(Integer, primary_key=True, index=True)
-    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
     
     # Basic info
     title = Column(String(255), nullable=False)
@@ -46,6 +46,7 @@ class Assignment(Base):
     difficulty = Column(Enum(DifficultyLevel), default=DifficultyLevel.MEDIUM)
     
     # Due date & late policy
+    start_date = Column(DateTime, nullable=True)
     due_date = Column(DateTime, nullable=False)
     allow_late = Column(Boolean, default=True)
     late_penalty_per_day = Column(Float, default=10.0)  # Percentage

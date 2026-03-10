@@ -5,21 +5,23 @@ import { useParams, useRouter } from 'next/navigation';
 import apiClient from '@/lib/api-client';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Modal, ModalFooter } from '@/components/ui/modal';
 import { cn } from '@/lib/utils';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { assignmentCreateSchema } from '@/lib/validation';
 import type { z } from 'zod';
+import { format as formatDate } from 'date-fns';
 
 type AssignmentCreateForm = z.infer<typeof assignmentCreateSchema>;
 
 import {
     FileText,
     Code,
-    Calendar,
+    Calendar as CalendarIcon,
     Award,
     Settings,
     Users,
@@ -89,6 +91,14 @@ type AttachmentFile = {
     id: string;
 };
 
+const parseDateTimeInput = (value?: string): Date | null => {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const toDateTimeInput = (date: Date): string => formatDate(date, "yyyy-MM-dd'T'HH:mm");
+
 export default function NewAssignmentPage() {
     const router = useRouter();
     const params = useParams();
@@ -119,7 +129,7 @@ export default function NewAssignmentPage() {
     const [isDragging, setIsDragging] = useState(false);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
-    const { register, handleSubmit, formState: { errors }, watch, setValue } = useForm<AssignmentCreateForm>({
+    const { register, control, handleSubmit, formState: { errors }, watch, setValue } = useForm<AssignmentCreateForm>({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(assignmentCreateSchema) as any,
         defaultValues: {
@@ -128,6 +138,7 @@ export default function NewAssignmentPage() {
             language_id: undefined as unknown as number,
             description: '',
             instructions: '',
+            start_date: '',
             due_date: '',
             max_score: 100,
             passing_score: 60,
@@ -342,6 +353,7 @@ export default function NewAssignmentPage() {
         setErrorModalOpen(false);
         setLoading(true);
         try {
+            const startDateISO = values.start_date ? new Date(values.start_date).toISOString() : undefined;
             const dueDateISO = new Date(values.due_date).toISOString();
 
             const selectedLanguage = languages.find(lang => String(lang.id) === String(values.language_id));
@@ -399,6 +411,7 @@ export default function NewAssignmentPage() {
                 description: values.description.trim(),
                 instructions: values.instructions?.trim() || undefined,
                 language_id: parseInt(String(values.language_id), 10),
+                start_date: startDateISO,
                 due_date: dueDateISO,
                 max_score: values.max_score,
                 passing_score: values.passing_score,
@@ -522,12 +535,14 @@ export default function NewAssignmentPage() {
     // ─── Completion indicator ───
     const watchTitle = watch('title');
     const watchDesc = watch('description');
+    const watchStartDate = watch('start_date');
     const watchDueDate = watch('due_date');
 
     const completionSteps = [
         { label: 'Title', done: !!watchTitle?.trim() },
         { label: 'Language', done: !!watchLangId },
         { label: 'Description', done: !!watchDesc?.trim() },
+        { label: 'Start Date', done: !!watchStartDate },
         { label: 'Due Date', done: !!watchDueDate },
         ...((watchTestWeight ?? 0) > 0 ? [{ label: 'Test Cases', done: testCases.length > 0 }] : []),
     ];
@@ -753,20 +768,42 @@ export default function NewAssignmentPage() {
                             <CardHeader className="pb-0">
                                 <SectionHeader
                                     id="timing"
-                                    icon={Calendar}
+                                    icon={CalendarIcon}
                                     title="Timing & Scoring"
-                                    subtitle="Due date, score limits, and late submission policy"
+                                    subtitle="Start date, due date, score limits, and late submission policy"
                                 />
                             </CardHeader>
                             {expandedSections.has('timing') && (
                                 <CardContent className="pt-2 pb-6 space-y-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <Input
-                                            label="Due Date & Time"
-                                            type="datetime-local"
-                                            {...register('due_date')}
-                                            error={errors.due_date?.message}
-                                            required
+                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                                        <Controller
+                                            name="start_date"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Calendar
+                                                    label="Start Date & Time"
+                                                    selectedDate={parseDateTimeInput(field.value)}
+                                                    onDateChange={(date) => field.onChange(date ? toDateTimeInput(date) : '')}
+                                                    includeTime
+                                                    maxDate={parseDateTimeInput(watchDueDate) || undefined}
+                                                    error={errors.start_date?.message}
+                                                />
+                                            )}
+                                        />
+                                        <Controller
+                                            name="due_date"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Calendar
+                                                    label="Due Date & Time"
+                                                    selectedDate={parseDateTimeInput(field.value)}
+                                                    onDateChange={(date) => field.onChange(date ? toDateTimeInput(date) : '')}
+                                                    minDate={parseDateTimeInput(watchStartDate) || undefined}
+                                                    includeTime
+                                                    error={errors.due_date?.message}
+                                                    required
+                                                />
+                                            )}
                                         />
                                         <Input
                                             label="Maximum Score"

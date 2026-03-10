@@ -198,7 +198,7 @@ def get_course(
     db: Session = Depends(get_db)
 ):
     """Get course details"""
-    course = db.query(Course).filter(Course.id == course_id).first()
+    course = db.query(Course).options(joinedload(Course.instructor)).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -237,14 +237,11 @@ def get_course(
     students_count = db.query(Enrollment).filter(
         Enrollment.course_id == course_id,
         Enrollment.status == EnrollmentStatus.ACTIVE
-    ).count()
+    ).with_entities(func.count(Enrollment.id)).scalar() or 0
     
     assignments_count = db.query(Assignment).filter(
         Assignment.course_id == course_id
-    ).count()
-
-    # Fetch instructor
-    instructor = db.query(User).filter(User.id == course.instructor_id).first()
+    ).with_entities(func.count(Assignment.id)).scalar() or 0
     
     # Build response
     return CourseWithStats(
@@ -256,8 +253,8 @@ def get_course(
         semester=course.semester,
         year=course.year,
         instructor_id=course.instructor_id,
-        instructor_name=instructor.full_name if instructor else None,
-        instructor_email=instructor.email if instructor else None,
+        instructor_name=course.instructor.full_name if course.instructor else None,
+        instructor_email=course.instructor.email if course.instructor else None,
         is_active=course.is_active,
         status=course.status.value if hasattr(course.status, 'value') else str(course.status),
         students_count=students_count,
