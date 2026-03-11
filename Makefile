@@ -1,4 +1,4 @@
-.PHONY: help install build up down restart logs clean test migrate seed
+.PHONY: help install build up down restart logs clean test migrate migrate-local seed
 
 install: ## Install dependencies
 	@echo "Installing backend dependencies..."
@@ -70,6 +70,15 @@ migrate: ## Run database migrations
 migrate-create: ## Create a new migration
 	@read -p "Enter migration message: " msg; \
 	docker-compose exec backend alembic revision --autogenerate -m "$$msg"
+
+migrate-local: ## Run migrations against Supabase (local, no Docker; set DATABASE_URL in .env)
+	@echo "Running migrations (local → Supabase)..."
+	@if [ -d backend/.venv ]; then \
+		cd backend && .venv/bin/alembic upgrade head; \
+	else \
+		cd backend && alembic upgrade head; \
+	fi
+	@echo "Migrations complete!"
 
 seed: ## Seed database (Docker - requires backend container running)
 	@echo "Seeding database..."
