@@ -13,7 +13,7 @@ from pathlib import Path
 from app.api.deps import get_db, get_current_user, require_role
 from app.models import (
     User, UserRole, Assignment, Course, CourseAssistant, Submission, SubmissionFile, TestResult, RubricScore,
-    Enrollment, EnrollmentStatus, Group, GroupMembership, AuditLog
+    Enrollment, EnrollmentStatus, Group, GroupMembership, AuditLog, NotificationType
 )
 from app.models.assignment import Rubric, RubricCategory, RubricItem, TestCase
 from app.schemas.submission import (
@@ -28,6 +28,7 @@ from sqlalchemy.orm import joinedload
 from app.core.config import settings
 from app.core.logging import logger
 from app.services.grading import GradingService
+from app.services.notifications import create_notification, notify_users, get_assistant_ids_for_course
 from app.services.s3_storage import s3_service
 from app.services.notification import notify_faculty_submission_received, notify_student_grade_posted
 
@@ -486,6 +487,17 @@ async def create_submission(
         status="success"
     )
     db.add(audit_log)
+
+    grader_user_ids = set([assignment.course.instructor_id] + get_assistant_ids_for_course(db, assignment.course_id))
+    notify_users(
+        db,
+        user_ids=grader_user_ids,
+        notification_type=NotificationType.SUBMISSION_RECEIVED,
+        title=f"New submission: {assignment.title}",
+        message=f"{current_user.full_name or current_user.email} submitted attempt {attempt_number}.",
+        course_id=assignment.course_id,
+        assignment_id=assignment.id,
+    )
     
     db.commit()
     db.refresh(submission)
@@ -569,6 +581,19 @@ async def grade_submission(
             description=f"Submission graded: {result.get('status')}"
         )
         db.add(audit)
+
+        db.refresh(submission)
+        create_notification(
+            db,
+            user_id=submission.student_id,
+            notification_type=NotificationType.ASSIGNMENT_GRADED,
+            title=f"Assignment graded: {submission.assignment.title}",
+            message=f"Your submission has been graded. Latest score: {submission.final_score if submission.final_score is not None else 'available in gradebook'}.",
+            course_id=submission.assignment.course_id,
+            assignment_id=submission.assignment_id,
+            submission_id=submission.id,
+        )
+
         db.commit()
         
         return result
@@ -827,6 +852,18 @@ def save_manual_grade(
         description=f"Manual grade saved for submission {submission_id}: score={final_score}"
     )
     db.add(audit)
+
+    create_notification(
+        db,
+        user_id=submission.student_id,
+        notification_type=NotificationType.ASSIGNMENT_GRADED,
+        title=f"Assignment graded: {submission.assignment.title}",
+        message=f"Your submission has been graded. Latest score: {submission.final_score if submission.final_score is not None else 'available in gradebook'}.",
+        course_id=submission.assignment.course_id,
+        assignment_id=submission.assignment_id,
+        submission_id=submission.id,
+    )
+
     db.commit()
 
     return {"message": "Grade saved successfully", "submission_id": submission_id}
