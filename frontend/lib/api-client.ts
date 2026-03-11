@@ -450,6 +450,13 @@ class ApiClient {
         return response.data;
     }
 
+    async exportCourseReport(courseId: number) {
+        const response = await this.client.get(`/reports/course/${courseId}/export`, {
+            responseType: 'blob',
+        });
+        return response.data as Blob;
+    }
+
     // Admin endpoints
     async getUsers(role?: string) {
         const params = role ? { role } : {};
