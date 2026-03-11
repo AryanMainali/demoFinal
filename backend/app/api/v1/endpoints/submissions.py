@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.services.grading import GradingService
 from app.services.s3_storage import s3_service
+from app.services.notification import notify_faculty_submission_received, notify_student_grade_posted
 
 router = APIRouter()
 
@@ -489,6 +490,35 @@ async def create_submission(
     db.commit()
     db.refresh(submission)
     
+    # Send submission received notification to faculty/assistants
+    try:
+        notify_faculty_submission_received(
+            db=db,
+            course_id=assignment.course_id,
+            assignment_id=assignment.id,
+            student_name=current_user.full_name or "A student",
+            course_code=assignment.course.code,
+            faculty_id=assignment.course.instructor_id,
+        )
+        
+        # Also notify assigned assistants
+        assistants = db.query(CourseAssistant).filter(
+            CourseAssistant.course_id == assignment.course_id
+        ).all()
+        for assistant in assistants:
+            notify_faculty_submission_received(
+                db=db,
+                course_id=assignment.course_id,
+                assignment_id=assignment.id,
+                student_name=current_user.full_name or "A student",
+                course_code=assignment.course.code,
+                faculty_id=assistant.assistant_id,
+            )
+        
+        db.commit()
+    except Exception as notif_err:
+        logger.warning(f"Failed to send submission notifications: {str(notif_err)}")
+    
     logger.info(f"Submission {submission.id} created by user {current_user.id} for assignment {assignment_id}")
 
     # Dispatch Celery tasks in background so HTTP response returns immediately
@@ -578,6 +608,22 @@ def override_score(
     )
     db.add(audit)
     db.commit()
+    
+    # Send grade posted notification to student
+    try:
+        notify_student_grade_posted(
+            db=db,
+            student_id=submission.student_id,
+            course_code=submission.assignment.course.code,
+            assignment_title=submission.assignment.title,
+            score=new_score,
+            max_score=submission.assignment.max_score,
+            course_id=submission.assignment.course_id,
+            assignment_id=submission.assignment_id,
+        )
+        db.commit()
+    except Exception as notif_err:
+        logger.warning(f"Failed to send grade notification: {str(notif_err)}")
     
     logger.info(f"Score overridden for submission {submission_id} by user {current_user.id}")
     

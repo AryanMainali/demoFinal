@@ -14,6 +14,7 @@ import apiClient from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Calendar } from '@/components/ui/calendar';
 import { CourseLoadingPage, CourseLoadingSpinner } from '@/components/course/CourseLoading';
 import { ArrowLeft, AlertCircle } from 'lucide-react';
 
@@ -40,6 +41,20 @@ const toDateInput = (s: string | null | undefined): string => {
     if (!s) return '';
     const d = new Date(s);
     return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+};
+
+const toLocalDateInput = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const fromDateInput = (value: string): Date | null => {
+    if (!value) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -70,8 +85,11 @@ export default function NewCoursePage() {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formLoaded, setFormLoaded] = useState(!isEdit);
 
-    const minStartDate = isEdit ? undefined : today();
-    const minEndDate = form.start_date || (isEdit ? undefined : today());
+    const todayDate = fromDateInput(today()) || new Date();
+    const minStartDate = isEdit ? undefined : todayDate;
+    const minEndDate = form.start_date
+        ? fromDateInput(form.start_date) || (isEdit ? undefined : todayDate)
+        : (isEdit ? undefined : todayDate);
 
     const { data: course } = useQuery({
         queryKey: ['course', editId],
@@ -376,20 +394,19 @@ export default function NewCoursePage() {
 
                             {/* Dates */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <Input
+                                <Calendar
                                     label="Start Date"
-                                    type="date"
-                                    {...(minStartDate && { min: minStartDate })}
-                                    value={form.start_date}
-                                    onChange={(e) => update('start_date', e.target.value)}
+                                    selectedDate={fromDateInput(form.start_date)}
+                                    onDateChange={(date) => update('start_date', date ? toLocalDateInput(date) : '')}
+                                    minDate={minStartDate}
+                                    maxDate={form.end_date ? (fromDateInput(form.end_date) || undefined) : undefined}
                                     error={errors.start_date}
                                 />
-                                <Input
+                                <Calendar
                                     label="End Date"
-                                    type="date"
-                                    {...(minEndDate && { min: minEndDate })}
-                                    value={form.end_date}
-                                    onChange={(e) => update('end_date', e.target.value)}
+                                    selectedDate={fromDateInput(form.end_date)}
+                                    onDateChange={(date) => update('end_date', date ? toLocalDateInput(date) : '')}
+                                    minDate={minEndDate}
                                     error={errors.end_date}
                                 />
                             </div>
