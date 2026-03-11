@@ -1,6 +1,6 @@
 from typing import List, Optional, Any
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 # --- Test Case Schemas ---
 
@@ -93,6 +93,7 @@ class AssignmentBase(BaseModel):
     title: str
     description: str
     instructions: Optional[str] = None
+    start_date: Optional[datetime] = None
     due_date: datetime
     
     # Scoring
@@ -127,6 +128,12 @@ class AssignmentBase(BaseModel):
     
     is_published: bool = False
 
+    @model_validator(mode='after')
+    def validate_date_range(self):
+        if self.start_date and self.due_date and self.start_date > self.due_date:
+            raise ValueError('Start date must be on or before due date')
+        return self
+
 class AssignmentCreate(AssignmentBase):
     course_id: int
     language_id: int
@@ -138,6 +145,7 @@ class AssignmentUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     instructions: Optional[str] = None
+    start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     language_id: Optional[int] = None
     
@@ -168,6 +176,12 @@ class AssignmentUpdate(BaseModel):
     
     is_published: Optional[bool] = None
     rubric: Optional[RubricUpdate] = None
+
+    @model_validator(mode='after')
+    def validate_date_range(self):
+        if self.start_date and self.due_date and self.start_date > self.due_date:
+            raise ValueError('Start date must be on or before due date')
+        return self
 
 class CourseForAssignment(BaseModel):
     id: int

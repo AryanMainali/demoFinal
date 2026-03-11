@@ -9,11 +9,13 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Calendar } from '@/components/ui/calendar';
 import { CourseLoadingPage, CourseLoadingSpinner } from '@/components/course/CourseLoading';
 import { ArrowLeft, AlertCircle } from 'lucide-react';
 
@@ -42,6 +44,20 @@ const toDateInput = (s: string | null | undefined): string => {
     return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 };
 
+const toLocalDateInput = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const fromDateInput = (value: string): Date | null => {
+    if (!value) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day);
+};
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 const initialForm: FormData = {
@@ -62,7 +78,6 @@ const initialForm: FormData = {
 export default function NewCoursePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const queryClient = useQueryClient();
     const editId = searchParams.get('edit') ? parseInt(searchParams.get('edit')!, 10) : null;
     const isEdit = Boolean(editId && !isNaN(editId));
 
@@ -70,8 +85,11 @@ export default function NewCoursePage() {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formLoaded, setFormLoaded] = useState(!isEdit);
 
-    const minStartDate = isEdit ? undefined : today();
-    const minEndDate = form.start_date || (isEdit ? undefined : today());
+    const todayDate = fromDateInput(today()) || new Date();
+    const minStartDate = isEdit ? undefined : todayDate;
+    const minEndDate = form.start_date
+        ? fromDateInput(form.start_date) || (isEdit ? undefined : todayDate)
+        : (isEdit ? undefined : todayDate);
 
     const { data: course } = useQuery({
         queryKey: ['course', editId],
@@ -99,7 +117,7 @@ export default function NewCoursePage() {
         }
     }, [isEdit, course]);
 
-    const createMutation = useMutation({
+    const createMutation = useMutationWithInvalidation({
         mutationFn: (data: FormData) => {
             const payload: Record<string, unknown> = {
                 code: data.code.trim().toUpperCase(),
@@ -117,8 +135,8 @@ export default function NewCoursePage() {
             if (data.end_date) payload.end_date = new Date(data.end_date).toISOString();
             return apiClient.createCourse(payload);
         },
+        invalidateGroups: ['allCourses', 'allDashboards'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['faculty-courses'] });
             router.push('/faculty/courses');
         },
         onError: (err: any) => {
@@ -138,7 +156,7 @@ export default function NewCoursePage() {
         },
     });
 
-    const updateMutation = useMutation({
+    const updateMutation = useMutationWithInvalidation({
         mutationFn: (data: FormData) => {
             const payload: Record<string, unknown> = {
                 code: data.code.trim().toUpperCase(),
@@ -159,8 +177,8 @@ export default function NewCoursePage() {
             else payload.end_date = null;
             return apiClient.updateCourse(editId!, payload);
         },
+        invalidateGroups: ['allCourses', 'allDashboards'],
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['faculty-courses'] });
             router.push('/faculty/courses');
         },
         onError: (err: any) => {
@@ -376,20 +394,19 @@ export default function NewCoursePage() {
 
                             {/* Dates */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <Input
+                                <Calendar
                                     label="Start Date"
-                                    type="date"
-                                    {...(minStartDate && { min: minStartDate })}
-                                    value={form.start_date}
-                                    onChange={(e) => update('start_date', e.target.value)}
+                                    selectedDate={fromDateInput(form.start_date)}
+                                    onDateChange={(date) => update('start_date', date ? toLocalDateInput(date) : '')}
+                                    minDate={minStartDate}
+                                    maxDate={form.end_date ? (fromDateInput(form.end_date) || undefined) : undefined}
                                     error={errors.start_date}
                                 />
-                                <Input
+                                <Calendar
                                     label="End Date"
-                                    type="date"
-                                    {...(minEndDate && { min: minEndDate })}
-                                    value={form.end_date}
-                                    onChange={(e) => update('end_date', e.target.value)}
+                                    selectedDate={fromDateInput(form.end_date)}
+                                    onDateChange={(date) => update('end_date', date ? toLocalDateInput(date) : '')}
+                                    minDate={minEndDate}
                                     error={errors.end_date}
                                 />
                             </div>

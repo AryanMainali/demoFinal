@@ -1,7 +1,7 @@
 """
 Notification Model - In-app notifications for users
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum as PyEnum
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text, Enum
 from sqlalchemy.orm import relationship
@@ -13,6 +13,14 @@ class NotificationType(str, PyEnum):
     ASSIGNMENT_DUE = "assignment_due"
     ASSIGNMENT_GRADED = "assignment_graded"
     SUBMISSION_RECEIVED = "submission_received"
+    HOMEWORK_POSTED = "HOMEWORK_POSTED"
+    HOMEWORK_DUE = "HOMEWORK_DUE"
+    GRADE_POSTED = "GRADE_POSTED"
+    NEW_SUBMISSION_RECEIVED = "NEW_SUBMISSION_RECEIVED"
+    GRADING_PENDING = "GRADING_PENDING"
+    NEW_USER_REGISTERED = "NEW_USER_REGISTERED"
+    COURSE_APPROVAL_REQUIRED = "COURSE_APPROVAL_REQUIRED"
+    SYSTEM_ALERT = "SYSTEM_ALERT"
 
 
 class Notification(Base):
@@ -46,7 +54,7 @@ class Notification(Base):
     email_sent_at = Column(DateTime, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     
     def __repr__(self):
         return f"<Notification {self.type} for user {self.user_id}>"

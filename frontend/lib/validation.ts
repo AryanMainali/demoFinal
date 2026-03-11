@@ -90,6 +90,13 @@ export const assignmentCreateSchema = z.object({
     title: z.string().min(1, 'Title is required'),
     language_id: z.coerce.number().int().positive('Language is required'),
     description: z.string().min(1, 'Description is required'),
+    start_date: z
+        .string()
+        .optional()
+        .or(z.literal(''))
+        .refine((v: any) => !v || !Number.isNaN(Date.parse(v)), {
+            message: 'Invalid start date/time',
+        }),
     due_date: z
         .string()
         .min(1, 'Due date is required')
@@ -137,6 +144,13 @@ export const assignmentCreateSchema = z.object({
 .refine((data: any) => data.passing_score <= data.max_score, {
     message: 'Passing score cannot exceed max score',
     path: ['passing_score'],
+})
+.refine((data: any) => {
+    if (!data.start_date || !data.due_date) return true;
+    return new Date(data.start_date) <= new Date(data.due_date);
+}, {
+    message: 'Start date must be on or before due date',
+    path: ['start_date'],
 })
 .refine((data: any) => Math.abs((data.test_weight ?? 0) + (data.rubric_weight ?? 0) - 100) < 0.01, {
     message: 'Test weight and manual weight must sum to 100%',

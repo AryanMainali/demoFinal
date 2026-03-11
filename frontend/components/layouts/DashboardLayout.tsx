@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth, UserRole } from '@/contexts/AuthContext';
+import { NotificationButton } from '@/components/notifications/NotificationButton';
 
 interface NavItem {
     label: string;
@@ -202,6 +203,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
         if (closeSidebar) setSidebarOpen(false);
 
+        // If clicking the same route, just ensure content is visible
+        if (pathname === href || pathname.startsWith(href + '/')) {
+            setContentVisible(true);
+            return;
+        }
+
         // Respect reduced motion user preference
         if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
             router.push(href);
@@ -221,6 +228,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
     if (!user) return null;
 
+<<<<<<< HEAD
     const topNavItems = getTopNavItems(user.role);
     const isAdmin = user.role === 'ADMIN';
     const showSidebar = false;
@@ -229,6 +237,20 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     // For students, remove the primary learning nav from the sidebar since we show it in the top nav
     // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu
     const sidebarItems: NavItem[] = [];
+=======
+    const currentUser = user!;
+
+    const navItems = getNavItems(currentUser.role);
+    const topNavItems = getTopNavItems(currentUser.role);
+    const isAdmin = currentUser.role === 'ADMIN';
+    const isAdminDashboard = isAdmin && (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/'));
+
+    // For students, remove the primary learning nav from the sidebar since we show it in the top nav
+    // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu
+    const sidebarItems = currentUser.role === 'STUDENT'
+        ? navItems.filter(i => !['Dashboard', 'My Courses', 'Assignments', 'Grades', 'Progress', 'Schedule', 'Help', 'Settings'].includes(i.label))
+        : navItems;
+>>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
 
     const handleLogout = () => {
         logout();
@@ -259,8 +281,14 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
     return (
         <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
+<<<<<<< HEAD
             {/* Sidebar (used only for admin; students and faculty use top nav only) */}
             {showSidebar && (
+=======
+            {/* Sidebar (was used only for admin; students and faculty use top nav only).
+                We now hide it for all admin pages to match the faculty-style layout. */}
+            {user.role === 'ADMIN' && false && (
+>>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                 <>
                     {/* Mobile sidebar backdrop */}
                     {sidebarOpen && (
@@ -277,7 +305,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     >
                         {/* Logo Section */}
                         <div className="flex h-16 items-center justify-between border-b border-gray-200 px-4">
-                            <Link href={`/${user.role.toLowerCase()}/dashboard`} className="flex items-center gap-3">
+                            <Link href={`/${currentUser.role.toLowerCase()}/dashboard`} className="flex items-center gap-3">
                                 <div className="h-10 w-10 overflow-hidden rounded-lg bg-[#862733] flex items-center justify-center">
                                     <Image
                                         src="/logo.png"
@@ -301,18 +329,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                         <div className="border-b border-gray-200 p-4">
                             <div className="flex items-center gap-3">
                                 <div className="h-10 w-10 rounded-full bg-[#862733] flex items-center justify-center text-white font-semibold">
-                                    {user.full_name?.charAt(0).toUpperCase() || 'U'}
+                                    {currentUser.full_name?.charAt(0).toUpperCase() || 'U'}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <p className="truncate text-sm font-semibold text-gray-900">
-                                        {user.full_name}
+                                        {currentUser.full_name}
                                     </p>
-                                    <p className="truncate text-xs text-gray-500">{user.email}</p>
+                                    <p className="truncate text-xs text-gray-500">{currentUser.email}</p>
                                 </div>
                             </div>
                             <div className="mt-3">
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getRoleBadgeColor(user.role)}`}>
-                                    {user.role}
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${getRoleBadgeColor(currentUser.role)}`}>
+                                    {currentUser.role}
                                 </span>
                             </div>
                         </div>
@@ -359,13 +387,21 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             )}
 
             {/* Main Content */}
+<<<<<<< HEAD
             <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${showSidebar ? 'lg:pl-72' : ''}`}>
+=======
+            <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${isAdmin && false ? 'lg:pl-72' : ''}`}>
+>>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                 {/* Top Header */}
                 {(!isAdmin || showAdminTopNav) && (
                 <header className="flex-shrink-0 z-30 bg-white border-b border-gray-200 shadow-sm">
                     <div className="px-3 sm:px-4 lg:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 min-w-0">
                         {/* Left side */}
+<<<<<<< HEAD
                         {showSidebar ? (
+=======
+                        {isAdmin && false ? (
+>>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                             <button
                                 onClick={() => setSidebarOpen(true)}
                                 className="rounded-md p-2 text-gray-500 hover:bg-gray-100 lg:hidden"
@@ -412,12 +448,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
                         {/* Right side */}
                         <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-                            <button className="relative rounded-full p-1.5 sm:p-2 text-gray-500 hover:bg-gray-100 transition-colors" aria-label="Notifications">
-                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                                </svg>
-                                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
-                            </button>
+                            <NotificationButton role={user.role} />
 
                             <div className="relative" ref={userMenuRef}>
                                 <button

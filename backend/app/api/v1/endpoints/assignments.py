@@ -13,7 +13,7 @@ import asyncio
 from app.api.deps import get_db, get_current_user, require_role
 from app.models import (
     User, UserRole, Assignment, Course, CourseAssistant, Enrollment, EnrollmentStatus,
-    Rubric, RubricCategory, RubricItem, TestCase, AuditLog, Language
+    Rubric, RubricCategory, RubricItem, TestCase, AuditLog, Language, NotificationType
 )
 from app.schemas.assignment import (
     AssignmentCreate,
@@ -28,7 +28,9 @@ from app.schemas.assignment import (
 
 from app.core.logging import logger
 from app.services.autograding import autograding_service
+from app.services.notifications import notify_users, get_active_student_ids_for_course, get_assistant_ids_for_course
 from app.services.sandbox import sandbox_executor
+from app.services.notification import notify_course_students_assignment_posted
 from app.tasks.code_execution import run_code_task, compile_check_task
 from app.services.s3_storage import s3_service
 
@@ -301,6 +303,9 @@ async def create_assignment(
     try:
         assignment_in = AssignmentCreate(**json.loads(assignment_data))
 
+        if assignment_in.start_date and assignment_in.start_date > assignment_in.due_date:
+            raise HTTPException(status_code=422, detail="Start date must be on or before due date")
+
         course = db.query(Course).filter(Course.id == assignment_in.course_id).first()
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -435,6 +440,7 @@ async def create_assignment(
         )
         db.add(audit)
         db.commit()
+        
         db.refresh(assignment)
         assignment.course = course
         logger.info(f"Assignment {assignment.id} created by user {current_user.id}")
@@ -479,6 +485,11 @@ def update_assignment(
     
     if "difficulty" in update_data and isinstance(update_data["difficulty"], str):
         update_data["difficulty"] = update_data["difficulty"].lower()
+
+    effective_start_date = update_data.get("start_date", assignment.start_date)
+    effective_due_date = update_data.get("due_date", assignment.due_date)
+    if effective_start_date and effective_due_date and effective_start_date > effective_due_date:
+        raise HTTPException(status_code=422, detail="Start date must be on or before due date")
         
     for field, value in update_data.items():
         setattr(assignment, field, value)
@@ -513,6 +524,10 @@ def delete_assignment(
     if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
+    # Delete related notifications first to avoid foreign key constraint violation
+    from app.models.notification import Notification
+    db.query(Notification).filter(Notification.assignment_id == assignment_id).delete()
+    
     # Audit log before deletion
     audit = AuditLog(
         user_id=current_user.id,
@@ -534,7 +549,7 @@ def publish_assignment(
     current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
 ):
     """Publish an assignment to make it visible to students"""
-    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    assignment = db.query(Assignment).options(joinedload(Assignment.course)).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
     
@@ -542,6 +557,7 @@ def publish_assignment(
     if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     
+    was_published = bool(assignment.is_published)
     assignment.is_published = True
     
     # Audit log
@@ -551,6 +567,20 @@ def publish_assignment(
         description=f"Assignment '{assignment.title}' published"
     )
     db.add(audit)
+    
+    # Send notifications to enrolled students
+    try:
+        notify_course_students_assignment_posted(
+            db=db,
+            course_id=assignment.course_id,
+            assignment_id=assignment.id,
+            assignment_title=assignment.title,
+            course_code=assignment.course.code,
+        )
+    except Exception as notif_err:
+        logger.warning(f"Failed to send assignment notifications: {str(notif_err)}")
+    
+    # Commit all changes together
     db.commit()
     
     return {"message": "Assignment published successfully"}

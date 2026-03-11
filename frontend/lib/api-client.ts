@@ -299,8 +299,13 @@ class ApiClient {
         if (groupId) formData.append('group_id', groupId.toString());
         files.forEach((file) => formData.append('files', file));
 
+        // Must NOT send Content-Type for FormData - axios/browser sets multipart/form-data with boundary
         const response = await this.client.post('/submissions', formData, {
-            headers: { 'Content-Type': undefined as unknown as string },
+            headers: { 'Content-Type': undefined } as Record<string, string | undefined>,
+            transformRequest: [(data, headers) => {
+                if (data instanceof FormData && headers) delete headers['Content-Type'];
+                return data;
+            }],
         });
         return response.data;
     }
@@ -395,13 +400,14 @@ class ApiClient {
         const assignments = await this.getAssignments();
         return (assignments || [])
             .filter((a: { is_published?: boolean; due_date?: string }) => a.is_published !== false && a.due_date)
-            .map((a: { id: number; title: string; due_date: string; course?: { code?: string; name?: string } }) => ({
+            .map((a: { id: number; title: string; due_date: string; course_id?: number; course?: { id?: number; code?: string; name?: string } }) => ({
                 id: a.id,
                 title: a.title,
                 date: (a.due_date || '').slice(0, 10),
                 event_type: 'deadline',
                 course_code: a.course?.code,
                 course_name: a.course?.name,
+                course_id: a.course_id || a.course?.id,
             }));
     }
 
@@ -443,6 +449,13 @@ class ApiClient {
             responseType: 'blob',
         });
         return response.data;
+    }
+
+    async exportCourseReport(courseId: number) {
+        const response = await this.client.get(`/reports/course/${courseId}/export`, {
+            responseType: 'blob',
+        });
+        return response.data as Blob;
     }
 
     // Admin endpoints
@@ -554,6 +567,37 @@ class ApiClient {
         return response.data;
     }
 
+    async getNotifications(unreadOnly: boolean = false, limit: number = 20) {
+        const response = await this.client.get('/notifications', {
+            params: {
+                unread_only: unreadOnly,
+                limit,
+            },
+        });
+        return response.data as Array<{
+            id: number;
+            type: string;
+            title: string;
+            message: string;
+            link?: string | null;
+            course_id?: number | null;
+            assignment_id?: number | null;
+            submission_id?: number | null;
+            is_read: boolean;
+            created_at: string;
+        }>;
+    }
+
+    async markNotificationRead(notificationId: number) {
+        const response = await this.client.put(`/notifications/${notificationId}/read`);
+        return response.data;
+    }
+
+    async markAllNotificationsRead() {
+        const response = await this.client.put('/notifications/read-all');
+        return response.data;
+    }
+
     // Admin settings endpoints
     async getSettings() {
         const response = await this.client.get('/admin/settings');
@@ -599,6 +643,31 @@ class ApiClient {
         const response = await this.client.put(`/submissions/plagiarism-matches/${matchId}/review`, formData, {
             headers: { 'Content-Type': undefined as unknown as string },
         });
+        return response.data;
+    }
+
+    // Notification endpoints
+    async getNotifications(skip: number = 0, limit: number = 50) {
+        const response = await this.client.get('/notifications', {
+            params: { skip, limit }
+        });
+        return response.data;
+    }
+
+    async getUnreadNotificationCount() {
+        const response = await this.client.get('/notifications/unread/count');
+        return response.data;
+    }
+
+    async markNotificationAsRead(notificationId: number, isRead: boolean = true) {
+        const response = await this.client.patch(`/notifications/${notificationId}`, {
+            is_read: isRead
+        });
+        return response.data;
+    }
+
+    async markAllNotificationsAsRead() {
+        const response = await this.client.post('/notifications/mark-all-as-read');
         return response.data;
     }
 

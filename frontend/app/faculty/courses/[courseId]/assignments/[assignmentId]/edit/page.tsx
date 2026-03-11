@@ -7,16 +7,26 @@ import apiClient from '@/lib/api-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Calendar } from '@/components/ui/calendar';
 import { Select } from '@/components/ui/select';
 import {
     Loader2, ArrowLeft, Trash2, AlertCircle, Save, Eye, EyeOff,
     Clock, FileCode, Shield, Settings, ChevronDown, ChevronUp, CheckCircle2,
 } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { assignmentCreateSchema, type AssignmentCreateForm } from '@/lib/validation';
+import { format as formatDate } from 'date-fns';
 
 type Language = { id: number; name: string; version?: string; display_name?: string };
+
+const parseDateTimeInput = (value?: string): Date | null => {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const toDateTimeInput = (date: Date): string => formatDate(date, "yyyy-MM-dd'T'HH:mm");
 
 export default function EditAssignmentPage() {
     const router = useRouter();
@@ -47,7 +57,7 @@ export default function EditAssignmentPage() {
         enabled: !!assignmentId && !isNaN(assignmentId),
     });
 
-    const { register, handleSubmit, formState: { errors, isDirty }, watch, setValue, reset } = useForm<AssignmentCreateForm>({
+    const { register, control, handleSubmit, formState: { errors, isDirty }, watch, setValue, reset } = useForm<AssignmentCreateForm>({
         resolver: zodResolver(assignmentCreateSchema),
         defaultValues: {
             course_id: courseId,
@@ -55,7 +65,7 @@ export default function EditAssignmentPage() {
             language_id: undefined as unknown as number,
             starter_code: '', solution_code: '',
             max_score: 100, passing_score: 60, difficulty: 'medium',
-            due_date: '', allow_late: true, late_penalty_per_day: 10,
+            start_date: '', due_date: '', allow_late: true, late_penalty_per_day: 10,
             max_late_days: 7, max_attempts: 0, max_file_size_mb: 10,
             allowedExtensionsStr: '', requiredFilesStr: '',
             allow_groups: false, max_group_size: 4,
@@ -86,7 +96,8 @@ export default function EditAssignmentPage() {
         setValue('max_score', a.max_score ?? 100);
         setValue('passing_score', a.passing_score ?? 60);
         setValue('difficulty', a.difficulty ?? 'medium');
-        if (a.due_date) setValue('due_date', new Date(a.due_date).toISOString().slice(0, 16));
+        if (a.start_date) setValue('start_date', toDateTimeInput(new Date(a.start_date)));
+        if (a.due_date) setValue('due_date', toDateTimeInput(new Date(a.due_date)));
         setValue('allow_late', a.allow_late ?? true);
         setValue('late_penalty_per_day', a.late_penalty_per_day ?? 10);
         setValue('max_late_days', a.max_late_days ?? 7);
@@ -119,6 +130,7 @@ export default function EditAssignmentPage() {
                 max_score: values.max_score,
                 passing_score: values.passing_score,
                 difficulty: values.difficulty,
+                start_date: values.start_date ? new Date(values.start_date).toISOString() : null,
                 due_date: new Date(values.due_date).toISOString(),
                 allow_late: values.allow_late,
                 late_penalty_per_day: values.late_penalty_per_day,
@@ -172,6 +184,8 @@ export default function EditAssignmentPage() {
     });
 
     const onSubmit = (values: AssignmentCreateForm) => updateMutation.mutate(values);
+    const watchStartDate = watch('start_date');
+    const watchDueDate = watch('due_date');
 
     if (loadingAssignment) {
         return (
@@ -284,8 +298,36 @@ export default function EditAssignmentPage() {
                     <SectionHeader id="timing" icon={Clock} title="Timing & Scoring" />
                     {expandedSections.timing && (
                         <div className="px-6 pb-6 space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                                <Input label="Due Date" type="datetime-local" {...register('due_date')} error={errors.due_date?.message} required />
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                                <Controller
+                                    name="start_date"
+                                    control={control}
+                                    render={({ field }) => (
+                                        <Calendar
+                                            label="Start Date"
+                                            selectedDate={parseDateTimeInput(field.value)}
+                                            onDateChange={(date) => field.onChange(date ? toDateTimeInput(date) : '')}
+                                            includeTime
+                                            maxDate={parseDateTimeInput(watchDueDate) || undefined}
+                                            error={errors.start_date?.message}
+                                        />
+                                    )}
+                                />
+                                <Controller
+                                    name="due_date"
+                                    control={control}
+                                    render={({ field }) => (
+                                        <Calendar
+                                            label="Due Date"
+                                            selectedDate={parseDateTimeInput(field.value)}
+                                            onDateChange={(date) => field.onChange(date ? toDateTimeInput(date) : '')}
+                                            minDate={parseDateTimeInput(watchStartDate) || undefined}
+                                            includeTime
+                                            error={errors.due_date?.message}
+                                            required
+                                        />
+                                    )}
+                                />
                                 <Input label="Max Score" type="number" min={0} {...register('max_score', { valueAsNumber: true })} error={errors.max_score?.message} />
                                 <Input label="Passing Score" type="number" min={0} {...register('passing_score', { valueAsNumber: true })} error={errors.passing_score?.message} />
                             </div>
