@@ -48,6 +48,11 @@ interface Assignment {
     due_date?: string;
 }
 
+const isSubmissionGraded = (submission: SubmissionItem) => {
+    const status = String(submission.status || '').toLowerCase();
+    return submission.final_score != null || status === 'completed' || status === 'autograded' || status === 'graded';
+};
+
 const getScoreColor = (score: number, max: number) => {
     if (max <= 0) return 'text-gray-600';
     const pct = (score / max) * 100;
@@ -98,10 +103,18 @@ export default function AssistantAssignmentPage() {
     const studentsWithLatest = useMemo(() => {
         return Array.from(studentGroups.entries()).map(([studentId, subs]) => {
             const sorted = [...subs].sort(
-                (a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
+                (a, b) => {
+                    const submittedAtDiff = new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
+                    if (submittedAtDiff !== 0) return submittedAtDiff;
+
+                    const attemptDiff = (b.attempt_number || 0) - (a.attempt_number || 0);
+                    if (attemptDiff !== 0) return attemptDiff;
+
+                    return (b.id || 0) - (a.id || 0);
+                }
             );
             const latest = sorted[0];
-            const pending = latest.status !== 'completed';
+            const pending = !isSubmissionGraded(latest);
             return {
                 studentId,
                 student: latest.student || { id: studentId, full_name: 'Student', email: '' },

@@ -5,6 +5,9 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
+import { getAssignmentStatusSummaries } from '@/lib/course-report-utils';
+import { AssignmentAttentionBadges } from '@/components/ui/AssignmentAttentionBadges';
+import { BackLink } from '@/components/ui/BackLink';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,6 +47,17 @@ interface Assignment {
     allow_late: boolean;
     created_at: string;
     updated_at?: string;
+}
+
+interface CourseReport {
+    assignments?: { id: number; title: string; due_date?: string | null }[];
+    student_reports?: {
+        id: number;
+        assignment_grades?: {
+            assignment_id: number;
+            status: 'graded' | 'ungraded' | 'missing' | 'not_submitted';
+        }[];
+    }[];
 }
 
 const formatDate = (dateString: string) =>
@@ -105,6 +119,21 @@ export default function AssignmentsPage() {
         enabled: !!courseId && !isNaN(courseId),
     });
 
+    const { data: courseReport } = useQuery<CourseReport | null>({
+        queryKey: ['course-report', courseId],
+        queryFn: () => apiClient.getCourseReport(courseId),
+        enabled: !!courseId && !isNaN(courseId),
+    });
+
+    const assignmentSummaries = useMemo(
+        () => getAssignmentStatusSummaries(courseReport),
+        [courseReport],
+    );
+    const assignmentSummaryMap = useMemo(
+        () => new Map(assignmentSummaries.map((assignment) => [assignment.assignmentId, assignment])),
+        [assignmentSummaries],
+    );
+
     const assignments = useMemo(() => {
         const list = allAssignments as Assignment[];
         if (statusFilter === 'all') return list;
@@ -150,14 +179,18 @@ export default function AssignmentsPage() {
         const closed = all.filter(isClosed);
         const published = all.filter((a) => a.is_published && !isClosed(a));
         const drafts = all.filter((a) => !a.is_published);
+        const needsGrading = assignmentSummaries.reduce((sum, assignment) => sum + assignment.ungradedCount, 0);
+        const missing = assignmentSummaries.reduce((sum, assignment) => sum + assignment.missingCount, 0);
         return {
             total: all.length,
             published: published.length,
             drafts: drafts.length,
             closed: closed.length,
             overdue: closed.length,
+            needsGrading,
+            missing,
         };
-    }, [allAssignments]);
+    }, [allAssignments, assignmentSummaries]);
 
     if (isLoading) {
         return <CourseLoadingPage message="Loading assignments..." />;
@@ -170,12 +203,7 @@ export default function AssignmentsPage() {
                     {/* ─── Header ─── */}
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                         <div>
-                            <Link
-                                href={`/faculty/courses/${courseId}`}
-                                className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-sm mb-2 transition-colors"
-                            >
-                                ← Back to Overview
-                            </Link>
+                            <BackLink href={`/faculty/courses/${courseId}`} label="Back to Overview" className="mb-2" />
                             <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-3">
                                 <div className="p-2 bg-primary/10 rounded-xl">
                                     <FileText className="w-6 h-6 text-primary" />
@@ -203,7 +231,7 @@ export default function AssignmentsPage() {
                     </div>
 
                     {/* ─── Stat Cards ─── */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
                         <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStatusFilter('all')}>
                             <CardContent className="p-4">
                                 <div className="flex items-center gap-3">
@@ -255,6 +283,32 @@ export default function AssignmentsPage() {
                                     <div>
                                         <p className="text-2xl font-bold text-red-600">{stats.closed}</p>
                                         <p className="text-xs text-gray-500">Closed</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <Card className="hover:shadow-md transition-shadow">
+                            <CardContent className="p-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-yellow-100 flex items-center justify-center">
+                                        <Clock className="w-5 h-5 text-yellow-700" />
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-yellow-700">{stats.needsGrading}</p>
+                                        <p className="text-xs text-gray-500">Needs Grading</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <Card className="hover:shadow-md transition-shadow">
+                            <CardContent className="p-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                                        <AlertCircle className="w-5 h-5 text-red-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-bold text-red-600">{stats.missing}</p>
+                                        <p className="text-xs text-gray-500">Missing</p>
                                     </div>
                                 </div>
                             </CardContent>
@@ -321,6 +375,7 @@ export default function AssignmentsPage() {
                             {filteredAssignments.map((a: Assignment) => {
                                 const overdue = a.is_published && isOverdue(a.due_date);
                                 const upcoming = a.is_published && isUpcoming(a.due_date);
+                                const summary = assignmentSummaryMap.get(a.id);
 
                                 return (
                                     <Card key={a.id} className="hover:shadow-md transition-all group">
@@ -381,6 +436,14 @@ export default function AssignmentsPage() {
                                                                     </span>
                                                                 )}
                                                             </div>
+                                                            {summary && (
+                                                                <AssignmentAttentionBadges
+                                                                    ungradedCount={summary.ungradedCount}
+                                                                    missingCount={summary.missingCount}
+                                                                    compact
+                                                                    className="mt-3"
+                                                                />
+                                                            )}
                                                         </div>
 
                                                         <div className="flex items-center gap-4 flex-shrink-0">

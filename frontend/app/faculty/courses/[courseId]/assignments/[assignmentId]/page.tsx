@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
+import { BackLink } from '@/components/ui/BackLink';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -442,12 +443,12 @@ export default function AssignmentDetailPage() {
                     <div className="absolute -right-5 -bottom-5 w-28 h-28 rounded-full bg-white/10" />
                 </div>
                 <div className="relative z-10">
-                    <button
-                        onClick={() => router.push(`/faculty/courses/${courseId}/assignments`)}
-                        className="flex items-center gap-1.5 text-white/80 hover:text-white text-sm mb-4 transition-colors"
-                    >
-                        <ArrowLeft className="w-4 h-4" /> Back to Assignments
-                    </button>
+                    <BackLink
+                        href={`/faculty/courses/${courseId}/assignments`}
+                        label="Back to Assignments"
+                        className="mb-4"
+                        inverted
+                    />
 
                     <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
                         <div>

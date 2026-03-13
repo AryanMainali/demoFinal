@@ -27,7 +27,6 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
 
     return (
         <div className="space-y-6">
-            {/* Centered Tab Bar */}
             <div className="flex justify-center overflow-x-auto py-1">
                 <nav className="inline-flex items-center gap-1 p-1.5 rounded-2xl bg-gray-100/80 border border-gray-200/80 shadow-sm min-w-0">
                     {navItems.map((item) => {
@@ -68,7 +67,6 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
                 </nav>
             </div>
 
-            {/* Content */}
             <div className="w-full">{children}</div>
         </div>
     );
