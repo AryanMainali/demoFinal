@@ -111,6 +111,7 @@ export default function NewAssignmentPage() {
     const [error, setError] = useState<string | null>(null);
     const [errorModalOpen, setErrorModalOpen] = useState(false);
     const [successModalOpen, setSuccessModalOpen] = useState(false);
+    const [createdAssignmentId, setCreatedAssignmentId] = useState<number | null>(null);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(
         new Set(['basic', 'timing'])
     );
@@ -468,12 +469,13 @@ export default function NewAssignmentPage() {
             }
 
             const supplementaryFiles = attachmentFiles.map(af => af.file);
-            await apiClient.createAssignment(payload, {
+            const createdAssignment = await apiClient.createAssignment(payload, {
                 starterFile: starterFile ?? undefined,
                 solutionFile: solutionFile ?? undefined,
                 supplementaryFiles: supplementaryFiles.length > 0 ? supplementaryFiles : undefined,
             });
 
+            setCreatedAssignmentId(createdAssignment?.id ?? null);
             setSuccessModalOpen(true);
         } catch (err: unknown) {
             const axiosErr = err as { response?: { data?: { detail?: string | { msg?: string }[] } }; message?: string };
@@ -637,7 +639,11 @@ export default function NewAssignmentPage() {
                         isOpen={successModalOpen}
                         onClose={() => {
                             setSuccessModalOpen(false);
-                            router.push(`/faculty/courses/${courseId}/assignments`);
+                            if (createdAssignmentId) {
+                                router.push(`/faculty/courses/${courseId}/assignments/${createdAssignmentId}`);
+                            } else {
+                                router.push(`/faculty/courses/${courseId}/assignments`);
+                            }
                         }}
                         size="md"
                     >
@@ -662,12 +668,16 @@ export default function NewAssignmentPage() {
                                         type="button"
                                         onClick={() => {
                                             setSuccessModalOpen(false);
-                                            router.push(`/faculty/courses/${courseId}/assignments`);
+                                            if (createdAssignmentId) {
+                                                router.push(`/faculty/courses/${courseId}/assignments/${createdAssignmentId}`);
+                                            } else {
+                                                router.push(`/faculty/courses/${courseId}/assignments`);
+                                            }
                                         }}
                                         className="bg-primary hover:bg-primary/90 text-white px-8 gap-2"
                                     >
                                         <FileText className="w-4 h-4" />
-                                        View Assignments
+                                        View Assignment
                                     </Button>
                                 </ModalFooter>
                             </div>
