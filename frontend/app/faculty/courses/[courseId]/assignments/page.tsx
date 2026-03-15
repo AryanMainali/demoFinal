@@ -5,6 +5,9 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
+import { getAssignmentStatusSummaries } from '@/lib/course-report-utils';
+import { AssignmentAttentionBadges } from '@/components/ui/AssignmentAttentionBadges';
+import { BackLink } from '@/components/ui/BackLink';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,6 +42,17 @@ interface Assignment {
     allow_late: boolean;
     created_at: string;
     updated_at?: string;
+}
+
+interface CourseReport {
+    assignments?: { id: number; title: string; due_date?: string | null }[];
+    student_reports?: {
+        id: number;
+        assignment_grades?: {
+            assignment_id: number;
+            status: 'graded' | 'ungraded' | 'missing' | 'not_submitted';
+        }[];
+    }[];
 }
 
 
@@ -93,6 +107,21 @@ export default function AssignmentsPage() {
         enabled: !!courseId && !isNaN(courseId),
     });
 
+    const { data: courseReport } = useQuery<CourseReport | null>({
+        queryKey: ['course-report', courseId],
+        queryFn: () => apiClient.getCourseReport(courseId),
+        enabled: !!courseId && !isNaN(courseId),
+    });
+
+    const assignmentSummaries = useMemo(
+        () => getAssignmentStatusSummaries(courseReport),
+        [courseReport],
+    );
+    const assignmentSummaryMap = useMemo(
+        () => new Map(assignmentSummaries.map((assignment) => [assignment.assignmentId, assignment])),
+        [assignmentSummaries],
+    );
+
     const assignments = useMemo(() => {
         const list = allAssignments as Assignment[];
         if (statusFilter === 'all') return list;
@@ -138,12 +167,16 @@ export default function AssignmentsPage() {
         const closed = all.filter(isClosed);
         const published = all.filter((a) => a.is_published && !isClosed(a));
         const drafts = all.filter((a) => !a.is_published);
+        const needsGrading = assignmentSummaries.reduce((sum, assignment) => sum + assignment.ungradedCount, 0);
+        const missing = assignmentSummaries.reduce((sum, assignment) => sum + assignment.missingCount, 0);
         return {
             total: all.length,
             published: published.length,
             drafts: drafts.length,
             closed: closed.length,
             overdue: closed.length,
+            needsGrading,
+            missing,
         };
     }, [allAssignments]);
 

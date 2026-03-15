@@ -112,6 +112,7 @@ export default function NewAssignmentPage() {
     const [error, setError] = useState<string | null>(null);
     const [errorModalOpen, setErrorModalOpen] = useState(false);
     const [successModalOpen, setSuccessModalOpen] = useState(false);
+    const [createdAssignmentId, setCreatedAssignmentId] = useState<number | null>(null);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(
         new Set(['basic', 'timing'])
     );
@@ -502,12 +503,13 @@ export default function NewAssignmentPage() {
             }
 
             const supplementaryFiles = attachmentFiles.map(af => af.file);
-            await apiClient.createAssignment(payload, {
+            const createdAssignment = await apiClient.createAssignment(payload, {
                 starterFile: starterFile ?? undefined,
                 solutionFile: solutionFile ?? undefined,
                 supplementaryFiles: supplementaryFiles.length > 0 ? supplementaryFiles : undefined,
             });
 
+            setCreatedAssignmentId(createdAssignment?.id ?? null);
             setSuccessModalOpen(true);
         } catch (err: unknown) {
             const axiosErr = err as { response?: { data?: { detail?: string | { msg?: string }[] } }; message?: string };
