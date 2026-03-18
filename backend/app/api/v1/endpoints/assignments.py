@@ -1252,7 +1252,8 @@ async def run_assignment_code(
                     max_score=test_case.points,
                     output=raw_stdout[:2000] if show_details else None,
                     error=error_detail if show_details else ("failed" if not passed else None),
-                    expected_output=expected_output[:2000] if (is_faculty or (show_details and not passed)) else None,
+                    # Always show expected output so UI never renders \"(empty)\".
+                    expected_output=expected_output[:2000],
                     execution_time=execution_result.get("runtime", 0)
                 )
                 

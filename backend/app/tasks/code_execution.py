@@ -149,7 +149,8 @@ def run_code_task(
                         "max_score": test_case.points,
                         "output": execution_result.get("stdout", "")[:1000],
                         "error": execution_result.get("stderr", "")[:1000] if not execution_result.get("success") else None,
-                        "expected_output": expected_output if not passed else None,
+                        # Always include expected_output so UI can display it even when tests pass.
+                        "expected_output": expected_output,
                         "execution_time": execution_result.get("runtime", 0)
                     })
                     

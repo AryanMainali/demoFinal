@@ -174,8 +174,8 @@ export function AssignmentUpsertPage({
             due_date: '',
             max_score: 100,
             passing_score: 60,
-            rubric_min_points: 0,
-            rubric_max_points: 10,
+            rubric_min_points: 1,
+            rubric_max_points: 5,
             allow_late: true,
             late_penalty_per_day: 10,
             max_late_days: 7,
@@ -229,8 +229,8 @@ export function AssignmentUpsertPage({
                     due_date: existing.due_date ? toDateTimeInput(new Date(existing.due_date)) : '',
                     max_score: existing.max_score ?? 100,
                     passing_score: existing.passing_score ?? 60,
-                    rubric_min_points: existing.rubric_min_points ?? 0,
-                    rubric_max_points: existing.rubric_max_points ?? 10,
+                    rubric_min_points: existing.rubric_min_points ?? 1,
+                    rubric_max_points: existing.rubric_max_points ?? 5,
                     allow_late: existing.allow_late ?? true,
                     late_penalty_per_day: existing.late_penalty_per_day ?? 10,
                     max_late_days: existing.max_late_days ?? 7,
@@ -450,6 +450,21 @@ export function AssignmentUpsertPage({
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
 
+    const convertRubricPoints = (
+        rawPoints: number,
+        minScale: number,
+        maxScale: number,
+        assignmentMax: number,
+        rubricType: 'weighted' | 'unweighted',
+    ) => {
+        const clamped = Math.min(maxScale, Math.max(minScale, rawPoints));
+        if (rubricType === 'unweighted') {
+            return clamped;
+        }
+        if (maxScale <= minScale) return 0;
+        return ((clamped - minScale) / (maxScale - minScale)) * assignmentMax;
+    };
+
     // ─── Form Submit ───
     const onSubmit: SubmitHandler<AssignmentCreateForm> = async (values: AssignmentCreateForm) => {
         setError(null);
@@ -467,9 +482,9 @@ export function AssignmentUpsertPage({
             }
 
             if (rubricEnabled && rubricItems.length > 0) {
-                const pointsSum = rubricItems.reduce((s, i) => s + (Number(i.points) || 0), 0);
                 if (manualRubricType === 'unweighted') {
                     const maxScore = Number(values.max_score) || 100;
+                    const pointsSum = rubricItems.reduce((s, i) => s + (Number(i.points) || 0), 0);
                     if (Math.abs(pointsSum - maxScore) > 0.01) {
                         setError(`Rubric points must sum to ${maxScore}. Current total: ${pointsSum.toFixed(1)}.`);
                         setErrorModalOpen(true);
@@ -491,8 +506,12 @@ export function AssignmentUpsertPage({
                         setLoading(false);
                         return;
                     }
-                    if (Math.abs(pointsSum - maxScale) > 0.01) {
-                        setError(`Rubric points must sum to ${maxScale}. Current total: ${pointsSum.toFixed(1)}.`);
+                    const invalidItem = rubricItems.find((item) => {
+                        const pts = Number(item.points);
+                        return !Number.isFinite(pts) || pts < minScale || pts > maxScale;
+                    });
+                    if (invalidItem) {
+                        setError(`Each rubric criterion must stay between ${minScale} and ${maxScale}.`);
                         setErrorModalOpen(true);
                         setLoading(false);
                         return;
@@ -602,13 +621,14 @@ export function AssignmentUpsertPage({
 
             if (rubricEnabled && rubricItems.length > 0) {
                 const maxScore = Number(values.max_score) || 100;
+                const minScale = Number((values as any).rubric_min_points);
                 const maxScale = Number((values as any).rubric_max_points);
                 payload.rubric = {
                     items: rubricItems.map((item) => {
                         const points = Number(item.points) || 0;
                         const weight = manualRubricType === 'unweighted'
                             ? 0
-                            : (Number.isFinite(maxScale) && maxScale > 0 ? (points / maxScale) * 100 : 0);
+                            : convertRubricPoints(points, minScale, maxScale, 100, 'weighted');
                         return {
                             name: item.name.trim(),
                             description: (item.description || '').trim() || undefined,
@@ -714,11 +734,19 @@ export function AssignmentUpsertPage({
     const watchRubricMaxRaw = (watch as any)('rubric_max_points');
     const watchRubricMin = Number.isFinite(watchRubricMinRaw) ? Number(watchRubricMinRaw) : Number(watchRubricMinRaw);
     const watchRubricMax = Number.isFinite(watchRubricMaxRaw) ? Number(watchRubricMaxRaw) : Number(watchRubricMaxRaw);
-    const rubricTotalTarget = manualRubricType === 'unweighted' ? watchMaxScore : watchRubricMax;
     const rubricRangeLabel = manualRubricType === 'unweighted'
         ? `0–${watchMaxScore}`
         : `${Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}–${Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}`;
-    const rubricTotalSum = rubricItems.reduce((s, i) => s + (Number(i.points) || 0), 0);
+    const rubricConvertedTotal = rubricItems.reduce(
+        (s, i) => s + convertRubricPoints(
+            Number(i.points) || 0,
+            Number.isFinite(watchRubricMin) ? watchRubricMin : 1,
+            Number.isFinite(watchRubricMax) ? watchRubricMax : 5,
+            watchMaxScore,
+            manualRubricType,
+        ),
+        0,
+    );
     const isRubricScaleReady = manualRubricType === 'unweighted'
         ? Number.isFinite(watchMaxScore) && watchMaxScore > 0
         : Number.isFinite(watchRubricMin) && Number.isFinite(watchRubricMax) && watchRubricMax > watchRubricMin;
@@ -1457,24 +1485,22 @@ export function AssignmentUpsertPage({
                                                     {manualRubricType === 'weighted' ? (
                                                         <>
                                                             <div className="mt-0.5">
-                                                                Min: <span className="font-semibold">{Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}</span> · Max:{' '}
-                                                                <span className="font-semibold">{Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}</span> · Total must equal{' '}
-                                                                <span className="font-semibold">{Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}</span>
+                                                        Min: <span className="font-semibold">{Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}</span> · Max:{' '}
+                                                        <span className="font-semibold">{Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}</span> · 1 maps to 0 pts, 5 maps to 100 pts
                                                             </div>
                                                             <div className="mt-0.5 text-blue-700/90">
-                                                                Live conversion:{' '}
-                                                                <span className="font-semibold">
-                                                                    {rubricTotalSum.toFixed(1)} / {Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}
-                                                                </span>{' '}
-                                                                →{' '}
-                                                                <span className="font-semibold">{((Number.isFinite(watchRubricMax) && watchRubricMax > 0 ? rubricTotalSum / watchRubricMax : 0) * watchMaxScore).toFixed(1)} / {watchMaxScore}</span> pts
+                                                        Live conversion:{' '}
+                                                        <span className="font-semibold">
+                                                            {rubricConvertedTotal.toFixed(1)} / {watchMaxScore}
+                                                        </span>{' '}
+                                                        pts
                                                             </div>
                                                         </>
                                                     ) : (
                                                         <div className="mt-0.5 text-blue-700/90">
                                                             Total:{' '}
                                                             <span className="font-semibold">
-                                                                {rubricTotalSum.toFixed(1)} / {watchMaxScore}
+                                                                {rubricConvertedTotal.toFixed(1)} / {watchMaxScore}
                                                             </span>{' '}
                                                             pts
                                                         </div>
@@ -1521,30 +1547,11 @@ export function AssignmentUpsertPage({
                                                     <label className="block text-sm font-medium text-gray-700">Criteria</label>
                                                     {rubricItems.length > 0 && (
                                                         <span className="text-[11px] text-gray-600">
-                                                            <>Total:{' '}
-                                                                <span className={(() => {
-                                                                    const target = rubricTotalTarget;
-                                                                    const sum = rubricTotalSum;
-                                                                    if (Number.isFinite(target) && Math.abs(sum - target) < 0.01) return 'text-emerald-600 font-semibold';
-                                                                    if (Number.isFinite(target) && sum > target) return 'text-red-600 font-semibold';
-                                                                    return 'text-amber-600 font-semibold';
-                                                                })()}>
-                                                                    {rubricTotalSum.toFixed(1)} / {Number.isFinite(rubricTotalTarget) ? rubricTotalTarget : '—'}
-                                                                </span>
-                                                                <span className="text-gray-400"> · </span>
-                                                                <span className="text-gray-700">
-                                                                    {(() => {
-                                                                        const sum = rubricTotalSum;
-                                                                        const scaled = manualRubricType === 'weighted'
-                                                                            ? (Number.isFinite(watchRubricMax) && watchRubricMax > 0 ? (sum / watchRubricMax) * watchMaxScore : 0)
-                                                                            : sum;
-                                                                        return (
-                                                                            <>
-                                                                                {scaled.toFixed(1)} / {watchMaxScore} pts
-                                                                            </>
-                                                                        );
-                                                                    })()}
-                                                                </span>
+                                                            <>Converted total:{' '}
+                                                                <span className="text-emerald-600 font-semibold">
+                                                                    {rubricConvertedTotal.toFixed(1)} / {watchMaxScore}
+                                                                </span>{' '}
+                                                                pts
                                                             </>
                                                         </span>
                                                     )}
@@ -1590,7 +1597,7 @@ export function AssignmentUpsertPage({
                                                                     <div className="flex items-center gap-2 sm:w-[220px] justify-end">
                                                                         <span className="text-[11px] text-gray-500 whitespace-nowrap">
                                                                             {(() => {
-                                                                                const label = manualRubricType === 'weighted' ? 'Weight points' : 'Points';
+                                                                                const label = manualRubricType === 'weighted' ? 'Points' : 'Points';
                                                                                 return <>{label} ({manualRubricType === 'weighted' ? rubricRangeLabel : `0–${watchMaxScore}`})</>;
                                                                             })()}
                                                                         </span>
@@ -1613,9 +1620,13 @@ export function AssignmentUpsertPage({
                                                                         <span className="text-[11px] text-gray-500 whitespace-nowrap">
                                                                             {(() => {
                                                                                 const p = Number(item.points) || 0;
-                                                                                const scaled = manualRubricType === 'weighted'
-                                                                                    ? (Number.isFinite(watchRubricMax) && watchRubricMax > 0 ? (p / watchRubricMax) * watchMaxScore : 0)
-                                                                                    : p;
+                                                                                const scaled = convertRubricPoints(
+                                                                                    p,
+                                                                                    Number.isFinite(watchRubricMin) ? watchRubricMin : 1,
+                                                                                    Number.isFinite(watchRubricMax) ? watchRubricMax : 5,
+                                                                                    watchMaxScore,
+                                                                                    manualRubricType,
+                                                                                );
                                                                                 return <> = {scaled.toFixed(1)} pts</>;
                                                                             })()}
                                                                         </span>
