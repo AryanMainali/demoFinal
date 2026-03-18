@@ -84,9 +84,10 @@ export default function CourseStudentsPage() {
 
     const { data: course } = useQuery({
         queryKey: ['course', courseId],
-        queryFn: () => apiClient.getCourse(courseId) as Promise<{ code: string; name: string }>,
+        queryFn: () => apiClient.getCourse(courseId) as Promise<{ code: string; name: string; color?: string | null }>,
         enabled: !!courseId,
     });
+    const accentColor = course?.color || '#862733';
 
     const makeInactiveMutation = useMutationWithInvalidation({
         mutationFn: (studentId: number) => apiClient.unenrollStudent(courseId, studentId),
@@ -125,7 +126,7 @@ export default function CourseStudentsPage() {
             header: 'Student',
             cell: (s: StudentInCourse) => (
                 <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-[#862733]/10 flex items-center justify-center text-xs font-semibold text-[#862733] flex-shrink-0">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0" style={{ backgroundColor: `${accentColor}18`, color: accentColor }}>
                         {s.full_name
                             .split(' ')
                             .map(n => n[0])
@@ -214,22 +215,7 @@ export default function CourseStudentsPage() {
     return (
         <>
             <div className="space-y-6 pb-8">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div>
-                        <BackLink href={`/faculty/courses/${courseId}`} label="Back to Overview" className="mb-2" />
-                        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-3">
-                            <div className="p-2 bg-[#862733]/10 rounded-xl">
-                                <GraduationCap className="w-6 h-6 text-[#862733]" />
-                            </div>
-                            Students
-                        </h1>
-                        <p className="text-gray-500 mt-1">
-                            {activeStudents.length} active
-                            {droppedStudents.length > 0 ? ` · ${droppedStudents.length} inactive` : ''}
-                        </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                         <Button
                             variant="outline"
                             size="sm"
@@ -238,16 +224,15 @@ export default function CourseStudentsPage() {
                             className="gap-2"
                         >
                             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-                            <span className="hidden sm:inline">Refresh</span>
+                            Refresh
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => setEnrollModal(true)} className="gap-2">
                             <UserPlus className="w-4 h-4" /> Enroll
                         </Button>
-                        <Button size="sm" onClick={() => setBulkEnrollModal(true)} className="gap-2 bg-[#862733] hover:bg-[#a03040]">
+                        <Button size="sm" onClick={() => setBulkEnrollModal(true)} className="gap-2 text-white" style={{ backgroundColor: accentColor }}>
                             <Upload className="w-4 h-4" /> Bulk Enroll
                         </Button>
                     </div>
-                </div>
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

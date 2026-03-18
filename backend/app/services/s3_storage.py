@@ -292,16 +292,6 @@ class S3StorageService:
         content_types = {
             '.py': 'text/x-python',
             '.java': 'text/x-java',
-            '.js': 'application/javascript',
-            '.ts': 'application/typescript',
-            '.cpp': 'text/x-c++src',
-            '.c': 'text/x-csrc',
-            '.h': 'text/x-chdr',
-            '.hpp': 'text/x-c++hdr',
-            '.txt': 'text/plain',
-            '.md': 'text/markdown',
-            '.pdf': 'application/pdf',
-            '.zip': 'application/zip',
         }
         return content_types.get(file_extension.lower(), 'application/octet-stream')
 

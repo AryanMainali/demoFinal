@@ -100,12 +100,20 @@ const parseDateTimeInput = (value?: string): Date | null => {
 
 const toDateTimeInput = (date: Date): string => formatDate(date, "yyyy-MM-dd'T'HH:mm");
 
-export default function NewAssignmentPage() {
+export function AssignmentUpsertPage({
+    mode,
+    assignmentId: assignmentIdProp,
+}: {
+    mode: 'create' | 'edit';
+    assignmentId?: number;
+}) {
     const router = useRouter();
     const params = useParams();
     const courseParam = params?.courseId as string | string[] | undefined;
     const courseIdStr = Array.isArray(courseParam) ? (courseParam[0] ?? '') : (courseParam ?? '');
     const courseId = useMemo(() => parseInt(courseIdStr, 10), [courseIdStr]);
+    const assignmentId = assignmentIdProp ?? Number.NaN;
+    const isEditMode = mode === 'edit' && !Number.isNaN(assignmentId);
 
     const [languages, setLanguages] = useState<Language[]>([]);
     const [loading, setLoading] = useState(false);
@@ -121,9 +129,9 @@ export default function NewAssignmentPage() {
     const [testCases, setTestCases] = useState<TestCase[]>([]);
     const [testInputMode, setTestInputMode] = useState<'stdin' | 'file'>('stdin');
 
-    // Rubric: 'weight' = criteria weights sum to 100%; 'points' = criteria points sum to max_score
+    // Rubric: points must sum to 10 (scaled to max score)
     const [rubricEnabled, setRubricEnabled] = useState(false);
-    const [rubricMode, setRubricMode] = useState<'weight' | 'points'>('weight');
+    const [manualRubricType, setManualRubricType] = useState<'weighted' | 'unweighted'>('weighted');
     const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
     const [rubricLibrary, setRubricLibrary] = useState<RubricLibraryItem[]>([]);
 
@@ -149,14 +157,13 @@ export default function NewAssignmentPage() {
         };
     }, []);
 
-    // File uploads
-    const [starterFile, setStarterFile] = useState<File | null>(null);
-    const [solutionFile, setSolutionFile] = useState<File | null>(null);
+    // Utility files (uploaded to S3 as supplementary materials)
     const [attachmentFiles, setAttachmentFiles] = useState<AttachmentFile[]>([]);
+    const [existingUtilityFiles, setExistingUtilityFiles] = useState<{ filename: string; download_url: string; size: number }[]>([]);
     const [isDragging, setIsDragging] = useState(false);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
-    const { register, control, handleSubmit, formState: { errors }, watch, setValue } = useForm<AssignmentCreateForm>({
+    const { register, control, handleSubmit, formState: { errors }, watch, setValue, reset } = useForm<AssignmentCreateForm>({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(assignmentCreateSchema) as any,
         defaultValues: {
@@ -167,6 +174,8 @@ export default function NewAssignmentPage() {
             due_date: '',
             max_score: 100,
             passing_score: 60,
+            rubric_min_points: 0,
+            rubric_max_points: 10,
             allow_late: true,
             late_penalty_per_day: 10,
             max_late_days: 7,
@@ -194,6 +203,97 @@ export default function NewAssignmentPage() {
         };
         loadLanguages();
     }, []);
+
+    // If editing, load existing assignment and prefill the same form
+    useEffect(() => {
+        if (!isEditMode || !assignmentId || !courseId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const existing: any = await apiClient.getAssignment(assignmentId);
+                if (cancelled || !existing) return;
+                // Load existing utility files (supplementary materials)
+                try {
+                    const files = await apiClient.getAssignmentSupplementaryFiles(assignmentId);
+                    if (!cancelled && Array.isArray(files)) {
+                        setExistingUtilityFiles(files);
+                    }
+                } catch {
+                    // ignore
+                }
+                reset({
+                    title: existing.title ?? '',
+                    language_id: existing.language_id ?? existing.language?.id,
+                    description: existing.description ?? '',
+                    instructions: existing.instructions ?? '',
+                    due_date: existing.due_date ? toDateTimeInput(new Date(existing.due_date)) : '',
+                    max_score: existing.max_score ?? 100,
+                    passing_score: existing.passing_score ?? 60,
+                    rubric_min_points: existing.rubric_min_points ?? 0,
+                    rubric_max_points: existing.rubric_max_points ?? 10,
+                    allow_late: existing.allow_late ?? true,
+                    late_penalty_per_day: existing.late_penalty_per_day ?? 10,
+                    max_late_days: existing.max_late_days ?? 7,
+                    max_attempts: existing.max_attempts ?? 10,
+                    max_file_size_mb: existing.max_file_size_mb ?? 10,
+                    allowedExtensionsStr: Array.isArray(existing.allowed_file_extensions)
+                        ? existing.allowed_file_extensions.join(', ')
+                        : '',
+                    allow_groups: existing.allow_groups ?? false,
+                    max_group_size: existing.max_group_size ?? 4,
+                    enable_plagiarism_check: existing.enable_plagiarism_check ?? true,
+                    plagiarism_threshold: existing.plagiarism_threshold ?? 30,
+                    enable_ai_detection: existing.enable_ai_detection ?? true,
+                    ai_detection_threshold: existing.ai_detection_threshold ?? 50,
+                    is_published: existing.is_published ?? false,
+                });
+
+                // Prefill test cases (text-based; file contents are not reloaded)
+                const existingTestCases: any[] = Array.isArray(existing.test_cases) ? existing.test_cases : [];
+                setTestCases(
+                    existingTestCases.map((tc, index) => ({
+                        name: tc.name || `Test Case ${index + 1}`,
+                        description: tc.description || '',
+                        input_type: (tc.input_type as 'stdin' | 'file') || 'stdin',
+                        input_data: tc.input_data || '',
+                        inputFiles: [],
+                        input_filenames: tc.input_filenames ?? [],
+                        expected_output_type: (tc.expected_output_type as 'text' | 'file') || 'text',
+                        expected_output: tc.expected_output || '',
+                        expectedFiles: [],
+                        is_hidden: tc.is_hidden ?? false,
+                        ignore_whitespace: tc.ignore_whitespace ?? true,
+                        ignore_case: tc.ignore_case ?? false,
+                        time_limit_seconds: tc.time_limit_seconds ?? null,
+                        memory_limit_mb: tc.memory_limit_mb ?? null,
+                        order: tc.order ?? index,
+                    })),
+                );
+
+                // Prefill rubric if present
+                const rubric = existing.rubric?.items ?? [];
+                if (Array.isArray(rubric) && rubric.length > 0) {
+                    setRubricEnabled(true);
+                    setManualRubricType(rubric.some((item: any) => Number(item.weight ?? 0) > 0) ? 'weighted' : 'unweighted');
+                    setRubricItems(
+                        rubric.map((item: any) => ({
+                            name: item.name ?? '',
+                            description: item.description ?? '',
+                            weight: item.weight ?? 0,
+                            points: Number(item.points ?? 0),
+                        })),
+                    );
+                }
+            } catch (e) {
+                console.error('Failed to load assignment for editing', e);
+                setError('Failed to load assignment for editing.');
+                setErrorModalOpen(true);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [isEditMode, assignmentId, courseId, reset]);
 
     const watchLangId = watch('language_id');
     useEffect(() => {
@@ -294,7 +394,21 @@ export default function NewAssignmentPage() {
     const updateRubricItem = (index: number, field: keyof RubricItem, value: string | number) => {
         setRubricItems(prev => {
             const updated = [...prev];
-            updated[index] = { ...updated[index], [field]: value };
+            if (field === 'points') {
+                const minRaw = (watch as any)('rubric_min_points');
+                const maxRaw = (watch as any)('rubric_max_points');
+                const minScale = typeof minRaw === 'number' ? minRaw : Number(minRaw);
+                const maxScale = typeof maxRaw === 'number' ? maxRaw : Number(maxRaw);
+                const v = typeof value === 'number' ? value : Number(value);
+                if (Number.isFinite(minScale) && Number.isFinite(maxScale) && Number.isFinite(v)) {
+                    const clamped = Math.min(maxScale, Math.max(minScale, v));
+                    updated[index] = { ...updated[index], [field]: clamped };
+                } else {
+                    updated[index] = { ...updated[index], [field]: Number.isFinite(v) ? v : 0 };
+                }
+            } else {
+                updated[index] = { ...updated[index], [field]: value };
+            }
             return updated;
         });
     };
@@ -353,28 +467,38 @@ export default function NewAssignmentPage() {
             }
 
             if (rubricEnabled && rubricItems.length > 0) {
-                const maxScore = Number(values.max_score) || 100;
-                if (rubricMode === 'weight') {
-                    const weightSum = rubricItems.reduce((s, i) => s + (i.weight || 0), 0);
-                    if (Math.abs(weightSum - 100) > 0.01) {
-                        setError(`Weights must sum to 100% (current total: ${weightSum.toFixed(1)}%).`);
+                const pointsSum = rubricItems.reduce((s, i) => s + (Number(i.points) || 0), 0);
+                if (manualRubricType === 'unweighted') {
+                    const maxScore = Number(values.max_score) || 100;
+                    if (Math.abs(pointsSum - maxScore) > 0.01) {
+                        setError(`Rubric points must sum to ${maxScore}. Current total: ${pointsSum.toFixed(1)}.`);
                         setErrorModalOpen(true);
                         setLoading(false);
                         return;
                     }
                 } else {
-                    const pointsSum = rubricItems.reduce((s, i) => s + (i.points || 0), 0);
-                    if (Math.abs(pointsSum - maxScore) > 0.01) {
-                        setError(`Points must sum to the assignment max score (${maxScore}). Current total: ${pointsSum.toFixed(1)}.`);
+                    const minScale = Number((values as any).rubric_min_points);
+                    const maxScale = Number((values as any).rubric_max_points);
+                    if (!Number.isFinite(minScale) || !Number.isFinite(maxScale)) {
+                        setError('Enter rubric min and max points before adding criteria.');
+                        setErrorModalOpen(true);
+                        setLoading(false);
+                        return;
+                    }
+                    if (maxScale <= minScale) {
+                        setError('Rubric max points must be greater than rubric min points.');
+                        setErrorModalOpen(true);
+                        setLoading(false);
+                        return;
+                    }
+                    if (Math.abs(pointsSum - maxScale) > 0.01) {
+                        setError(`Rubric points must sum to ${maxScale}. Current total: ${pointsSum.toFixed(1)}.`);
                         setErrorModalOpen(true);
                         setLoading(false);
                         return;
                     }
                 }
             }
-
-            const starter_code = '';
-            const solution_code = '';
 
             const allowed_file_extensions = (values.allowedExtensionsStr || '')
                 .split(',').map(s => s.trim()).filter(Boolean)
@@ -401,8 +525,6 @@ export default function NewAssignmentPage() {
                 plagiarism_threshold: values.plagiarism_threshold,
                 enable_ai_detection: values.enable_ai_detection,
                 ai_detection_threshold: values.ai_detection_threshold,
-                starter_code,
-                solution_code,
                 is_published: values.is_published,
             };
 
@@ -480,37 +602,52 @@ export default function NewAssignmentPage() {
 
             if (rubricEnabled && rubricItems.length > 0) {
                 const maxScore = Number(values.max_score) || 100;
+                const maxScale = Number((values as any).rubric_max_points);
                 payload.rubric = {
-                    items: rubricItems.map(item => {
-                        if (rubricMode === 'weight') {
-                            const w = item.weight ?? 0;
-                            return {
-                                name: item.name.trim(),
-                                description: (item.description || '').trim() || undefined,
-                                weight: w,
-                                points: (w / 100) * maxScore,
-                            };
-                        }
-                        const p = item.points ?? 0;
+                    items: rubricItems.map((item) => {
+                        const points = Number(item.points) || 0;
+                        const weight = manualRubricType === 'unweighted'
+                            ? 0
+                            : (Number.isFinite(maxScale) && maxScale > 0 ? (points / maxScale) * 100 : 0);
                         return {
                             name: item.name.trim(),
                             description: (item.description || '').trim() || undefined,
-                            weight: maxScore > 0 ? (p / maxScore) * 100 : 0,
-                            points: p,
+                            weight,
+                            points,
                         };
                     }),
                 };
+                if (manualRubricType === 'weighted') {
+                    payload.rubric_min_points = (values as any).rubric_min_points ?? 0;
+                    payload.rubric_max_points = (values as any).rubric_max_points ?? 10;
+                } else {
+                    payload.rubric_min_points = 0;
+                    payload.rubric_max_points = Number(values.max_score) || 100;
+                }
             }
 
             const supplementaryFiles = attachmentFiles.map(af => af.file);
-            const createdAssignment = await apiClient.createAssignment(payload, {
-                starterFile: starterFile ?? undefined,
-                solutionFile: solutionFile ?? undefined,
-                supplementaryFiles: supplementaryFiles.length > 0 ? supplementaryFiles : undefined,
-            });
 
-            setCreatedAssignmentId(createdAssignment?.id ?? null);
-            setSuccessModalOpen(true);
+            if (isEditMode && assignmentId) {
+                // Update existing assignment
+                await apiClient.updateAssignment(assignmentId, {
+                    ...payload,
+                    course_id: undefined, // course_id is immutable after creation
+                });
+                // Upload any newly added utility files
+                if (supplementaryFiles.length > 0) {
+                    await apiClient.addAssignmentSupplementaryFiles(assignmentId, supplementaryFiles);
+                }
+                setCreatedAssignmentId(assignmentId);
+                setSuccessModalOpen(true);
+            } else {
+                // Create new assignment
+                const createdAssignment = await apiClient.createAssignment(payload, {
+                    supplementaryFiles: supplementaryFiles.length > 0 ? supplementaryFiles : undefined,
+                });
+                setCreatedAssignmentId(createdAssignment?.id ?? null);
+                setSuccessModalOpen(true);
+            }
         } catch (err: unknown) {
             const axiosErr = err as { response?: { data?: { detail?: string | { msg?: string }[] } }; message?: string };
             console.error('Create assignment failed', err);
@@ -572,6 +709,19 @@ export default function NewAssignmentPage() {
     const watchTitle = watch('title');
     const watchDesc = watch('description');
     const watchDueDate = watch('due_date');
+    const watchMaxScore = Number(watch('max_score')) || 100;
+    const watchRubricMinRaw = (watch as any)('rubric_min_points');
+    const watchRubricMaxRaw = (watch as any)('rubric_max_points');
+    const watchRubricMin = Number.isFinite(watchRubricMinRaw) ? Number(watchRubricMinRaw) : Number(watchRubricMinRaw);
+    const watchRubricMax = Number.isFinite(watchRubricMaxRaw) ? Number(watchRubricMaxRaw) : Number(watchRubricMaxRaw);
+    const rubricTotalTarget = manualRubricType === 'unweighted' ? watchMaxScore : watchRubricMax;
+    const rubricRangeLabel = manualRubricType === 'unweighted'
+        ? `0–${watchMaxScore}`
+        : `${Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}–${Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}`;
+    const rubricTotalSum = rubricItems.reduce((s, i) => s + (Number(i.points) || 0), 0);
+    const isRubricScaleReady = manualRubricType === 'unweighted'
+        ? Number.isFinite(watchMaxScore) && watchMaxScore > 0
+        : Number.isFinite(watchRubricMin) && Number.isFinite(watchRubricMax) && watchRubricMax > watchRubricMin;
 
     const completionSteps = [
         { label: 'Title', done: !!watchTitle?.trim() },
@@ -593,10 +743,12 @@ export default function NewAssignmentPage() {
                                 <div className="p-2.5 bg-gradient-to-br from-primary to-primary/80 rounded-xl shadow-lg shadow-primary/20">
                                     <FileText className="w-7 h-7 text-white" />
                                 </div>
-                                Create New Assignment
+                                {isEditMode ? 'Edit Assignment' : 'Create New Assignment'}
                             </h1>
                             <p className="mt-2 text-gray-600">
-                                Design a comprehensive programming assignment for your students
+                                {isEditMode
+                                    ? 'Update details, tests, utility files, and grading settings'
+                                    : 'Design a comprehensive programming assignment for your students'}
                             </p>
                         </div>
                         <Button
@@ -640,7 +792,7 @@ export default function NewAssignmentPage() {
                 <Modal
                     isOpen={errorModalOpen}
                     onClose={() => { setErrorModalOpen(false); setError(null); }}
-                    title="Error Creating Assignment"
+                        title={isEditMode ? 'Error Saving Assignment' : 'Error Creating Assignment'}
                     description="Something went wrong. Please fix the issues below and try again."
                     size="md"
                 >
@@ -686,9 +838,13 @@ export default function NewAssignmentPage() {
                                 </div>
                             </div>
                             <div className="space-y-1">
-                                <h3 className="text-xl font-bold text-gray-900">Assignment created successfully!</h3>
+                                <h3 className="text-xl font-bold text-gray-900">
+                                    {isEditMode ? 'Assignment updated successfully!' : 'Assignment created successfully!'}
+                                </h3>
                                 <p className="text-sm text-gray-600 max-w-sm">
-                                    Your assignment has been saved. Students will see it once you publish it.
+                                    {isEditMode
+                                        ? 'Your changes have been saved.'
+                                        : 'Your assignment has been saved. Students will see it once you publish it.'}
                                 </p>
                             </div>
                             <ModalFooter className="border-t-0 pt-0 justify-center">
@@ -1241,78 +1397,108 @@ export default function NewAssignmentPage() {
 
                                 {rubricEnabled && (
                                     <>
-                                        {/* Mode: Weight (%) vs Points */}
-                                        <div className="space-y-2">
-                                            <label className="block text-sm font-medium text-gray-700">Scoring type</label>
-                                            <div className="grid grid-cols-2 gap-3">
+                                        {manualRubricType === 'weighted' ? (
+                                            !isRubricScaleReady ? (
+                                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                                    <span className="font-medium">First set rubric bounds.</span> Enter <span className="font-semibold">min</span> and <span className="font-semibold">max</span> points to unlock adding criteria.
+                                                </div>
+                                            ) : null
+                                        ) : (
+                                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                                                <span className="font-medium">Unweighted rubric.</span> Criteria points must add up to the assignment max score.
+                                            </div>
+                                        )}
+
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="text-xs font-medium text-gray-600">Manual rubric type</span>
+                                            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        const maxScore = Number(watch('max_score')) || 100;
-                                                        setRubricMode('weight');
-                                                        if (maxScore > 0 && rubricItems.some((i) => (i.points ?? 0) > 0)) {
-                                                            setRubricItems((prev) =>
-                                                                prev.map((i) => ({
-                                                                    ...i,
-                                                                    weight: ((i.points ?? 0) / maxScore) * 100,
-                                                                }))
-                                                            );
-                                                        }
-                                                    }}
-                                                    className={`relative flex flex-col items-start rounded-xl border-2 p-4 text-left transition-all ${rubricMode === 'weight'
-                                                            ? 'border-primary bg-primary/5 shadow-sm'
-                                                            : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50'
-                                                        }`}
-                                                >
-                                                    {rubricMode === 'weight' && (
-                                                        <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary" />
+                                                    onClick={() => setManualRubricType('weighted')}
+                                                    className={cn(
+                                                        'px-2.5 py-1 text-xs rounded-md transition-colors',
+                                                        manualRubricType === 'weighted'
+                                                            ? 'bg-gray-900 text-white'
+                                                            : 'text-gray-700 hover:bg-gray-100',
                                                     )}
-                                                    <span className="text-sm font-semibold text-gray-900">By weight</span>
-                                                    <span className="text-xs text-gray-500 mt-0.5">Criteria weights must total 100%</span>
+                                                >
+                                                    Weighted
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        const maxScore = Number(watch('max_score')) || 100;
-                                                        setRubricMode('points');
-                                                        if (rubricItems.some((i) => (i.weight ?? 0) > 0)) {
-                                                            setRubricItems((prev) =>
-                                                                prev.map((i) => ({
-                                                                    ...i,
-                                                                    points: ((i.weight ?? 0) / 100) * maxScore,
-                                                                }))
-                                                            );
-                                                        }
-                                                    }}
-                                                    className={`relative flex flex-col items-start rounded-xl border-2 p-4 text-left transition-all ${rubricMode === 'points'
-                                                            ? 'border-primary bg-primary/5 shadow-sm'
-                                                            : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50'
-                                                        }`}
-                                                >
-                                                    {rubricMode === 'points' && (
-                                                        <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary" />
+                                                    onClick={() => setManualRubricType('unweighted')}
+                                                    className={cn(
+                                                        'px-2.5 py-1 text-xs rounded-md transition-colors',
+                                                        manualRubricType === 'unweighted'
+                                                            ? 'bg-gray-900 text-white'
+                                                            : 'text-gray-700 hover:bg-gray-100',
                                                     )}
-                                                    <span className="text-sm font-semibold text-gray-900">By points</span>
-                                                    <span className="text-xs text-gray-500 mt-0.5">
-                                                        Criteria points must total max score ({watch('max_score') ?? 100})
-                                                    </span>
+                                                >
+                                                    Unweighted
                                                 </button>
+                                            </div>
+                                            {manualRubricType === 'unweighted' && (
+                                                <span className="text-[11px] text-gray-600">
+                                                    Unweighted rubric uses the assignment max score. Enter criterion points that sum to that total.
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        <div className={manualRubricType === 'unweighted' ? 'bg-blue-50 border border-blue-200 rounded-lg p-3' : 'bg-blue-50 border border-blue-200 rounded-lg p-3'}>
+                                            <div className="flex items-start gap-2">
+                                                <BookOpen className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                                                <div className="text-xs text-blue-700">
+                                                    <div className="font-medium text-blue-800">
+                                                        {manualRubricType === 'weighted'
+                                                            ? <>Enter rubric points on a <span className="font-semibold">{rubricRangeLabel}</span> scale.</>
+                                                            : <>Enter rubric points that add up to <span className="font-semibold">{watchMaxScore}</span> total.</>
+                                                        }
+                                                    </div>
+                                                    {manualRubricType === 'weighted' ? (
+                                                        <>
+                                                            <div className="mt-0.5">
+                                                                Min: <span className="font-semibold">{Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}</span> · Max:{' '}
+                                                                <span className="font-semibold">{Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}</span> · Total must equal{' '}
+                                                                <span className="font-semibold">{Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}</span>
+                                                            </div>
+                                                            <div className="mt-0.5 text-blue-700/90">
+                                                                Live conversion:{' '}
+                                                                <span className="font-semibold">
+                                                                    {rubricTotalSum.toFixed(1)} / {Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}
+                                                                </span>{' '}
+                                                                →{' '}
+                                                                <span className="font-semibold">{((Number.isFinite(watchRubricMax) && watchRubricMax > 0 ? rubricTotalSum / watchRubricMax : 0) * watchMaxScore).toFixed(1)} / {watchMaxScore}</span> pts
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <div className="mt-0.5 text-blue-700/90">
+                                                            Total:{' '}
+                                                            <span className="font-semibold">
+                                                                {rubricTotalSum.toFixed(1)} / {watchMaxScore}
+                                                            </span>{' '}
+                                                            pts
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
 
-                                        {rubricMode === 'weight' ? (
-                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                                <p className="text-xs text-amber-700 flex items-start gap-2">
-                                                    <BookOpen className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                                                    Enter a weight (%) for each criterion. The total must equal <span className="font-semibold">100%</span>.
-                                                </p>
-                                            </div>
-                                        ) : (
-                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                                <p className="text-xs text-blue-700 flex items-start gap-2">
-                                                    <BookOpen className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                                                    Enter points per criterion. The total must equal the assignment <span className="font-semibold">max score ({watch('max_score') ?? 100})</span>.
-                                                </p>
+                                        {manualRubricType === 'weighted' && (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <Input
+                                                    label="Rubric min points"
+                                                    type="number"
+                                                    step="0.5"
+                                                    min={0}
+                                                    {...(register as any)('rubric_min_points')}
+                                                />
+                                                <Input
+                                                    label="Rubric max points (total)"
+                                                    type="number"
+                                                    step="0.5"
+                                                    min={0.5}
+                                                    {...(register as any)('rubric_max_points')}
+                                                />
                                             </div>
                                         )}
 
@@ -1320,7 +1506,12 @@ export default function NewAssignmentPage() {
                                             <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50/50">
                                                 <Layers className="w-10 h-10 text-gray-400 mx-auto mb-3" />
                                                 <p className="text-sm text-gray-600 mb-4">Add grading criteria for manual scoring</p>
-                                                <Button type="button" onClick={addRubricItem} className="gap-2 h-9 rounded-md px-3">
+                                                <Button
+                                                    type="button"
+                                                    onClick={addRubricItem}
+                                                    disabled={!isRubricScaleReady}
+                                                    className="gap-2 h-9 rounded-md px-3"
+                                                >
                                                     <Plus className="w-4 h-4" /> Add grading criteria
                                                 </Button>
                                             </div>
@@ -1330,30 +1521,31 @@ export default function NewAssignmentPage() {
                                                     <label className="block text-sm font-medium text-gray-700">Criteria</label>
                                                     {rubricItems.length > 0 && (
                                                         <span className="text-[11px] text-gray-600">
-                                                            {rubricMode === 'weight' ? (
-                                                                <>Total:{' '}
-                                                                    <span className={(() => {
-                                                                        const sum = rubricItems.reduce((s, i) => s + (i.weight || 0), 0);
-                                                                        if (Math.abs(sum - 100) < 0.01) return 'text-emerald-600 font-semibold';
-                                                                        if (sum > 100) return 'text-red-600 font-semibold';
-                                                                        return 'text-amber-600 font-semibold';
-                                                                    })()}>
-                                                                        {rubricItems.reduce((s, i) => s + (i.weight || 0), 0).toFixed(1)}% / 100%
-                                                                    </span>
-                                                                </>
-                                                            ) : (
-                                                                <>Total:{' '}
-                                                                    <span className={(() => {
-                                                                        const maxScore = Number(watch('max_score')) || 100;
-                                                                        const sum = rubricItems.reduce((s, i) => s + (i.points || 0), 0);
-                                                                        if (Math.abs(sum - maxScore) < 0.01) return 'text-emerald-600 font-semibold';
-                                                                        if (sum > maxScore) return 'text-red-600 font-semibold';
-                                                                        return 'text-amber-600 font-semibold';
-                                                                    })()}>
-                                                                        {rubricItems.reduce((s, i) => s + (i.points || 0), 0).toFixed(1)} / {Number(watch('max_score')) || 100} pts
-                                                                    </span>
-                                                                </>
-                                                            )}
+                                                            <>Total:{' '}
+                                                                <span className={(() => {
+                                                                    const target = rubricTotalTarget;
+                                                                    const sum = rubricTotalSum;
+                                                                    if (Number.isFinite(target) && Math.abs(sum - target) < 0.01) return 'text-emerald-600 font-semibold';
+                                                                    if (Number.isFinite(target) && sum > target) return 'text-red-600 font-semibold';
+                                                                    return 'text-amber-600 font-semibold';
+                                                                })()}>
+                                                                    {rubricTotalSum.toFixed(1)} / {Number.isFinite(rubricTotalTarget) ? rubricTotalTarget : '—'}
+                                                                </span>
+                                                                <span className="text-gray-400"> · </span>
+                                                                <span className="text-gray-700">
+                                                                    {(() => {
+                                                                        const sum = rubricTotalSum;
+                                                                        const scaled = manualRubricType === 'weighted'
+                                                                            ? (Number.isFinite(watchRubricMax) && watchRubricMax > 0 ? (sum / watchRubricMax) * watchMaxScore : 0)
+                                                                            : sum;
+                                                                        return (
+                                                                            <>
+                                                                                {scaled.toFixed(1)} / {watchMaxScore} pts
+                                                                            </>
+                                                                        );
+                                                                    })()}
+                                                                </span>
+                                                            </>
                                                         </span>
                                                     )}
                                                 </div>
@@ -1395,46 +1587,39 @@ export default function NewAssignmentPage() {
                                                                         className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                                                                         placeholder="Criterion name"
                                                                     />
-                                                                    {rubricMode === 'weight' ? (
-                                                                        <div className="flex items-center gap-1.5 sm:w-28">
-                                                                            <span className="text-[11px] text-gray-500 whitespace-nowrap">Weight %</span>
-                                                                            <input
-                                                                                type="number"
-                                                                                min={0}
-                                                                                max={100}
-                                                                                step={0.5}
-                                                                                value={item.weight}
-                                                                                onChange={(e) =>
-                                                                                    updateRubricItem(
-                                                                                        index,
-                                                                                        'weight',
-                                                                                        isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value),
-                                                                                    )
-                                                                                }
-                                                                                className="w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                                                                placeholder="25"
-                                                                            />
-                                                                        </div>
-                                                                    ) : (
-                                                                        <div className="flex items-center gap-1.5 sm:w-28">
-                                                                            <span className="text-[11px] text-gray-500 whitespace-nowrap">Points</span>
-                                                                            <input
-                                                                                type="number"
-                                                                                min={0}
-                                                                                step={0.5}
-                                                                                value={item.points}
-                                                                                onChange={(e) =>
-                                                                                    updateRubricItem(
-                                                                                        index,
-                                                                                        'points',
-                                                                                        isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value),
-                                                                                    )
-                                                                                }
-                                                                                className="w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                                                                placeholder="25"
-                                                                            />
-                                                                        </div>
-                                                                    )}
+                                                                    <div className="flex items-center gap-2 sm:w-[220px] justify-end">
+                                                                        <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                                                                            {(() => {
+                                                                                const label = manualRubricType === 'weighted' ? 'Weight points' : 'Points';
+                                                                                return <>{label} ({manualRubricType === 'weighted' ? rubricRangeLabel : `0–${watchMaxScore}`})</>;
+                                                                            })()}
+                                                                        </span>
+                                                                        <input
+                                                                            type="number"
+                                                                            min={manualRubricType === 'weighted' ? (Number.isFinite(watchRubricMin) ? watchRubricMin : 0) : 0}
+                                                                            max={manualRubricType === 'weighted' ? (Number.isFinite(watchRubricMax) ? watchRubricMax : watchMaxScore) : watchMaxScore}
+                                                                            step={0.5}
+                                                                            value={item.points}
+                                                                            onChange={(e) =>
+                                                                                updateRubricItem(
+                                                                                    index,
+                                                                                    'points',
+                                                                                    isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value),
+                                                                                )
+                                                                            }
+                                                                            className="w-24 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                                                                            placeholder="3"
+                                                                        />
+                                                                        <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                                                                            {(() => {
+                                                                                const p = Number(item.points) || 0;
+                                                                                const scaled = manualRubricType === 'weighted'
+                                                                                    ? (Number.isFinite(watchRubricMax) && watchRubricMax > 0 ? (p / watchRubricMax) * watchMaxScore : 0)
+                                                                                    : p;
+                                                                                return <> = {scaled.toFixed(1)} pts</>;
+                                                                            })()}
+                                                                        </span>
+                                                                    </div>
                                                                 </div>
                                                                 <input
                                                                     type="text"
@@ -1460,6 +1645,7 @@ export default function NewAssignmentPage() {
                                                         variant="outline"
                                                         size="sm"
                                                         onClick={addRubricItem}
+                                                    disabled={!isRubricScaleReady}
                                                         className="h-8 gap-1.5 text-xs rounded-md"
                                                     >
                                                         <Plus className="w-3.5 h-3.5" /> Add another criterion
@@ -1629,96 +1815,14 @@ export default function NewAssignmentPage() {
                         )}
                     </Card>
 
-                    {/* ━━━ 8. Code Files ━━━ */}
-                    <Card className="overflow-hidden border-gray-200 shadow-sm">
-                        <CardHeader className="pb-0">
-                            <SectionHeader
-                                id="files"
-                                icon={FileCode}
-                                title="Starter & Solution Code"
-                                subtitle="Template code for students and your reference solution"
-                            />
-                        </CardHeader>
-                        {expandedSections.has('files') && (
-                            <CardContent className="pt-2 pb-6 space-y-5">
-                                {/* Starter Code */}
-                                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <FileCode className="w-4 h-4 text-primary" />
-                                        <span className="text-sm font-semibold text-gray-900">Starter Code File</span>
-                                    </div>
-                                    <input
-                                        type="file"
-                                        accept=".py,.java,.cpp,.c,.js,.ts,.rb,.go,.rs,.php,.h,.hpp"
-                                        onChange={(e) => setStarterFile(e.target.files?.[0] || null)}
-                                        className="block w-full text-sm text-gray-600
-                                                file:mr-4 file:py-2 file:px-4
-                                                file:rounded-lg file:border-0
-                                                file:text-sm file:font-semibold
-                                                file:bg-primary file:text-white
-                                                hover:file:bg-primary/90
-                                                file:transition-colors file:cursor-pointer
-                                                cursor-pointer border border-gray-300 rounded-lg
-                                                focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                    />
-                                    {starterFile && (
-                                        <div className="mt-2 flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg">
-                                            <CheckCircle2 className="w-4 h-4" />
-                                            <span className="font-medium truncate">{starterFile.name}</span>
-                                            <span className="text-green-500 text-xs">({formatFileSize(starterFile.size)})</span>
-                                            <button type="button" onClick={() => setStarterFile(null)} className="ml-auto text-red-500 hover:text-red-700">
-                                                <X className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    )}
-                                    <p className="mt-2 text-xs text-gray-500">Template code students will start with</p>
-                                </div>
-
-                                {/* Solution Code */}
-                                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Code className="w-4 h-4 text-primary" />
-                                        <span className="text-sm font-semibold text-gray-900">Solution Code File</span>
-                                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-medium bg-yellow-100 text-yellow-800">Faculty only</span>
-                                    </div>
-                                    <input
-                                        type="file"
-                                        accept=".py,.java,.cpp,.c,.js,.ts,.rb,.go,.rs,.php,.h,.hpp"
-                                        onChange={(e) => setSolutionFile(e.target.files?.[0] || null)}
-                                        className="block w-full text-sm text-gray-600
-                                                file:mr-4 file:py-2 file:px-4
-                                                file:rounded-lg file:border-0
-                                                file:text-sm file:font-semibold
-                                                file:bg-primary file:text-white
-                                                hover:file:bg-primary/90
-                                                file:transition-colors file:cursor-pointer
-                                                cursor-pointer border border-gray-300 rounded-lg
-                                                focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                    />
-                                    {solutionFile && (
-                                        <div className="mt-2 flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg">
-                                            <CheckCircle2 className="w-4 h-4" />
-                                            <span className="font-medium truncate">{solutionFile.name}</span>
-                                            <span className="text-green-500 text-xs">({formatFileSize(solutionFile.size)})</span>
-                                            <button type="button" onClick={() => setSolutionFile(null)} className="ml-auto text-red-500 hover:text-red-700">
-                                                <X className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    )}
-                                    <p className="mt-2 text-xs text-gray-500">Reference solution (never visible to students)</p>
-                                </div>
-                            </CardContent>
-                        )}
-                    </Card>
-
-                    {/* ━━━ 9. Attachments (S3 Upload) ━━━ */}
+                    {/* ━━━ Utility Files (S3 Upload) ━━━ */}
                     <Card className="overflow-hidden border-gray-200 shadow-sm">
                         <CardHeader className="pb-0">
                             <SectionHeader
                                 id="attachments"
                                 icon={Paperclip}
-                                title="Supplementary Materials"
-                                subtitle="Upload PDFs, images, datasets, or any files students need"
+                                title="Utility Files"
+                                subtitle="Upload datasets, helper files, PDFs, or anything students need"
                                 badge={attachmentFiles.length > 0 ? (
                                     <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-medium bg-[#862733]/10 text-[#862733]">
                                         {attachmentFiles.length} file{attachmentFiles.length !== 1 ? 's' : ''}
@@ -1728,12 +1832,25 @@ export default function NewAssignmentPage() {
                         </CardHeader>
                         {expandedSections.has('attachments') && (
                             <CardContent className="pt-2 pb-6 space-y-4">
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                    <p className="text-xs text-blue-700 flex items-start gap-2">
-                                        <Upload className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                                        Files are uploaded to secure cloud storage (AWS S3). Students will be able to download these materials from the assignment page.
-                                    </p>
-                                </div>
+                                {existingUtilityFiles.length > 0 && (
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                        <p className="text-xs font-medium text-gray-700 mb-2">Existing utility files</p>
+                                        <div className="space-y-1">
+                                            {existingUtilityFiles.map((f) => (
+                                                <a
+                                                    key={f.filename}
+                                                    href={f.download_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="flex items-center justify-between gap-3 text-xs text-gray-700 hover:text-gray-900"
+                                                >
+                                                    <span className="truncate">{f.filename}</span>
+                                                    <span className="text-gray-400 flex-shrink-0">{formatFileSize(f.size)}</span>
+                                                </a>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Drop zone */}
                                 <div
@@ -1761,7 +1878,7 @@ export default function NewAssignmentPage() {
                                         {isDragging ? 'Drop files here' : 'Drag & drop files or click to browse'}
                                     </p>
                                     <p className="text-xs text-gray-400 mt-1">
-                                        PDF, images, datasets, ZIP archives, etc.
+                                        Datasets, ZIP archives, PDFs, images, etc.
                                     </p>
                                 </div>
 
@@ -1855,12 +1972,12 @@ export default function NewAssignmentPage() {
                                     {loading ? (
                                         <span className="relative flex items-center gap-2.5">
                                             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                            <span className="animate-pulse">Creating...</span>
+                                            <span className="animate-pulse">{isEditMode ? 'Saving...' : 'Creating...'}</span>
                                         </span>
                                     ) : (
                                         <span className="relative flex items-center gap-2.5">
                                             <Save className="w-4 h-4" />
-                                            Create Assignment
+                                            {isEditMode ? 'Save Changes' : 'Create Assignment'}
                                         </span>
                                     )}
                                 </Button>
@@ -1871,4 +1988,8 @@ export default function NewAssignmentPage() {
             </div>
         </div>
     );
+}
+
+export default function NewAssignmentPage() {
+    return <AssignmentUpsertPage mode="create" />;
 }

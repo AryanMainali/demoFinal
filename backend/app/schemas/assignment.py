@@ -116,9 +116,9 @@ class AssignmentBase(BaseModel):
     enable_ai_detection: bool = True
     ai_detection_threshold: float = 50.0
     
-    # Code (starter_code also stores S3 attachment refs as JSON when files are uploaded)
-    starter_code: Optional[str] = None
-    solution_code: Optional[str] = None
+    # Manual rubric scale bounds (e.g. 0–10, 0–5, etc.)
+    rubric_min_points: float = 0.0
+    rubric_max_points: float = 10.0
     
     is_published: bool = False
 
@@ -161,8 +161,8 @@ class AssignmentUpdate(BaseModel):
     enable_ai_detection: Optional[bool] = None
     ai_detection_threshold: Optional[float] = None
     
-    starter_code: Optional[str] = None
-    solution_code: Optional[str] = None
+    rubric_min_points: Optional[float] = None
+    rubric_max_points: Optional[float] = None
     
     is_published: Optional[bool] = None
     test_cases: Optional[List[TestCaseCreate]] = None

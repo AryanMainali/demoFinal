@@ -52,10 +52,6 @@ export default function FacultyPage() {
     const [languagePermissions, setLanguagePermissions] = useState({
         python: true,
         java: true,
-        javascript: false,
-        cpp: false,
-        c: false,
-        csharp: false,
     });
 
     const { data: users = [], isLoading } = useQuery({
@@ -262,30 +258,6 @@ export default function FacultyPage() {
                                 onChange={(checked) => setLanguagePermissions(prev => ({ ...prev, java: checked }))}
                                 label="Java"
                                 description="Java 11+ programming language"
-                            />
-                            <Switch
-                                checked={languagePermissions.javascript}
-                                onChange={(checked) => setLanguagePermissions(prev => ({ ...prev, javascript: checked }))}
-                                label="JavaScript"
-                                description="Node.js JavaScript runtime"
-                            />
-                            <Switch
-                                checked={languagePermissions.cpp}
-                                onChange={(checked) => setLanguagePermissions(prev => ({ ...prev, cpp: checked }))}
-                                label="C++"
-                                description="C++17 programming language"
-                            />
-                            <Switch
-                                checked={languagePermissions.c}
-                                onChange={(checked) => setLanguagePermissions(prev => ({ ...prev, c: checked }))}
-                                label="C"
-                                description="C programming language"
-                            />
-                            <Switch
-                                checked={languagePermissions.csharp}
-                                onChange={(checked) => setLanguagePermissions(prev => ({ ...prev, csharp: checked }))}
-                                label="C#"
-                                description=".NET C# programming language"
                             />
                         </div>
                     </div>

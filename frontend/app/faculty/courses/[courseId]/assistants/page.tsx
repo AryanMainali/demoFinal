@@ -72,9 +72,10 @@ export default function CourseAssistantsPage() {
 
     const { data: course } = useQuery({
         queryKey: ['course', courseId],
-        queryFn: () => apiClient.getCourse(courseId) as Promise<{ code: string; name: string }>,
+        queryFn: () => apiClient.getCourse(courseId) as Promise<{ code: string; name: string; color?: string | null }>,
         enabled: !!courseId,
     });
+    const accentColor = course?.color || '#862733';
 
     const addAssistantMutation = useMutation({
         mutationFn: (email: string) => apiClient.addCourseAssistant(courseId, email),
@@ -111,7 +112,7 @@ export default function CourseAssistantsPage() {
             header: 'Assistant',
             cell: (a: AssistantInCourse) => (
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-sm font-semibold text-violet-700 flex-shrink-0">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0" style={{ backgroundColor: `${accentColor}20`, color: accentColor }}>
                         {(a.full_name || a.email)
                             .split(' ')
                             .map((n) => n[0])
@@ -170,49 +171,33 @@ export default function CourseAssistantsPage() {
     return (
         <>
             <div className="space-y-6 pb-8">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div>
-                        <BackLink href={`/faculty/courses/${courseId}`} label="Back to Overview" className="mb-2" />
-                        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-3">
-                            <div className="p-2 bg-violet-100 rounded-xl">
-                                <UserCog className="w-6 h-6 text-violet-600" />
-                            </div>
-                            Grading Assistants
-                        </h1>
-                        {course && (
-                            <p className="text-gray-500 mt-1">
-                                {course.code} · {course.name}
-                            </p>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => refetch()}
-                            disabled={isFetching}
-                            className="gap-2"
-                        >
-                            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-                            <span className="hidden sm:inline">Refresh</span>
-                        </Button>
-                        <Button
-                            size="sm"
-                            onClick={() => setAddModal(true)}
-                            className="gap-2 bg-[#862733] hover:bg-[#a03040]"
-                        >
-                            <UserPlus className="w-4 h-4" /> Add Assistant
-                        </Button>
-                    </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetch()}
+                        disabled={isFetching}
+                        className="gap-2"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </Button>
+                    <Button
+                        size="sm"
+                        onClick={() => setAddModal(true)}
+                        className="gap-2 text-white"
+                        style={{ backgroundColor: accentColor }}
+                    >
+                        <UserPlus className="w-4 h-4" /> Add Assistant
+                    </Button>
                 </div>
 
                 {/* Info Card */}
-                <Card className="border-0 shadow-md bg-gradient-to-r from-violet-50 to-purple-50">
+                <Card className="border border-gray-200 shadow-sm" style={{ background: `linear-gradient(to right, ${accentColor}08, ${accentColor}12)` }}>
                     <CardContent className="p-4">
                         <div className="flex items-start gap-3">
-                            <div className="p-2 bg-violet-100 rounded-lg">
-                                <ShieldCheck className="w-5 h-5 text-violet-600" />
+                            <div className="p-2 rounded-lg" style={{ backgroundColor: `${accentColor}20` }}>
+                                <ShieldCheck className="w-5 h-5" style={{ color: accentColor }} />
                             </div>
                             <div>
                                 <h3 className="font-medium text-gray-900 mb-1">What can Grading Assistants do?</h3>

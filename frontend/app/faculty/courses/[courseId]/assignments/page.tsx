@@ -182,6 +182,13 @@ export default function AssignmentsPage() {
 
 
 
+    const { data: course } = useQuery({
+        queryKey: ['course', courseId],
+        queryFn: () => apiClient.getCourse(courseId) as Promise<{ color?: string | null }>,
+        enabled: !!courseId,
+    });
+    const accentColor = course?.color || '#862733';
+
     if (isLoading) {
         return <CourseLoadingPage message="Loading assignments..." />;
     }
@@ -189,40 +196,22 @@ export default function AssignmentsPage() {
     return (
         <>
             <div className="space-y-6 pb-8">
-
-                {/* ─── Header ─── */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div>
-                        <Link
-                            href={`/faculty/courses/${courseId}`}
-                            className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-700 text-sm mb-2 transition-colors"
-                        >
-                            ← Back to Overview
-                        </Link>
-                        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-3">
-                            <div className="p-2 bg-primary/10 rounded-xl">
-                                <FileText className="w-6 h-6 text-primary" />
-                            </div>
-                            Assignments
-                        </h1>
-                        <p className="text-gray-500 mt-1">
-                            {stats.total} total &middot; {stats.published} published &middot; {stats.drafts} draft{stats.drafts !== 1 ? 's' : ''} &middot; {stats.closed} closed
-                        </p>
-                    </div>
-                    <div className="flex gap-2">
-                        <Button
-                            onClick={() => refetch()}
-                            disabled={isFetching}
-                            className="gap-2 border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 h-9 px-3"
-                        >
-                            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                        onClick={() => refetch()}
+                        disabled={isFetching}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </Button>
+                    <Link href={`/faculty/courses/${courseId}/assignments/new`}>
+                        <Button className="gap-2 h-9 text-white" style={{ backgroundColor: accentColor }}>
+                            <Plus className="w-4 h-4" /> New Assignment
                         </Button>
-                        <Link href={`/faculty/courses/${courseId}/assignments/new`}>
-                            <Button className="gap-2 h-9">
-                                <Plus className="w-4 h-4" /> New Assignment
-                            </Button>
-                        </Link>
-                    </div>
+                    </Link>
                 </div>
 
                 {/* ─── Stat Cards ─── */}
@@ -230,8 +219,8 @@ export default function AssignmentsPage() {
                     <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStatusFilter('all')}>
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                                    <FileText className="w-5 h-5 text-blue-600" />
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
+                                    <FileText className="w-5 h-5" style={{ color: accentColor }} />
                                 </div>
                                 <div>
                                     <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
@@ -243,11 +232,11 @@ export default function AssignmentsPage() {
                     <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStatusFilter('published')}>
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
-                                    <Eye className="w-5 h-5 text-green-600" />
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
+                                    <Eye className="w-5 h-5" style={{ color: accentColor }} />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold text-green-600">{stats.published}</p>
+                                    <p className="text-2xl font-bold text-gray-900">{stats.published}</p>
                                     <p className="text-xs text-gray-500">Published</p>
                                 </div>
                             </div>
@@ -256,11 +245,11 @@ export default function AssignmentsPage() {
                     <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStatusFilter('draft')}>
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
-                                    <EyeOff className="w-5 h-5 text-amber-600" />
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
+                                    <EyeOff className="w-5 h-5" style={{ color: accentColor }} />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold text-amber-600">{stats.drafts}</p>
+                                    <p className="text-2xl font-bold text-gray-900">{stats.drafts}</p>
                                     <p className="text-xs text-gray-500">Drafts</p>
                                 </div>
                             </div>
@@ -272,11 +261,11 @@ export default function AssignmentsPage() {
                     >
                         <CardContent className="p-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
-                                    <AlertCircle className="w-5 h-5 text-red-600" />
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
+                                    <AlertCircle className="w-5 h-5" style={{ color: accentColor }} />
                                 </div>
                                 <div>
-                                    <p className="text-2xl font-bold text-red-600">{stats.closed}</p>
+                                    <p className="text-2xl font-bold text-gray-900">{stats.closed}</p>
                                     <p className="text-xs text-gray-500">Closed</p>
                                 </div>
                             </div>
@@ -317,7 +306,7 @@ export default function AssignmentsPage() {
                     </CardContent>
                 </Card>
 
-                {/* ─── Assignment Cards ─── */}
+                {/* ─── Assignment Cards (scrollable) ─── */}
                 {filteredAssignments.length === 0 ? (
                     <Card>
                         <CardContent className="py-16 text-center">
@@ -340,7 +329,7 @@ export default function AssignmentsPage() {
                         </CardContent>
                     </Card>
                 ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                         {filteredAssignments.map((a: Assignment) => {
                             const overdue = a.is_published && isOverdue(a.due_date);
                             const upcoming = a.is_published && isUpcoming(a.due_date);

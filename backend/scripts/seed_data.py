@@ -113,7 +113,7 @@ COURSES = [
     {
         "code": "CS3030",
         "name": "Data Structures & Algorithms",
-        "description": "Trees, graphs, heaps, hash tables, and algorithm analysis. Implementations in C++.",
+        "description": "Trees, graphs, heaps, hash tables, and algorithm analysis. Implementations in Python and Java.",
         "section": "B",
         "semester": "Spring",
         "year": 2026,
@@ -121,7 +121,7 @@ COURSES = [
         "end_date": datetime(2026, 5, 8),
         "faculty_email": "mwilson@ulm.edu",
         "color": "#065F46",
-        "languages": ["cpp", "python"],
+        "languages": ["python", "java"],
     },
 ]
 
@@ -286,52 +286,7 @@ ASSIGNMENTS = [
         ],
     },
     # ── CS3030 ──
-    {
-        "course_code": "CS3030",
-        "title": "Binary Search",
-        "description": "Implement binary search on a sorted array in C++. Return the index of the target or -1 if not found.",
-        "instructions": (
-            "## Input\n"
-            "First line: N (size of array)\n"
-            "Second line: N space-separated sorted integers\n"
-            "Third line: target integer\n\n"
-            "## Output\n"
-            "Print the 0-based index of the target, or -1 if not found.\n"
-        ),
-        "language": "cpp",
-        "starter_code": "#include <iostream>\nusing namespace std;\n\nint binarySearch(int arr[], int n, int target) {\n    // Your code here\n    return -1;\n}\n\nint main() {\n    int n;\n    cin >> n;\n    int arr[n];\n    for(int i=0;i<n;i++) cin >> arr[i];\n    int target;\n    cin >> target;\n    cout << binarySearch(arr, n, target) << endl;\n    return 0;\n}\n",
-        "solution_code": "",
-        "max_score": 100.0,
-        "passing_score": 60.0,
-        "due_days": 10,
-        "test_cases": [
-            {"name": "Found middle", "input_data": "5\n1 3 5 7 9\n5", "expected_output": "2", "points": 25.0, "is_hidden": False, "order": 1},
-            {"name": "Found first", "input_data": "5\n1 3 5 7 9\n1", "expected_output": "0", "points": 25.0, "is_hidden": False, "order": 2},
-            {"name": "Not found", "input_data": "5\n1 3 5 7 9\n4", "expected_output": "-1", "points": 25.0, "is_hidden": True, "order": 3},
-            {"name": "Single element", "input_data": "1\n42\n42", "expected_output": "0", "points": 25.0, "is_hidden": True, "order": 4},
-        ],
-        "rubric_categories": [
-            {
-                "name": "Algorithm",
-                "description": "Correct O(log n) binary search",
-                "weight": 0.8,
-                "items": [
-                    {"name": "O(log n) time complexity", "max_points": 15.0},
-                    {"name": "Correct boundary handling", "max_points": 10.0},
-                    {"name": "Returns -1 when not found", "max_points": 5.0},
-                ],
-            },
-            {
-                "name": "Style",
-                "description": "Code quality",
-                "weight": 0.2,
-                "items": [
-                    {"name": "Clean variable names", "max_points": 5.0},
-                    {"name": "No unnecessary includes", "max_points": 5.0},
-                ],
-            },
-        ],
-    },
+    # Removed legacy C++ seeded assignment; only Python and Java are supported.
 ]
 
 
@@ -532,8 +487,6 @@ def seed_database():
                 description=a["description"],
                 instructions=a["instructions"],
                 language_id=lang.id if lang else 1,
-                starter_code=a.get("starter_code", ""),
-                solution_code=a.get("solution_code", ""),
                 max_score=a["max_score"],
                 passing_score=a["passing_score"],
                 due_date=datetime.utcnow() + timedelta(days=a["due_days"]),

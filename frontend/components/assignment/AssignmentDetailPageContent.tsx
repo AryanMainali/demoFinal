@@ -83,8 +83,6 @@ interface Assignment {
     late_penalty_per_day?: number;
     max_late_days?: number;
     language_id?: number;
-    starter_code?: string;
-    solution_code?: string;
     test_weight: number;
     rubric_weight: number;
     enable_plagiarism_check: boolean;
@@ -98,6 +96,13 @@ interface Assignment {
     test_cases?: TestCaseItem[];
     created_at: string;
     updated_at?: string;
+}
+
+interface CourseForHeader {
+    id: number;
+    code: string;
+    name: string;
+    color?: string | null;
 }
 
 interface StudentInfo {
@@ -247,6 +252,12 @@ export default function AssignmentDetailPageContent() {
         queryKey: ['assignment', assignmentId],
         queryFn: () => apiClient.getAssignment(assignmentId) as Promise<Assignment>,
         enabled: !!assignmentId,
+    });
+
+    const { data: course } = useQuery<CourseForHeader>({
+        queryKey: ['course-shell', courseId],
+        queryFn: () => apiClient.getCourse(courseId) as Promise<CourseForHeader>,
+        enabled: !!courseId,
     });
 
     const { data: submissions = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
@@ -593,6 +604,26 @@ export default function AssignmentDetailPageContent() {
     }, [sortBy]);
 
     /* ===== RENDER ===== */
+    const accentColor = course?.color || '#862733';
+    const headerGradient = useMemo(() => {
+        const hex = accentColor;
+        if (!hex?.startsWith('#') || (hex.length !== 7 && hex.length !== 4)) {
+            return { backgroundImage: 'linear-gradient(135deg, #862733 0%, #6b1f2a 100%)' };
+        }
+        const normalize = (h: string) => {
+            if (h.length === 4) {
+                const r = h[1]; const g = h[2]; const b = h[3];
+                return `#${r}${r}${g}${g}${b}${b}`;
+            }
+            return h;
+        };
+        const h = normalize(hex);
+        const r = parseInt(h.slice(1, 3), 16);
+        const g = parseInt(h.slice(3, 5), 16);
+        const b = parseInt(h.slice(5, 7), 16);
+        const darker = `rgb(${Math.max(0, r - 40)}, ${Math.max(0, g - 25)}, ${Math.max(0, b - 25)})`;
+        return { backgroundImage: `linear-gradient(135deg, ${h} 0%, ${darker} 100%)` };
+    }, [accentColor]);
 
     if (isLoading) {
         return (
@@ -622,19 +653,16 @@ export default function AssignmentDetailPageContent() {
 
     const dueDate = assignment.due_date ? new Date(assignment.due_date) : null;
     const isOverdue = dueDate && dueDate < new Date();
-    const statusGradient = assignment.is_published
-        ? isOverdue ? 'from-red-500 to-rose-600' : 'from-emerald-500 to-teal-600'
-        : 'from-amber-500 to-orange-600';
 
     return (
         <div className="space-y-6 pb-8">
                     {/* ─── Header Banner ─── */}
-                    <div className={`bg-gradient-to-r ${statusGradient} rounded-2xl p-6 md:p-8 text-white relative overflow-hidden`}>
+                    <div className="rounded-2xl text-white relative overflow-hidden" style={headerGradient}>
                         <div className="absolute inset-0 opacity-10">
                             <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-white/20" />
                             <div className="absolute -right-5 -bottom-5 w-28 h-28 rounded-full bg-white/10" />
                         </div>
-                        <div className="relative z-10">
+                        <div className="relative z-10 px-6 md:px-8 pt-6 md:pt-8 pb-4">
                             <button
                                 onClick={() => router.push(`/${basePath}/courses/${courseId}/assignments`)}
                                 className="flex items-center gap-1.5 text-white/80 hover:text-white text-sm mb-4 transition-colors"
@@ -700,47 +728,54 @@ export default function AssignmentDetailPageContent() {
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    {/* ─── Tabs ─── */}
-                    <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                        <button
-                            onClick={() => setActiveTab('overview')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                                activeTab === 'overview'
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-700'
-                            }`}
-                        >
-                            <FileText className="w-4 h-4" /> Overview
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('submissions')}
-                            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                                activeTab === 'submissions'
-                                    ? 'bg-white text-gray-900 shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-700'
-                            }`}
-                        >
-                            <Users className="w-4 h-4" /> Submissions
-                            {(assignment.submission_count ?? 0) > 0 && (
-                                <span className="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary font-semibold">
-                                    {assignment.submission_count}
-                                </span>
-                            )}
-                        </button>
-                        {assignment.enable_plagiarism_check && (
-                            <button
-                                onClick={() => setActiveTab('plagiarism')}
-                                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                                    activeTab === 'plagiarism'
-                                        ? 'bg-white text-gray-900 shadow-sm'
-                                        : 'text-gray-500 hover:text-gray-700'
-                                }`}
-                            >
-                                <Shield className="w-4 h-4" /> Plagiarism Report
-                            </button>
-                        )}
+                        {/* Tabs inside banner, matching course layout */}
+                        <div className="px-4 md:px-6 pb-4 pt-0 relative z-10">
+                            <div className="inline-flex items-center gap-1 rounded-xl bg-black/15 backdrop-blur-sm px-1.5 py-1.5">
+                                <button
+                                    onClick={() => setActiveTab('overview')}
+                                    className={`relative block rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                                        activeTab === 'overview'
+                                            ? 'bg-white/25 text-white'
+                                            : 'text-white/80 hover:text-white hover:bg-white/10'
+                                    }`}
+                                >
+                                    <span className="relative z-10 flex items-center gap-2">
+                                        <FileText className="w-4 h-4" /> Overview
+                                    </span>
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('submissions')}
+                                    className={`relative block rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                                        activeTab === 'submissions'
+                                            ? 'bg-white/25 text-white'
+                                            : 'text-white/80 hover:text-white hover:bg-white/10'
+                                    }`}
+                                >
+                                    <span className="relative z-10 flex items-center gap-2">
+                                        <Users className="w-4 h-4" /> Submissions
+                                        {(assignment.submission_count ?? 0) > 0 && (
+                                            <span className="px-2 py-0.5 text-xs rounded-full bg-black/20 text-white font-semibold">
+                                                {assignment.submission_count}
+                                            </span>
+                                        )}
+                                    </span>
+                                </button>
+                                {assignment.enable_plagiarism_check && (
+                                    <button
+                                        onClick={() => setActiveTab('plagiarism')}
+                                        className={`relative block rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                                            activeTab === 'plagiarism'
+                                                ? 'bg-white/25 text-white'
+                                                : 'text-white/80 hover:text-white hover:bg-white/10'
+                                        }`}
+                                    >
+                                        <span className="relative z-10 flex items-center gap-2">
+                                            <Shield className="w-4 h-4" /> Plagiarism
+                                        </span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                     </div>
 
                     {/* ─── Tab Content ─── */}
@@ -751,8 +786,11 @@ export default function AssignmentDetailPageContent() {
                                 <Card>
                                     <CardContent className="p-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                                                <Target className="w-5 h-5 text-blue-600" />
+                                            <div
+                                                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                                                style={{ backgroundColor: `${accentColor}18` }}
+                                            >
+                                                <Target className="w-5 h-5" style={{ color: accentColor }} />
                                             </div>
                                             <div>
                                                 <p className="text-2xl font-bold text-gray-900">{assignment.max_score}</p>
@@ -764,8 +802,11 @@ export default function AssignmentDetailPageContent() {
                                 <Card>
                                     <CardContent className="p-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
-                                                <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                            <div
+                                                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                                                style={{ backgroundColor: `${accentColor}18` }}
+                                            >
+                                                <CheckCircle2 className="w-5 h-5" style={{ color: accentColor }} />
                                             </div>
                                             <div>
                                                 <p className="text-2xl font-bold text-gray-900">{assignment.passing_score}</p>
@@ -777,8 +818,11 @@ export default function AssignmentDetailPageContent() {
                                 <Card>
                                     <CardContent className="p-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center">
-                                                <FlaskConical className="w-5 h-5 text-purple-600" />
+                                            <div
+                                                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                                                style={{ backgroundColor: `${accentColor}18` }}
+                                            >
+                                                <FlaskConical className="w-5 h-5" style={{ color: accentColor }} />
                                             </div>
                                             <div>
                                                 <p className="text-2xl font-bold text-gray-900">{assignment.test_weight}%</p>
@@ -790,8 +834,11 @@ export default function AssignmentDetailPageContent() {
                                 <Card>
                                     <CardContent className="p-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
-                                                <RefreshCw className="w-5 h-5 text-amber-600" />
+                                            <div
+                                                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                                                style={{ backgroundColor: `${accentColor}18` }}
+                                            >
+                                                <RefreshCw className="w-5 h-5" style={{ color: accentColor }} />
                                             </div>
                                             <div>
                                                 <p className="text-2xl font-bold text-gray-900">
@@ -823,30 +870,6 @@ export default function AssignmentDetailPageContent() {
                                             </CardContent>
                                         </Card>
                                     )}
-                                    {assignment.starter_code && (
-                                        <Card>
-                                            <CardHeader>
-                                                <CardTitle className="flex items-center gap-2"><Code className="w-5 h-5" /> Starter Code</CardTitle>
-                                            </CardHeader>
-                                            <CardContent>
-                                                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-sm overflow-x-auto font-mono">
-                                                    {assignment.starter_code}
-                                                </pre>
-                                            </CardContent>
-                                        </Card>
-                                    )}
-                                    {assignment.solution_code && (
-                                        <Card>
-                                            <CardHeader>
-                                                <CardTitle className="flex items-center gap-2"><Code className="w-5 h-5" /> Solution Code</CardTitle>
-                                            </CardHeader>
-                                            <CardContent>
-                                                <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-sm overflow-x-auto font-mono">
-                                                    {assignment.solution_code}
-                                                </pre>
-                                            </CardContent>
-                                        </Card>
-                                    )}
                                     <Card>
                                         <CardHeader><CardTitle>Submissions</CardTitle></CardHeader>
                                         <CardContent>
@@ -856,7 +879,11 @@ export default function AssignmentDetailPageContent() {
                                                     <p className="text-sm text-gray-500">Total submissions received</p>
                                                 </div>
                                                 {(assignment.submission_count ?? 0) > 0 && (
-                                                    <Button onClick={() => setActiveTab('submissions')} className="gap-2 bg-[#862733] hover:bg-[#a03040] text-white">
+                                                    <Button
+                                                        onClick={() => setActiveTab('submissions')}
+                                                        className="gap-2 text-white"
+                                                        style={{ backgroundColor: accentColor }}
+                                                    >
                                                         <Users className="w-4 h-4" /> View Submissions
                                                     </Button>
                                                 )}

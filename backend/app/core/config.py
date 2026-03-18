@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 50
-    ALLOWED_EXTENSIONS: str = ".py,.java,.cpp,.c,.js,.ts,.txt,.md,.pdf"
+    ALLOWED_EXTENSIONS: str = ".py,.java"
     UPLOAD_DIR: str = "/tmp/kriterion/uploads"
     SUBMISSIONS_DIR: str = "/tmp/kriterion/submissions"
     TEMP_DIR: str = "/tmp/kriterion/temp"

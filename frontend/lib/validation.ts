@@ -127,6 +127,10 @@ export const assignmentCreateSchema = z.object({
     // Grading weights
     test_weight: z.coerce.number().min(0).max(100).default(70),
     rubric_weight: z.coerce.number().min(0).max(100).default(30),
+
+    // Rubric point scale
+    rubric_min_points: z.coerce.number().min(0).default(0),
+    rubric_max_points: z.coerce.number().min(0).default(10),
     
     // Publishing
     is_published: z.coerce.boolean().default(false),

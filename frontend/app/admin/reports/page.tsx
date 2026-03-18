@@ -70,9 +70,6 @@ export default function ReportsPage() {
     const languageStats = [
         { name: 'Python', count: 1250, percentage: 44 },
         { name: 'Java', count: 850, percentage: 30 },
-        { name: 'C++', count: 450, percentage: 16 },
-        { name: 'JavaScript', count: 200, percentage: 7 },
-        { name: 'Other', count: 97, percentage: 3 },
     ];
 
     const recentActivity = [

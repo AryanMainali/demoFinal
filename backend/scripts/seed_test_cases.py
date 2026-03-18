@@ -38,9 +38,8 @@ def create_sample_test_cases(db: Session):
             test_cases = create_python_test_cases(assignment.id)
         elif language_name == "java":
             test_cases = create_java_test_cases(assignment.id)
-        elif language_name in ["cpp", "c++"]:
-            test_cases = create_cpp_test_cases(assignment.id)
         else:
+            # Only python/java are supported; fall back to generic tests if legacy data exists
             test_cases = create_generic_test_cases(assignment.id)
         
         for test_case in test_cases:
@@ -115,36 +114,6 @@ def create_java_test_cases(assignment_id: int):
             description="Test with input",
             input_data="10",
             expected_output="Output: 10",
-            points=15.0,
-            is_hidden=False,
-            ignore_whitespace=True,
-            ignore_case=False,
-            order=2
-        )
-    ]
-
-
-def create_cpp_test_cases(assignment_id: int):
-    """Create sample C++ test cases"""
-    return [
-        TestCase(
-            assignment_id=assignment_id,
-            name="Compilation Test",
-            description="Verify program compiles",
-            input_data="",
-            expected_output="Hello, World!",
-            points=10.0,
-            is_hidden=False,
-            ignore_whitespace=True,
-            ignore_case=False,
-            order=1
-        ),
-        TestCase(
-            assignment_id=assignment_id,
-            name="Functionality Test",
-            description="Test basic functionality",
-            input_data="42",
-            expected_output="Result: 42",
             points=15.0,
             is_hidden=False,
             ignore_whitespace=True,

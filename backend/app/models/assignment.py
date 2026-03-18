@@ -31,8 +31,12 @@ class Assignment(Base):
     
     # Programming settings
     language_id = Column(Integer, ForeignKey("languages.id"), nullable=False)
-    starter_code = Column(Text, nullable=True)
-    solution_code = Column(Text, nullable=True)  # Faculty reference solution
+    # Utility files stored as list of {"filename": str, "s3_key": str, "size": int, ...}
+    utility_files_json = Column(JSON, nullable=True)
+
+    # Manual rubric scale bounds (e.g. 0–10, 0–5, etc.)
+    rubric_min_points = Column(Float, default=0.0)
+    rubric_max_points = Column(Float, default=10.0)
     
     # Scoring
     max_score = Column(Float, default=100.0)

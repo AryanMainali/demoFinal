@@ -126,10 +126,33 @@ class PlagiarismMatchOut(BaseModel):
         from_attributes = True
 
 
+class RubricItemInfo(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class RubricScoreOut(BaseModel):
+    id: int
+    rubric_item_id: int
+    score: float
+    max_score: float
+    comment: Optional[str] = None
+    graded_by: Optional[int] = None
+    graded_at: Optional[datetime] = None
+    item: Optional[RubricItemInfo] = None
+
+    class Config:
+        from_attributes = True
+
+
 class SubmissionDetail(Submission):
     files: List[SubmissionFileOut] = []
     test_results: List[TestResultOut] = []
     plagiarism_matches: List[PlagiarismMatchOut] = []
+    rubric_scores: List[RubricScoreOut] = []
 
     class Config:
         from_attributes = True

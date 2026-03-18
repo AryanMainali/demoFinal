@@ -49,12 +49,6 @@ interface Language {
 const DEFAULT_LANGUAGES = [
     { name: 'python', display_name: 'Python', version: '3.11', extension: '.py', run: 'python3 {file}', compile: null, timeout: 10, memory: 256 },
     { name: 'java', display_name: 'Java', version: '17', extension: '.java', run: 'java {class}', compile: 'javac {file}', timeout: 15, memory: 512 },
-    { name: 'cpp', display_name: 'C++', version: '17', extension: '.cpp', run: './{executable}', compile: 'g++ -std=c++17 -o {executable} {file}', timeout: 10, memory: 256 },
-    { name: 'c', display_name: 'C', version: '11', extension: '.c', run: './{executable}', compile: 'gcc -std=c11 -o {executable} {file}', timeout: 10, memory: 256 },
-    { name: 'javascript', display_name: 'JavaScript', version: 'Node 18', extension: '.js', run: 'node {file}', compile: null, timeout: 10, memory: 256 },
-    { name: 'typescript', display_name: 'TypeScript', version: '5.0', extension: '.ts', run: 'ts-node {file}', compile: null, timeout: 10, memory: 256 },
-    { name: 'rust', display_name: 'Rust', version: '1.70', extension: '.rs', run: './{executable}', compile: 'rustc -o {executable} {file}', timeout: 15, memory: 256 },
-    { name: 'go', display_name: 'Go', version: '1.21', extension: '.go', run: 'go run {file}', compile: null, timeout: 10, memory: 256 },
 ];
 
 export default function LanguagesPage() {

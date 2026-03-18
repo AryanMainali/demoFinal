@@ -48,11 +48,6 @@ interface ProgrammingLanguage {
 const langColors: Record<string, string> = {
     python: 'bg-sky-100 text-sky-700',
     java: 'bg-orange-100 text-orange-700',
-    cpp: 'bg-blue-100 text-blue-700',
-    'c++': 'bg-blue-100 text-blue-700',
-    'c#': 'bg-violet-100 text-violet-700',
-    javascript: 'bg-yellow-100 text-yellow-800',
-    c: 'bg-gray-100 text-gray-700',
 };
 
 export default function FacultyDashboard() {

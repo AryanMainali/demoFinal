@@ -233,6 +233,15 @@ class ApiClient {
         return response.data as { filename: string; download_url: string; size: number }[];
     }
 
+    async addAssignmentSupplementaryFiles(assignmentId: number, files: File[]) {
+        const formData = new FormData();
+        files.forEach((file) => formData.append('files', file));
+        const response = await this.client.post(`/assignments/${assignmentId}/supplementary-files`, formData, {
+            headers: { 'Content-Type': undefined as unknown as string },
+        });
+        return response.data as { filename: string; download_url: string; size: number }[];
+    }
+
     async createAssignment(
         data: any,
         options?: {
@@ -283,6 +292,11 @@ class ApiClient {
     async getSubmission(id: number) {
         const response = await this.client.get(`/submissions/${id}`);
         return response.data;
+    }
+
+    async getSubmissionFileContent(submissionId: number, fileId: number) {
+        const response = await this.client.get(`/submissions/${submissionId}/files/${fileId}/content`);
+        return response.data as { id: number; filename: string; content: string };
     }
 
     async getAssignmentSubmissions(assignmentId: number) {

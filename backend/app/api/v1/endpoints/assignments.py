@@ -24,6 +24,7 @@ from app.models import (
     Rubric,
     RubricItem,
     TestCase,
+    TestResult as TestResultORM,
     AuditLog,
     Language,
     NotificationType,
@@ -229,18 +230,55 @@ def get_supplementary_files(
         if not enrollment or not assignment.is_published:
             raise HTTPException(status_code=403, detail="Access denied")
 
-    import json
-    supplementary = []
-    if assignment.starter_code and isinstance(assignment.starter_code, str):
-        try:
-            payload = json.loads(assignment.starter_code)
-            supplementary = payload.get("supplementary") or []
-        except (json.JSONDecodeError, TypeError):
-            pass
+    supplementary = assignment.utility_files_json or []
 
     if not supplementary:
         return []
 
+    result = []
+    try:
+        from app.core.config import settings
+        if getattr(settings, 'USE_S3_STORAGE', True) and s3_service.s3_client:
+            for item in supplementary:
+                s3_key = item.get("s3_key")
+                filename = item.get("filename", "file")
+                size = item.get("size", 0)
+                if s3_key:
+                    url = s3_service.generate_presigned_url(s3_key, expiration=3600)
+                    result.append({"filename": filename, "download_url": url, "size": size})
+    except Exception as e:
+        logger.warning(f"Could not generate presigned URLs: {e}")
+    return result
+
+
+@router.post("/{assignment_id}/supplementary-files")
+async def add_supplementary_files(
+    assignment_id: int,
+    files: List[UploadFile] = File([]),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+):
+    """Append supplementary (utility) files to an assignment (faculty/admin)."""
+    assignment = db.query(Assignment).options(joinedload(Assignment.course)).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if current_user.role == UserRole.FACULTY and assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    base_prefix = f"assignments/{current_user.id}/{assignment.id}/"
+    utility_prefix = base_prefix + "utility/"
+
+    supplementary: list[dict] = list(assignment.utility_files_json or [])
+
+    for upload_file in files:
+        if upload_file and upload_file.filename:
+            meta, _ = await _upload_file_to_s3(upload_file, utility_prefix, assignment.id, current_user.id)
+            supplementary.append(meta)
+
+    assignment.utility_files_json = supplementary
+    db.commit()
+
+    # Return presigned URLs (same shape as GET)
     result = []
     try:
         from app.core.config import settings
@@ -315,16 +353,13 @@ async def _upload_file_to_s3(upload_file: UploadFile, s3_prefix: str, assignment
 @router.post("", response_model=AssignmentSchema, status_code=status.HTTP_201_CREATED)
 async def create_assignment(
     assignment_data: str = Form(...),
-    starter_file: Optional[UploadFile] = FastAPIFile(None),
-    solution_file: Optional[UploadFile] = FastAPIFile(None),
     files: List[UploadFile] = FastAPIFile([]),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
 ):
     """
     Create a new assignment (faculty only).
-    - starter_file, solution_file: uploaded to assignments/{user_id}/{assignment_id}/code/
-    - files (supplementary): uploaded to assignments/{user_id}/{assignment_id}/supplementary/
+    - files (utility): uploaded to assignments/{user_id}/{assignment_id}/utility/
     """
     import json
     try:
@@ -352,44 +387,18 @@ async def create_assignment(
         db.flush()
 
         base_prefix = f"assignments/{current_user.id}/{assignment.id}/"
-        code_prefix = base_prefix + "code/"
-        supp_prefix = base_prefix + "supplementary/"
+        utility_prefix = base_prefix + "utility/"
 
-        code_files = []
-        solution_files = []
-        supplementary = []
-        starter_code_text = (assignment.starter_code or "") if isinstance(assignment.starter_code, str) else ""
-
-        if starter_file and starter_file.filename:
-            meta, raw = await _upload_file_to_s3(
-                starter_file, code_prefix + "starter_", assignment.id, current_user.id
-            )
-            code_files.append(meta)
-            try:
-                starter_code_text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                pass  # Binary file; keep existing or empty
-        if solution_file and solution_file.filename:
-            meta, _ = await _upload_file_to_s3(
-                solution_file, code_prefix + "solution_", assignment.id, current_user.id
-            )
-            solution_files.append(meta)
+        utility_files = []
         for upload_file in files:
             if upload_file.filename:
                 meta, _ = await _upload_file_to_s3(
-                    upload_file, supp_prefix, assignment.id, current_user.id
+                    upload_file, utility_prefix, assignment.id, current_user.id
                 )
-                supplementary.append(meta)
+                utility_files.append(meta)
 
-        if code_files or solution_files or supplementary:
-            payload = {"code": starter_code_text}
-            if code_files:
-                payload["code_files"] = code_files
-            if solution_files:
-                payload["solution_files"] = solution_files
-            if supplementary:
-                payload["supplementary"] = supplementary
-            assignment.starter_code = json.dumps(payload)
+        if utility_files:
+            assignment.utility_files_json = utility_files
 
         # Create test cases if provided
         if assignment_in.test_cases:
@@ -481,6 +490,7 @@ def update_assignment(
     update_data_in = assignment_in.model_dump(exclude_unset=True)
     
     test_cases_data = update_data_in.pop("test_cases", None)
+    rubric_data = update_data_in.pop("rubric", None)
 
     # Filter to only include columns that exist in the database
     update_data = {
@@ -496,6 +506,13 @@ def update_assignment(
         setattr(assignment, field, value)
 
     if test_cases_data is not None:
+        # Bulk deleting test cases without removing test results first can break
+        # the foreign key from test_results -> test_cases when an assignment is edited.
+        db.query(TestResultORM).filter(
+            TestResultORM.test_case_id.in_(
+                db.query(TestCase.id).filter(TestCase.assignment_id == assignment.id)
+            )
+        ).delete(synchronize_session=False)
         db.query(TestCase).filter(TestCase.assignment_id == assignment.id).delete(synchronize_session=False)
         for idx, tc_data in enumerate(test_cases_data):
             test_case = TestCase(
@@ -506,7 +523,6 @@ def update_assignment(
                 expected_output=tc_data.get("expected_output"),
                 points=tc_data.get("points", 10.0),
                 is_hidden=tc_data.get("is_hidden", False),
-                is_sample=tc_data.get("is_sample", False),
                 ignore_whitespace=tc_data.get("ignore_whitespace", True),
                 ignore_case=tc_data.get("ignore_case", False),
                 time_limit_seconds=tc_data.get("time_limit_seconds"),
@@ -514,6 +530,28 @@ def update_assignment(
                 order=tc_data.get("order", idx),
             )
             db.add(test_case)
+
+    # Update rubric rows (flat items) if provided
+    if rubric_data is not None:
+        items = (rubric_data or {}).get("items")
+        # If items is explicitly provided, replace rubric
+        if items is not None:
+            db.query(Rubric).filter(Rubric.assignment_id == assignment.id).delete(synchronize_session=False)
+            if items:
+                for item_data in items:
+                    ri = RubricItem(
+                        name=(item_data.get("name") or "").strip() or "Criterion",
+                        description=(item_data.get("description") or "").strip() or None,
+                    )
+                    db.add(ri)
+                    db.flush()
+                    row = Rubric(
+                        assignment_id=assignment.id,
+                        rubric_item_id=ri.id,
+                        weight=float(item_data.get("weight") or 0.0),
+                        points=float(item_data.get("points") or 0.0),
+                    )
+                    db.add(row)
     
     # Audit log
     audit = AuditLog(

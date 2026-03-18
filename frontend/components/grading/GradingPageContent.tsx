@@ -105,6 +105,7 @@ interface SubmissionItem {
     error_message: string | null;
     files: SubmissionFileOut[];
     test_results: TestResultOut[];
+    rubric_scores?: { rubric_item_id: number; score: number; max_score: number; comment?: string | null; item?: { id?: number; name?: string } }[];
 }
 
 interface RubricItemFlat {
@@ -136,7 +137,6 @@ interface Assignment {
     allowed_file_extensions?: string[];
     enable_plagiarism_check?: boolean;
     enable_ai_detection?: boolean;
-    starter_code?: string;
     is_published?: boolean;
     language?: { id: number; name: string; display_name: string; file_extension: string };
     course?: { id: number; name: string; code: string };
@@ -280,6 +280,13 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
     const handleRubricTotalChange = (total: number) => {
         setRubricTotalScore(total);
     };
+
+    const formatScore = useCallback((value: number | string | null | undefined) => {
+        if (value === null || value === undefined || value === '') return '-';
+        const numeric = typeof value === 'string' ? Number(value) : value;
+        if (!Number.isFinite(numeric)) return '-';
+        return numeric.toFixed(1);
+    }, []);
 
     const handleTestCaseAdded = async (payload: any) => {
         try {
@@ -509,10 +516,20 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
         testResults.forEach(tr => {
             overrides[tr.id] = { points_awarded: tr.points_awarded, passed: tr.passed };
         });
+
+        const savedRubricScores = (selectedSub.rubric_scores || []).reduce<Record<number, number>>((acc, rs) => {
+            acc[rs.rubric_item_id] = Number(rs.score ?? 0);
+            return acc;
+        }, {});
+        const savedRubricTotal = (selectedSub.rubric_scores || []).reduce((sum, rs) => sum + Number(rs.score ?? 0), 0);
+
+        setRubricScores(savedRubricScores);
+        setRubricTotalScore(Number.isFinite(savedRubricTotal) ? savedRubricTotal : 0);
+
         setGradeState({
             testOverrides: overrides,
             feedback: selectedSub.feedback || '',
-            finalScore: selectedSub.final_score !== null ? selectedSub.final_score.toString() : '',
+            finalScore: selectedSub.final_score !== null ? selectedSub.final_score.toFixed(1) : '',
         });
 
         if (files.length > 0) {
@@ -520,7 +537,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             loadFileContent(selectedSub.id, mainFile.id);
             setSelectedFileId(mainFile.id);
         }
-    }, [selectedSub?.id]);
+    }, [selectedSub?.id, selectedSub?.rubric_scores, selectedSub?.feedback, selectedSub?.final_score]);
 
     const loadFileContent = useCallback(async (subId: number, fileId: number) => {
         if (fileContents[fileId]) return;
@@ -766,10 +783,16 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             const overrides = Object.entries(gradeState.testOverrides).map(([id, val]) => ({
                 id: Number(id), ...val,
             }));
+            const rubricItems = assignment?.rubric?.items ?? [];
 
             await apiClient.saveManualGrade(selectedSub.id, {
-                final_score: gradeState.finalScore ? parseFloat(gradeState.finalScore) : undefined,
+                final_score: gradeState.finalScore ? parseFloat(gradeState.finalScore) : (rubricItems.length ? Math.round(rubricTotalScore * 2) / 2 : undefined),
                 feedback: gradeState.feedback || undefined,
+                rubric_scores: rubricItems.map(item => ({
+                    rubric_item_id: item.id,
+                    score: rubricScores[item.id] ?? 0,
+                    max_score: item.points ?? 0,
+                })),
                 test_overrides: overrides.length > 0 ? overrides : undefined,
             });
 
@@ -958,7 +981,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                             {studentSubs.map((sub, idx) => (
                                 <option key={sub.id} value={sub.id}>
                                     Attempt #{sub.attempt_number}{idx === 0 ? ' (Latest)' : ''} - {format(new Date(sub.submitted_at), 'MMM dd, hh:mm a')}
-                                    {sub.final_score !== null ? ` · ${sub.final_score.toFixed(1)}pts` : ''}
+                                    {sub.final_score !== null ? ` · ${sub.final_score.toFixed(2)}pts` : ''}
                                 </option>
                             ))}
                         </select>
@@ -1582,19 +1605,33 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                         <input
                                             type="number"
                                             value={gradeState.finalScore}
-                                            onChange={(e) => setGradeState(p => ({ ...p, finalScore: e.target.value }))}
+                                            onChange={(e) => {
+                                                const raw = parseFloat(e.target.value);
+                                                if (!Number.isFinite(raw)) {
+                                                    setGradeState(p => ({ ...p, finalScore: '' }));
+                                                    return;
+                                                }
+                                                const rounded = Math.round(raw * 2) / 2;
+                                                setGradeState(p => ({ ...p, finalScore: String(rounded) }));
+                                            }}
+                                            onBlur={(e) => {
+                                                const raw = parseFloat(e.target.value);
+                                                if (!Number.isFinite(raw)) return;
+                                                const rounded = Math.round(raw * 2) / 2;
+                                                setGradeState(p => ({ ...p, finalScore: String(rounded) }));
+                                            }}
                                             placeholder="-"
-                                            step="0.1"
+                                            step="0.5"
                                             min="0"
                                             max={assignment.max_score}
-                                            className="w-20 bg-[#3c3c3c] border border-[#505050] rounded px-2 py-1 text-2xl font-bold text-white text-center focus:outline-none focus:border-[#862733]"
+                                            className="w-28 bg-[#3c3c3c] border border-[#505050] rounded px-2 py-1 text-xl font-bold font-mono tabular-nums tracking-tight text-white text-center focus:outline-none focus:border-[#862733]"
                                         />
                                         <span className="text-lg text-[#858585] pb-1">/ {assignment.max_score}</span>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 text-[11px]">
                                         <div className="bg-[#333] rounded p-2">
                                             <span className="text-[#858585]">Test Score</span>
-                                            <p className="text-white font-semibold">{selectedSub.test_score !== null ? selectedSub.test_score.toFixed(1) : '-'}</p>
+                                            <p className="text-white font-semibold">{formatScore(selectedSub.test_score)}</p>
                                         </div>
                                         <div className="bg-[#333] rounded p-2">
                                             <span className="text-[#858585]">Status</span>
@@ -1640,7 +1677,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             rubricItems={assignment.rubric.items.map(item => ({
                                                 itemId: item.id,
                                                 name: item.name,
-                                                description: `${item.weight > 0 ? `${item.weight}%` : item.points ? `${item.points} pts` : 'N/A'} • ${item.description || 'No description'}`,
+                                                description: `${item.points ? `${Number(item.points).toFixed(2)} pts` : 'N/A'} • ${item.description || 'No description'}`,
                                                 weight: item.weight,
                                                 maxPoints: item.points,
                                                 earnedPoints: Math.min(rubricScores[item.id] || 0, item.points),
@@ -1655,10 +1692,11 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             onTotalScoreChange={handleRubricTotalChange}
                                             onCalculate={() => {
                                                 // Calculate and set as the final score
-                                                setGradeState(prev => ({ ...prev, finalScore: rubricTotalScore.toFixed(1) }));
+                                                const roundedTotal = Math.round(rubricTotalScore * 2) / 2;
+                                                setGradeState(prev => ({ ...prev, finalScore: String(roundedTotal) }));
                                                 toast({
                                                     title: '✅ Score Calculated',
-                                                    description: `Rubric total: ${rubricTotalScore.toFixed(1)}/${assignment.max_score} pts`
+                                                    description: `Rubric total: ${roundedTotal.toFixed(1)}/${assignment.max_score} pts`
                                                 });
                                             }}
                                         />
@@ -2122,19 +2160,11 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                     className="px-3 py-2 flex items-start justify-between gap-2"
                                                 >
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-[11px] font-medium text-[#d4d4d4]">
+                                                        <p className="text-[11px] font-medium text-white">
                                                             {item.name}
                                                         </p>
-                                                        {item.description && (
-                                                            <p className="text-[10px] text-[#858585] mt-0.5">
-                                                                {item.description}
-                                                            </p>
-                                                        )}
-                                                        <p className="text-[10px] text-[#858585] mt-0.5">
-                                                            Weight: <span className="text-[#4ec9b0] font-semibold">{item.weight}%</span>
-                                                            {typeof item.points === 'number' && (
-                                                                <> · Points: <span className="text-[#4ec9b0] font-semibold">{item.points}</span></>
-                                                            )}
+                                                        <p className="text-[10px] text-white mt-0.5">
+                                                            Points: <span className="text-white font-semibold">{item.points}</span>
                                                         </p>
                                                     </div>
                                                 </div>
@@ -2158,14 +2188,9 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                     <span className="text-[#cccccc] truncate flex-1">{tc.name}</span>
                                                     <div className="flex items-center gap-2 shrink-0">
                                                         {tc.is_hidden && <span className="text-[9px] px-1 py-0.5 rounded bg-[#505050] text-[#858585]">Hidden</span>}
-                                                        <span className="text-[#4ec9b0] font-medium">{tc.points} pts</span>
                                                     </div>
                                                 </div>
                                             ))}
-                                            <div className="border-t border-[#3c3c3c] pt-1 mt-1 flex justify-between text-[11px]">
-                                                <span className="text-[#858585]">Total</span>
-                                                <span className="text-white font-semibold">{assignment.test_cases.reduce((s, tc) => s + tc.points, 0)} pts</span>
-                                            </div>
                                         </div>
                                     </div>
                                 )}
@@ -2487,7 +2512,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                         <h2 className="text-xl font-bold text-white mb-2">Grade Saved!</h2>
                         <p className="text-sm text-[#858585] mb-6">
                             The grade has been saved successfully.
-                            {gradeState.finalScore && <> Final score: <span className="text-white font-semibold">{gradeState.finalScore}/{assignment.max_score}</span></>}
+                            {gradeState.finalScore && <> Final score: <span className="text-white font-semibold">{formatScore(gradeState.finalScore)}/{assignment.max_score}</span></>}
                         </p>
                         <div className="flex gap-3">
                             <button

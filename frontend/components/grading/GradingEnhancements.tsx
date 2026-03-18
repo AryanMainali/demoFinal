@@ -93,12 +93,7 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-[12px] font-semibold text-[#d4d4d4]">{item.name}</p>
-                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#3c3c3c] text-[#858585] shrink-0">
-                                            {mode === 'weight' ? `${item.weight}%` : `${item.maxPoints} pts`}
-                                        </span>
-                                    </div>
+                                    <p className="text-[12px] font-semibold text-white">{item.name}</p>
                                 </div>
 
                                 {/* Score input */}
@@ -107,13 +102,17 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
                                         <input
                                             type="number"
                                             value={displayScore}
-                                            onChange={(e) => onScoreChange(item.itemId, parseFloat(e.target.value) || 0)}
-                                            step="0.5"
+                                            onChange={(e) => {
+                                                const raw = parseFloat(e.target.value);
+                                                onScoreChange(item.itemId, Number.isFinite(raw) ? raw : 0);
+                                            }}
+                                            step="0.01"
+                                            inputMode="decimal"
                                             min="0"
                                             max={item.maxPoints}
-                                            className="w-14 bg-[#252526] border border-[#505050] rounded px-2 py-1.5 text-[12px] font-medium text-[#d4d4d4] text-center focus:outline-none focus:ring-1 focus:ring-[#862733] focus:border-[#862733]"
+                                            className="w-24 bg-[#252526] border border-[#505050] rounded px-2 py-1.5 text-[11px] font-medium font-mono tabular-nums text-[#d4d4d4] text-center focus:outline-none focus:ring-1 focus:ring-[#862733] focus:border-[#862733]"
                                         />
-                                        <span className="text-[11px] text-[#858585] w-10 text-left">/{item.maxPoints}</span>
+                                        <span className="text-[11px] text-white w-14 text-left">/{item.maxPoints.toFixed(2)}</span>
                                     </div>
                                     {/* Progress bar */}
                                     <div className="w-24 h-1.5 bg-[#333] rounded-full overflow-hidden">
@@ -138,16 +137,10 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
 
             {/* Info tooltip and Calculate button */}
             <div className="space-y-2.5">
-                <div className="text-[10px] text-[#858585] bg-[#0c0c0c] border border-[#3c3c3c] rounded-lg p-2.5">
-                    {mode === 'weight' ? (
-                        <div>
-                            <strong className="text-[#cccccc]"> Weighted Mode:</strong> Score = (earned/max) × weight × total score
-                        </div>
-                    ) : (
-                        <div>
-                            <strong className="text-[#cccccc]"> Points Mode:</strong> Score = sum of all earned points
-                        </div>
-                    )}
+                <div className="text-[10px] text-white bg-[#0c0c0c] border border-[#3c3c3c] rounded-lg p-2.5">
+                    <div>
+                        <strong className="text-white"> Rubric score:</strong> Enter the points earned for each criterion.
+                    </div>
                 </div>
                 {onCalculate && (
                     <button

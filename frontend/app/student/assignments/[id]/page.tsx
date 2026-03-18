@@ -17,7 +17,6 @@ import {
     Upload as UploadIcon,
     AlertCircle,
     Loader2,
-    History,
     CheckCircle2,
     XCircle,
     Info,
@@ -51,6 +50,8 @@ interface UploadedFile {
     name: string
     content: string
     size: number
+    readOnly?: boolean
+    origin?: 'student' | 'utility'
 }
 
 interface TestResultItem {
@@ -92,7 +93,6 @@ interface Assignment {
     allow_late: boolean
     late_penalty_per_day: number
     max_late_days: number
-    starter_code: string | null
     language: {
         id: number
         name: string
@@ -119,9 +119,22 @@ interface SubmissionItem {
     attempt_number: number
 }
 
+interface SubmissionDetail extends SubmissionItem {
+    test_score?: number | null
+    rubric_score?: number | null
+    raw_score?: number | null
+    max_score?: number | null
+    override_score?: number | null
+    feedback?: string | null
+    rubric_scores?: { rubric_item_id: number; score: number; max_score: number; comment?: string | null; item?: { name?: string } }[]
+    files?: { id: number; filename: string }[]
+}
+
 const FILE_ICONS: Record<string, string> = {
-    '.py': '🐍', '.java': '☕', '.cpp': '⚡', '.c': '⚙️',
-    '.js': '🟨', '.ts': '🔷', '.txt': '📄', '.md': '📝',
+    '.py': '🐍',
+    '.java': '☕',
+    '.txt': '📄',
+    '.md': '📝',
 }
 
 function getFileIcon(filename: string) {
@@ -166,7 +179,7 @@ export default function StudentAssignmentPage() {
     const [explorerOpen, setExplorerOpen] = useState(true)
     const [panelOpen, setPanelOpen] = useState(true)
     const [activePanel, setActivePanel] = useState<'output' | 'tests'>('output')
-    const [rightPanel, setRightPanel] = useState<'description' | 'instructions' | 'rubric' | 'history' | 'supplementary' | 'custom' | null>(null)
+    const [rightPanel, setRightPanel] = useState<'description' | 'instructions' | 'rubric' | 'grading' | 'supplementary' | 'custom' | null>(null)
     const [showConfetti, setShowConfetti] = useState(false)
     const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set())
 
@@ -177,7 +190,7 @@ export default function StudentAssignmentPage() {
         retry: 2,
     })
 
-    const { data: submissions = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
+    const { data: submissionsAll = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
         queryKey: ['submissions', assignmentId],
         queryFn: () => apiClient.getSubmissions(assignmentId),
         enabled: !!assignment,
@@ -214,34 +227,60 @@ export default function StudentAssignmentPage() {
     const maxFileSize = maxFileSizeMB * 1024 * 1024
     const isOverdue = useMemo(() => assignment ? new Date(assignment.due_date) < new Date() : false, [assignment])
     const dueDate = useMemo(() => assignment ? new Date(assignment.due_date) : null, [assignment])
+    const submissions = useMemo(() => (submissionsAll.length > 0 ? [submissionsAll[0]] : []), [submissionsAll])
     const latestSubmission = useMemo(() => submissions.length > 0 ? submissions[0] : null, [submissions])
     const maxAttempts = assignment?.max_attempts || 0
-    const attemptsLeft = maxAttempts > 0 ? maxAttempts - submissions.length : Infinity
+    const attemptsUsed = latestSubmission?.attempt_number ?? 0
+    const attemptsLeft = maxAttempts > 0 ? Math.max(maxAttempts - attemptsUsed, 0) : Infinity
+
+    const isGraded = useMemo(() => {
+        if (!latestSubmission) return false
+        if (latestSubmission.final_score !== null) return true
+        const s = String(latestSubmission.status || '').toLowerCase()
+        return s === 'completed' || s === 'graded'
+    }, [latestSubmission])
+
+    const { data: latestSubmissionDetail } = useQuery<SubmissionDetail>({
+        queryKey: ['submission', latestSubmission?.id],
+        queryFn: () => apiClient.getSubmission(latestSubmission!.id),
+        enabled: !!latestSubmission?.id,
+    })
 
     const editorLines = (selectedFile?.content || '').split('\n')
     const hasStdinInput = customInput.trim().length > 0
     const hasTestFileInput = inputFileContent.trim().length > 0
 
-    // Load starter code only if it contains actual code
+    // No auto-loaded starter code; students start with their own files.
+
+    const [hasLoadedFromLastSubmission, setHasLoadedFromLastSubmission] = useState(false)
+
     useEffect(() => {
-        if (!assignment || files.length > 0) return
-        if (!assignment.starter_code) return
-
-        let codeContent = ''
-        try {
-            const parsed = JSON.parse(assignment.starter_code)
-            codeContent = parsed.code || ''
-        } catch {
-            codeContent = assignment.starter_code
+        const loadLastSubmissionFiles = async () => {
+            if (!latestSubmissionDetail || files.length > 0 || hasLoadedFromLastSubmission) return
+            try {
+                const loadedFiles: UploadedFile[] = []
+                for (const f of latestSubmissionDetail.files ?? []) {
+                    const fileData = await apiClient.getSubmissionFileContent(latestSubmissionDetail.id, f.id)
+                    loadedFiles.push({
+                        name: fileData.filename,
+                        content: fileData.content ?? '',
+                        size: (fileData.content ?? '').length,
+                        readOnly: false,
+                        origin: 'student',
+                    })
+                }
+                if (loadedFiles.length > 0) {
+                    setFiles(loadedFiles)
+                    setSelectedFile(loadedFiles[0])
+                }
+            } catch (e) {
+                // Silently ignore load failures; student can still upload new files.
+            } finally {
+                setHasLoadedFromLastSubmission(true)
+            }
         }
-
-        if (codeContent.trim()) {
-            const ext = assignment.language?.file_extension || '.py'
-            const f: UploadedFile = { name: `main${ext}`, content: codeContent, size: new Blob([codeContent]).size }
-            setFiles([f])
-            setSelectedFile(f)
-        }
-    }, [assignment])
+        loadLastSubmissionFiles()
+    }, [latestSubmissionDetail, files.length, hasLoadedFromLastSubmission])
 
     /* ===== File Handling ===== */
 
@@ -265,29 +304,26 @@ export default function StudentAssignmentPage() {
             const reader = new FileReader()
             reader.onload = (e) => {
                 const content = e.target?.result as string
-                const newFile: UploadedFile = { name: file.name, content, size: file.size }
+                const newFile: UploadedFile = { name: file.name, content, size: file.size, origin: 'student' }
                 setFiles((prev) => {
                     const idx = prev.findIndex((f) => f.name === file.name)
                     if (idx >= 0) { const u = [...prev]; u[idx] = newFile; return u }
                     return [...prev, newFile]
                 })
                 setSelectedFile(newFile)
+                // Immediately allow renaming newly added file
+                setEditingFileName(file.name)
+                setRenameDraft(file.name)
             }
             reader.readAsText(file)
         }
     }, [maxFileSize, maxFileSizeMB, allowedExtensions, toast])
 
-    const handleNewFile = useCallback(() => {
-        const ext = allowedExtensions[0] || assignment?.language?.file_extension || '.py'
-        let name = `file${ext}`
-        let c = 1
-        while (files.some(f => f.name === name)) { name = `file${c}${ext}`; c++ }
-        const nf: UploadedFile = { name, content: '', size: 0 }
-        setFiles(prev => [...prev, nf])
-        setSelectedFile(nf)
-    }, [assignment, files, allowedExtensions])
+    // Students can only upload files (no file creation) to reduce complexity.
 
     const removeFile = useCallback((name: string) => {
+        const target = files.find((f) => f.name === name)
+        if (target?.readOnly || target?.origin === 'utility') return
         setFiles((prev) => prev.filter((f) => f.name !== name))
         if (selectedFile?.name === name) {
             const rest = files.filter(f => f.name !== name)
@@ -298,13 +334,30 @@ export default function StudentAssignmentPage() {
 
     const [editingFileName, setEditingFileName] = useState<string | null>(null)
     const [renameDraft, setRenameDraft] = useState('')
+    const renameInputRef = useRef<HTMLInputElement | null>(null)
+
+    useEffect(() => {
+        if (!editingFileName) return
+        const t = window.setTimeout(() => {
+            renameInputRef.current?.focus()
+            renameInputRef.current?.select()
+        }, 0)
+        return () => window.clearTimeout(t)
+    }, [editingFileName])
 
     const startRenameFile = useCallback((name: string) => {
+        const target = files.find((f) => f.name === name)
+        if (target?.readOnly || target?.origin === 'utility') return
         setEditingFileName(name)
         setRenameDraft(name)
-    }, [])
+    }, [files])
 
     const renameFile = useCallback((oldName: string, newName: string) => {
+        const target = files.find((f) => f.name === oldName)
+        if (target?.readOnly || target?.origin === 'utility') {
+            setEditingFileName(null)
+            return
+        }
         const trimmed = newName.trim()
         if (!trimmed || trimmed === oldName) {
             setEditingFileName(null)
@@ -329,10 +382,57 @@ export default function StudentAssignmentPage() {
 
     const updateFileContent = useCallback((value: string) => {
         if (!selectedFile) return
+        if (selectedFile.readOnly || selectedFile.origin === 'utility') return
         const updated = { ...selectedFile, content: value, size: new Blob([value]).size }
         setSelectedFile(updated)
         setFiles((prev) => prev.map((f) => (f.name === updated.name ? updated : f)))
     }, [selectedFile])
+
+    // Utility files: load instructor-provided files into workspace (read-only helper files)
+    useEffect(() => {
+        if (!supplementaryFiles || supplementaryFiles.length === 0) return
+        let cancelled = false
+            ; (async () => {
+                try {
+                    const downloads = await Promise.all(
+                        supplementaryFiles.map(async (f: { filename: string; download_url: string }) => {
+                            try {
+                                const res = await fetch(f.download_url)
+                                if (!res.ok) return null
+                                const ct = res.headers.get('content-type') || ''
+                                // Best-effort: only inject text-like files into workspace
+                                if (ct && !ct.startsWith('text/') && !ct.includes('json') && !ct.includes('xml')) return null
+                                const content = await res.text()
+                                return { name: f.filename, content }
+                            } catch {
+                                return null
+                            }
+                        }),
+                    )
+                    if (cancelled) return
+                    const toAdd = downloads.filter(Boolean) as { name: string; content: string }[]
+                    if (toAdd.length === 0) return
+                    setFiles((prev) => {
+                        const existing = new Set(prev.map((p) => p.name))
+                        const merged = [...prev]
+                        for (const f of toAdd) {
+                            if (existing.has(f.name)) continue
+                            merged.push({
+                                name: f.name,
+                                content: f.content,
+                                size: new Blob([f.content]).size,
+                                readOnly: true,
+                                origin: 'utility',
+                            })
+                        }
+                        return merged
+                    })
+                } catch {
+                    // ignore
+                }
+            })()
+        return () => { cancelled = true }
+    }, [supplementaryFiles])
 
     /* ===== Run Code ===== */
 
@@ -657,11 +757,14 @@ export default function StudentAssignmentPage() {
                             className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'rubric' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
                             <ClipboardList className="w-3 h-3" /> Rubric
                         </button>
-                        <button onClick={() => setRightPanel(rightPanel === 'history' ? null : 'history')}
-                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'history' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
-                            <History className="w-3 h-3" /> History
-                            {submissions.length > 0 && <span className="px-1 py-0 text-[9px] bg-[#505050] rounded">{submissions.length}</span>}
-                        </button>
+                        {isGraded && (
+                            <button
+                                onClick={() => setRightPanel(rightPanel === 'grading' ? null : 'grading')}
+                                className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'grading' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}
+                            >
+                                <Target className="w-3 h-3" /> Grading
+                            </button>
+                        )}
                         <button onClick={() => setRightPanel(rightPanel === 'supplementary' ? null : 'supplementary')}
                             className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'supplementary' ? 'bg-[#094771] text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
                             <Paperclip className="w-3 h-3" /> Files
@@ -720,8 +823,14 @@ export default function StudentAssignmentPage() {
                             <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#bbbbbb] flex items-center justify-between">
                                 <span>Explorer</span>
                                 <div className="flex gap-0.5">
-                                    <button onClick={handleNewFile} className="p-0.5 rounded hover:bg-[#505050]" title="New File"><Plus className="w-3.5 h-3.5" /></button>
-                                    <button onClick={() => fileInputRef.current?.click()} className="p-0.5 rounded hover:bg-[#505050]" title="Upload"><UploadIcon className="w-3.5 h-3.5" /></button>
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="h-7 px-3 rounded-md bg-gradient-to-r from-[#0e639c] to-[#1177bb] hover:from-[#1177bb] hover:to-[#1588cc] text-white text-[11px] font-semibold inline-flex items-center gap-1.5 shadow-md hover:shadow-lg transition-all duration-200 active:scale-95"
+                                        title="Upload files"
+                                    >
+                                        <UploadIcon className="w-3.5 h-3.5 transition-transform group-hover:translate-y-0.5" />
+                                        <span>Upload</span>
+                                    </button>
                                 </div>
                             </div>
                             <input ref={fileInputRef} type="file" multiple hidden accept={allowedExtensions.join(',')} onChange={(e) => { handleUpload(e.target.files); e.target.value = '' }} />
@@ -740,65 +849,109 @@ export default function StudentAssignmentPage() {
                                 onDrop={(e) => { e.preventDefault(); handleUpload(e.dataTransfer.files) }}
                             >
                                 {files.length === 0 ? (
-                                    <div
-                                        className="flex flex-col items-center justify-center py-8 cursor-pointer text-center"
-                                        onClick={() => fileInputRef.current?.click()}
-                                    >
-                                        <UploadIcon className="w-8 h-8 text-[#505050] mb-2" />
-                                        <p className="text-[11px] text-[#858585]">Drop files or click to upload</p>
-                                        <p className="text-[10px] text-[#606060] mt-1">Max {maxFileSizeMB}MB per file</p>
+                                    <div className="flex flex-col items-center justify-center py-10 text-center px-3">
+                                        <div className="w-12 h-12 rounded-xl bg-[#0e639c]/15 flex items-center justify-center mb-3 border border-[#0e639c]/25">
+                                            <UploadIcon className="w-6 h-6 text-[#4fc1ff]" />
+                                        </div>
+                                        <p className="text-[12px] text-[#e6e6e6] font-medium">Upload your files to start</p>
+                                        <p className="text-[11px] text-[#bdbdbd] mt-1">
+                                            Drag & drop here, or click upload. Max {maxFileSizeMB}MB per file.
+                                        </p>
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="mt-4 h-9 px-4 rounded-lg bg-gradient-to-r from-[#0e639c] to-[#1177bb] hover:from-[#1177bb] hover:to-[#1588cc] text-white text-[12px] font-semibold inline-flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-200 active:scale-95"
+                                        >
+                                            <UploadIcon className="w-4 h-4 transition-transform group-hover:translate-y-0.5" />
+                                            <span>Upload files</span>
+                                        </button>
                                     </div>
                                 ) : (
-                                    <div className="space-y-0.5 pl-4">
-                                        {files.map((file) => (
-                                            <div
-                                                key={file.name}
-                                                onClick={() => setSelectedFile(file)}
-                                                className={`group flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-[12px] ${selectedFile?.name === file.name
-                                                    ? 'bg-[#094771] text-white'
-                                                    : 'text-[#cccccc] hover:bg-[#2a2d2e]'
-                                                    }`}
-                                            >
-                                                <span className="text-xs shrink-0">{getFileIcon(file.name)}</span>
-                                                {editingFileName === file.name ? (
-                                                    <input
-                                                        type="text"
-                                                        value={renameDraft}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        onChange={(e) => { e.stopPropagation(); setRenameDraft(e.target.value) }}
-                                                        onBlur={() => { renameFile(file.name, renameDraft.trim()) }}
-                                                        onKeyDown={(e) => {
-                                                            e.stopPropagation()
-                                                            if (e.key === 'Enter') {
-                                                                renameFile(file.name, renameDraft.trim())
-                                                                    ; (e.target as HTMLInputElement).blur()
-                                                            }
-                                                            if (e.key === 'Escape') {
-                                                                setRenameDraft(file.name)
-                                                                setEditingFileName(null)
-                                                                    ; (e.target as HTMLInputElement).blur()
-                                                            }
-                                                        }}
-                                                        autoFocus
-                                                        className="flex-1 min-w-0 bg-[#1e1e1e] border border-[#0e639c] rounded px-1 py-0.5 font-mono text-[12px] text-[#d4d4d4] focus:outline-none focus:ring-1 focus:ring-[#0e639c]"
-                                                    />
-                                                ) : (
-                                                    <span
-                                                        className="flex-1 truncate font-mono text-[12px]"
-                                                        onDoubleClick={(e) => { e.stopPropagation(); startRenameFile(file.name) }}
-                                                        title="Double-click to rename"
-                                                    >
-                                                        {file.name}
-                                                    </span>
-                                                )}
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); removeFile(file.name) }}
-                                                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/30 text-[#858585] hover:text-red-400 shrink-0"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        ))}
+                                    <div className="space-y-2 pl-4">
+                                        {(() => {
+                                            const studentFiles = files.filter((f) => f.origin !== 'utility')
+                                            const utilityFiles = files.filter((f) => f.origin === 'utility')
+                                            return (
+                                                <>
+                                                    <div className="space-y-0.5">
+                                                        {studentFiles.map((file) => (
+                                                            <div
+                                                                key={file.name}
+                                                                onClick={() => setSelectedFile(file)}
+                                                                className={`group flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-[12px] ${selectedFile?.name === file.name
+                                                                    ? 'bg-[#094771] text-white'
+                                                                    : 'text-[#cccccc] hover:bg-[#2a2d2e]'
+                                                                    }`}
+                                                            >
+                                                                <span className="text-xs shrink-0">{getFileIcon(file.name)}</span>
+                                                                {editingFileName === file.name ? (
+                                                                    <input
+                                                                        type="text"
+                                                                        value={renameDraft}
+                                                                        ref={renameInputRef}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        onChange={(e) => { e.stopPropagation(); setRenameDraft(e.target.value) }}
+                                                                        onBlur={() => { renameFile(file.name, renameDraft.trim()) }}
+                                                                        onKeyDown={(e) => {
+                                                                            e.stopPropagation()
+                                                                            if (e.key === 'Enter') {
+                                                                                renameFile(file.name, renameDraft.trim())
+                                                                                    ; (e.target as HTMLInputElement).blur()
+                                                                            }
+                                                                            if (e.key === 'Escape') {
+                                                                                setRenameDraft(file.name)
+                                                                                setEditingFileName(null)
+                                                                                    ; (e.target as HTMLInputElement).blur()
+                                                                            }
+                                                                        }}
+                                                                        autoFocus
+                                                                        className="flex-1 min-w-0 bg-[#1e1e1e] border border-[#0e639c] rounded px-1 py-0.5 font-mono text-[12px] text-[#d4d4d4] focus:outline-none focus:ring-1 focus:ring-[#0e639c]"
+                                                                    />
+                                                                ) : (
+                                                                    <span
+                                                                        className="flex-1 truncate font-mono text-[12px]"
+                                                                        onDoubleClick={(e) => { e.stopPropagation(); startRenameFile(file.name) }}
+                                                                        title="Double-click to rename"
+                                                                    >
+                                                                        {file.name}
+                                                                    </span>
+                                                                )}
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); removeFile(file.name) }}
+                                                                    className={`opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/30 text-[#858585] hover:text-red-400 shrink-0 ${file.readOnly || file.origin === 'utility' ? 'hidden' : ''}`}
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    {utilityFiles.length > 0 && (
+                                                        <div className="pt-2">
+                                                            <div className="flex items-center gap-1 px-2 py-1 text-[10px] text-[#bdbdbd] uppercase tracking-wider">
+                                                                <ChevronDown className="w-3 h-3" />
+                                                                <Paperclip className="w-3 h-3" />
+                                                                <span className="font-semibold">Utility files (read-only)</span>
+                                                            </div>
+                                                            <div className="space-y-0.5 pl-4">
+                                                                {utilityFiles.map((file) => (
+                                                                    <div
+                                                                        key={file.name}
+                                                                        onClick={() => setSelectedFile(file)}
+                                                                        className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer text-[12px] ${selectedFile?.name === file.name
+                                                                            ? 'bg-[#094771] text-white'
+                                                                            : 'text-[#cfcfcf] hover:bg-[#2a2d2e]'
+                                                                            }`}
+                                                                    >
+                                                                        <span className="text-xs shrink-0">{getFileIcon(file.name)}</span>
+                                                                        <span className="flex-1 truncate font-mono text-[12px]">{file.name}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )
+                                        })()}
 
                                         {uploadedDatasets.length > 0 && (
                                             <div className="mt-3">
@@ -838,6 +991,7 @@ export default function StudentAssignmentPage() {
                                         <input
                                             type="text"
                                             value={renameDraft}
+                                            ref={renameInputRef}
                                             onClick={(e) => e.stopPropagation()}
                                             onChange={(e) => { e.stopPropagation(); setRenameDraft(e.target.value) }}
                                             onBlur={() => { renameFile(file.name, renameDraft.trim()) }}
@@ -858,7 +1012,10 @@ export default function StudentAssignmentPage() {
                                             {file.name}
                                         </span>
                                     )}
-                                    <button onClick={(e) => { e.stopPropagation(); removeFile(file.name) }} className="ml-1 p-0.5 rounded hover:bg-[#505050] shrink-0">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); removeFile(file.name) }}
+                                        className={`ml-1 p-0.5 rounded hover:bg-[#505050] shrink-0 ${file.readOnly || file.origin === 'utility' ? 'hidden' : ''}`}
+                                    >
                                         <X className="w-3 h-3" />
                                     </button>
                                 </div>
@@ -888,13 +1045,10 @@ export default function StudentAssignmentPage() {
                                         <div className="text-center space-y-4">
                                             <Code className="w-16 h-16 mx-auto text-[#505050]" />
                                             <p className="text-sm text-[#858585]">
-                                                {files.length > 0 ? 'Select a file to start editing' : 'Upload or create a file to get started'}
+                                                {files.length > 0 ? 'Select a file to start editing' : 'Upload files to get started'}
                                             </p>
                                             {files.length === 0 && (
                                                 <div className="flex gap-2 justify-center">
-                                                    <Button onClick={handleNewFile} size="sm" className="bg-[#0e639c] hover:bg-[#1177bb] text-white text-xs h-7">
-                                                        <Plus className="w-3 h-3 mr-1" /> New File
-                                                    </Button>
                                                     <Button onClick={() => fileInputRef.current?.click()} size="sm" variant="outline" className="text-[#cccccc] border-[#505050] hover:bg-[#505050] text-xs h-7">
                                                         <UploadIcon className="w-3 h-3 mr-1" /> Upload
                                                     </Button>
@@ -1039,7 +1193,7 @@ export default function StudentAssignmentPage() {
                                                         </div>
                                                         {runResult.results.map((test) => {
                                                             const isExpanded = expandedTests.has(test.id)
-                                                            const hasDiffView = (test.expected_output != null && test.expected_output !== '') || (test.output != null && test.output !== '')
+                                                            const hasDiffView = true
                                                             return (
                                                                 <div key={test.id} className={`px-3 py-2 rounded border ${test.passed ? 'border-[#2ea04366] bg-[#2ea04310]' : 'border-[#f4474766] bg-[#f4474710]'} space-y-1`}>
                                                                     <div className="flex items-center gap-3">
@@ -1056,26 +1210,24 @@ export default function StudentAssignmentPage() {
                                                                         </div>
                                                                         <div className="flex items-center gap-2 shrink-0">
                                                                             <div className="text-[10px] text-[#858585]">{test.score}/{test.max_score} pts</div>
-                                                                            {hasDiffView && (
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => toggleTestDetails(test.id)}
-                                                                                    className="flex items-center gap-1 text-[10px] text-[#858585] hover:text-[#cccccc]"
-                                                                                >
-                                                                                    <span>Details</span>
-                                                                                    {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                                                                </button>
-                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => toggleTestDetails(test.id)}
+                                                                                className="flex items-center gap-1 text-[10px] text-[#858585] hover:text-[#cccccc]"
+                                                                            >
+                                                                                <span>Details</span>
+                                                                                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                                                            </button>
                                                                         </div>
                                                                     </div>
-                                                                    {isExpanded && hasDiffView && (
+                                                                    {isExpanded && (
                                                                         <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-[#cccccc]">
                                                                             <div className="space-y-1">
                                                                                 <div className="flex items-center gap-1 text-[#858585]">
                                                                                     <span className="uppercase tracking-wider text-[9px]">Expected</span>
                                                                                 </div>
                                                                                 <pre className="max-h-40 overflow-auto bg-[#1e1e1e] border border-[#3c3c3c] rounded p-2 whitespace-pre-wrap">
-                                                                                    {test.expected_output ?? ''}
+                                                                                    {(test.expected_output ?? '') || '(empty)'}
                                                                                 </pre>
                                                                             </div>
                                                                             <div className="space-y-1">
@@ -1083,7 +1235,7 @@ export default function StudentAssignmentPage() {
                                                                                     <span className="uppercase tracking-wider text-[9px]">Actual</span>
                                                                                 </div>
                                                                                 <pre className="max-h-40 overflow-auto bg-[#1e1e1e] border border-[#3c3c3c] rounded p-2 whitespace-pre-wrap">
-                                                                                    {test.output ?? ''}
+                                                                                    {(test.output ?? '') || '(empty)'}
                                                                                 </pre>
                                                                             </div>
                                                                         </div>
@@ -1132,11 +1284,11 @@ export default function StudentAssignmentPage() {
                     {rightPanel && (
                         <div className="w-80 bg-[#252526] border-l border-[#3c3c3c] flex flex-col min-h-0 shrink-0">
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-[#3c3c3c] shrink-0">
-                                <div className="flex items-center gap-2 text-[13px] font-semibold text-white">
+                                <div className="flex items-center gap-2 text-[14px] font-semibold text-white">
                                     {rightPanel === 'description' && <><BookOpen className="w-4 h-4 text-[#569cd6]" /> Description</>}
                                     {rightPanel === 'instructions' && <><Info className="w-4 h-4 text-[#dcdcaa]" /> Instructions</>}
                                     {rightPanel === 'rubric' && <><ClipboardList className="w-4 h-4 text-[#c586c0]" /> Rubric</>}
-                                    {rightPanel === 'history' && <><History className="w-4 h-4 text-[#4ec9b0]" /> Submissions</>}
+                                    {rightPanel === 'grading' && <><Target className="w-4 h-4 text-[#4ec9b0]" /> Grading</>}
                                     {rightPanel === 'supplementary' && <><Paperclip className="w-4 h-4 text-[#dcdcaa]" /> Supplementary Files</>}
                                     {rightPanel === 'custom' && <><UploadIcon className="w-4 h-4 text-[#4ec9b0]" /> Custom Input</>}
                                 </div>
@@ -1145,7 +1297,7 @@ export default function StudentAssignmentPage() {
                                 </button>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto p-4 text-[13px] leading-relaxed">
+                            <div className="flex-1 overflow-y-auto p-4 text-[14px] leading-relaxed">
                                 {rightPanel === 'description' && (
                                     <div className="space-y-4">
                                         <p className="text-[#cccccc] whitespace-pre-wrap">{assignment.description || 'No description provided.'}</p>
@@ -1195,7 +1347,7 @@ export default function StudentAssignmentPage() {
                                     <div>
                                         {assignment.rubric ? (
                                             <div className="space-y-4">
-                                                <p className="text-[11px] text-[#858585]">
+                                                <p className="text-[12px] text-[#bdbdbd]">
                                                     Grading is based on the rubric criteria below. Each item contributes to your total score.
                                                 </p>
                                                 <div className="rounded-lg border border-[#3c3c3c] overflow-hidden">
@@ -1214,12 +1366,9 @@ export default function StudentAssignmentPage() {
                                                                         {item.points} pts
                                                                     </span>
                                                                 </div>
-                                                                {(item.description || item.weight != null) && (
-                                                                    <div className="mt-1 text-[11px] text-[#858585]">
-                                                                        {item.description && <p className="whitespace-pre-wrap">{item.description}</p>}
-                                                                        {item.weight != null && (
-                                                                            <p className="mt-0.5 text-[#707070]">Weight: {item.weight}% of total</p>
-                                                                        )}
+                                                                {item.points != null && (
+                                                                    <div className="mt-1 text-[11px] text-white">
+                                                                        <p className="mt-0.5 text-white">Points: {item.points}</p>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -1232,6 +1381,77 @@ export default function StudentAssignmentPage() {
                                                 <ClipboardList className="w-10 h-10 mx-auto text-[#505050] mb-3" />
                                                 <p className="text-[#858585]">No rubric for this assignment.</p>
                                             </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {rightPanel === 'grading' && (
+                                    <div className="space-y-4">
+                                        {!isGraded ? (
+                                            <div className="text-center py-8">
+                                                <Target className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                <p className="text-[#cfcfcf] font-medium">Not graded yet</p>
+                                                <p className="text-[12px] text-[#bdbdbd] mt-1">Your submission is still being graded.</p>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="rounded-lg border border-[#3c3c3c] bg-[#1e1e1e] p-3">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-[12px] uppercase tracking-wider text-[#bdbdbd] font-semibold">Score</p>
+                                                        <p className="text-white font-semibold">
+                                                            {(latestSubmissionDetail?.final_score ?? latestSubmission?.final_score ?? 0).toFixed(1)} / {assignment.max_score}
+                                                        </p>
+                                                    </div>
+                                                    <div className="mt-2 grid grid-cols-2 gap-2 text-[12px]">
+                                                        <div className="rounded border border-[#3c3c3c] bg-[#252526] p-2">
+                                                            <p className="text-[#bdbdbd]">Tests</p>
+                                                            <p className="text-white font-medium">{(latestSubmissionDetail?.test_score ?? 0).toFixed(1)} pts</p>
+                                                        </div>
+                                                        <div className="rounded border border-[#3c3c3c] bg-[#252526] p-2">
+                                                            <p className="text-[#bdbdbd]">Rubric</p>
+                                                            <p className="text-white font-medium">{(latestSubmissionDetail?.rubric_score ?? 0).toFixed(2)} pts</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="rounded-lg border border-[#3c3c3c] overflow-hidden">
+                                                    <div className="px-3 py-2 bg-[#1e1e1e] border-b border-[#3c3c3c] flex items-center justify-between">
+                                                        <span className="text-[12px] font-semibold text-[#cfcfcf] uppercase tracking-wider">Rubric breakdown</span>
+                                                    </div>
+                                                    {latestSubmissionDetail?.rubric_scores?.length ? (
+                                                        <div className="divide-y divide-[#3c3c3c]">
+                                                            {latestSubmissionDetail.rubric_scores.map((rs, idx) => (
+                                                                <div key={`${rs.rubric_item_id}-${idx}`} className="px-3 py-2.5 hover:bg-[#2a2d2e]">
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="text-[13px] font-medium text-white">
+                                                                            {rs?.item?.name || `Criterion ${idx + 1}`}
+                                                                        </span>
+                                                                        <span className="text-[12px] text-white font-semibold">
+                                                                            {Number(rs.score ?? 0).toFixed(2)} / {Number(rs.max_score ?? 0).toFixed(2)}
+                                                                        </span>
+                                                                    </div>
+                                                                    {rs.comment && (
+                                                                        <p className="mt-1 text-[12px] text-[#cfcfcf] whitespace-pre-wrap">
+                                                                            {rs.comment}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="p-3 text-[12px] text-[#bdbdbd]">
+                                                            No rubric item grades were recorded.
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="rounded-lg border border-[#3c3c3c] bg-[#1e1e1e] p-3">
+                                                    <p className="text-[12px] font-semibold text-[#cfcfcf] uppercase tracking-wider">Feedback</p>
+                                                    <p className="mt-2 text-[13px] text-[#e6e6e6] whitespace-pre-wrap">
+                                                        {latestSubmissionDetail?.feedback?.trim() ? latestSubmissionDetail.feedback : 'No feedback provided.'}
+                                                    </p>
+                                                </div>
+                                            </>
                                         )}
                                     </div>
                                 )}
@@ -1392,45 +1612,6 @@ export default function StudentAssignmentPage() {
                                     </div>
                                 )}
 
-                                {rightPanel === 'history' && (
-                                    <div>
-                                        {isLoadingSubs ? (
-                                            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-[#0e639c]" /></div>
-                                        ) : submissions.length === 0 ? (
-                                            <div className="text-center py-8">
-                                                <History className="w-10 h-10 mx-auto text-[#505050] mb-3" />
-                                                <p className="text-[#858585]">No submissions yet</p>
-                                                <p className="text-[10px] text-[#606060] mt-1">Submit your code to see history</p>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                <p className="text-[11px] text-[#858585] mb-3">
-                                                    {submissions.length} submission{submissions.length !== 1 ? 's' : ''}
-                                                    {maxAttempts > 0 && ` · ${attemptsLeft} left`}
-                                                </p>
-                                                {submissions.map((sub, i) => (
-                                                    <div key={sub.id} className={`p-3 rounded border ${i === 0 ? 'border-[#0e639c]/50 bg-[#0e639c]/10' : 'border-[#3c3c3c] bg-[#1e1e1e]'}`}>
-                                                        <div className="flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-[12px] font-medium text-white">#{sub.attempt_number}</span>
-                                                                {i === 0 && <span className="text-[9px] px-1 py-0 bg-[#0e639c] text-white rounded">Latest</span>}
-                                                                {sub.is_late && <span className="text-[9px] px-1 py-0 bg-[#665500] text-[#dcdcaa] rounded">Late</span>}
-                                                            </div>
-                                                            <span className="text-[14px] font-bold text-white">
-                                                                {sub.final_score !== null ? sub.final_score.toFixed(1) : '-'}
-                                                                <span className="text-[10px] text-[#858585] font-normal">/{assignment.max_score}</span>
-                                                            </span>
-                                                        </div>
-                                                        <p className="text-[10px] text-[#858585] mt-1">
-                                                            {format(new Date(sub.submitted_at || sub.created_at), 'MMM dd, yyyy · hh:mm a')}
-                                                            {sub.tests_total > 0 && ` · ${sub.tests_passed}/${sub.tests_total} tests`}
-                                                        </p>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
                             </div>
                         </div>
                     )}
@@ -1503,7 +1684,7 @@ export default function StudentAssignmentPage() {
                         )}
                         {maxAttempts > 0 && (
                             <p className="text-xs text-gray-500 text-center">
-                                This will use attempt <strong>{submissions.length + 1}</strong> of <strong>{maxAttempts}</strong>.
+                                This will use attempt <strong>{attemptsUsed + 1}</strong> of <strong>{maxAttempts}</strong>.
                             </p>
                         )}
                         <div className="space-y-2">

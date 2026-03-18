@@ -12,7 +12,7 @@ from pathlib import Path
 
 from app.api.deps import get_db, get_current_user, require_role
 from app.models import (
-    User, UserRole, Assignment, Course, CourseAssistant, Submission, SubmissionFile, TestResult, RubricScore,
+    User, UserRole, Assignment, Course, CourseAssistant, Submission, SubmissionFile, TestResult as TestResultORM, RubricScore,
     Enrollment, EnrollmentStatus, Group, GroupMembership, AuditLog, NotificationType
 )
 from app.models.assignment import Rubric, RubricItem, TestCase
@@ -234,6 +234,7 @@ def get_submission(
             joinedload(Submission.files),
             joinedload(Submission.test_results),
             joinedload(Submission.plagiarism_matches),
+            joinedload(Submission.rubric_scores).joinedload(RubricScore.item),
             joinedload(Submission.assignment).joinedload(Assignment.course),
         )
         .filter(Submission.id == submission_id)
@@ -803,8 +804,8 @@ def save_manual_grade(
         try:
             overrides = json_lib.loads(test_overrides_json)
             for ov in overrides:
-                tr = db.query(TestResult).filter(
-                    and_(TestResult.id == ov["id"], TestResult.submission_id == submission_id)
+                tr = db.query(TestResultORM).filter(
+                    and_(TestResultORM.id == ov["id"], TestResultORM.submission_id == submission_id)
                 ).first()
                 if tr:
                     tr.points_awarded = float(ov.get("points_awarded", tr.points_awarded))
@@ -816,7 +817,10 @@ def save_manual_grade(
     if rubric_scores_json:
         try:
             rubric_data = json_lib.loads(rubric_scores_json)
+            rubric_total = 0.0
             for item in rubric_data:
+                score_val = float(item["score"])
+                rubric_total += score_val
                 existing = db.query(RubricScore).filter(
                     and_(
                         RubricScore.submission_id == submission_id,
@@ -832,12 +836,13 @@ def save_manual_grade(
                     db.add(RubricScore(
                         submission_id=submission_id,
                         rubric_item_id=item["rubric_item_id"],
-                        score=float(item["score"]),
+                        score=score_val,
                         max_score=float(item.get("max_score", 0)),
                         comment=item.get("comment"),
                         graded_by=current_user.id,
                         graded_at=datetime.utcnow(),
                     ))
+            submission.rubric_score = rubric_total
         except Exception as e:
             logger.warning(f"Error processing rubric scores: {e}")
 
