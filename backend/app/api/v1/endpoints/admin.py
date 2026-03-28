@@ -1,6 +1,9 @@
-from typing import List
+from typing import List, Optional
 import os
 import tempfile
+import secrets
+import string
+import re
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, text
@@ -15,8 +18,50 @@ from app.core.logging import logger
 from app.core.config import settings
 from app.core.celery_app import celery_app
 from app.services.s3_storage import s3_service
+from pydantic import BaseModel, EmailStr
 
 router = APIRouter()
+
+
+class BulkStudentImportItem(BaseModel):
+    email: EmailStr
+    full_name: Optional[str] = None
+    student_id: str
+
+
+class BulkStudentImportRequest(BaseModel):
+    students: List[BulkStudentImportItem]
+
+
+def _generate_temp_password(length: int = 12) -> str:
+    """Generate a password that satisfies strength requirements."""
+    if length < 8:
+        length = 8
+
+    lower = string.ascii_lowercase
+    upper = string.ascii_uppercase
+    digits = string.digits
+    symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+    all_chars = lower + upper + digits + symbols
+
+    required = [
+        secrets.choice(lower),
+        secrets.choice(upper),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    remaining = [secrets.choice(all_chars) for _ in range(length - len(required))]
+    password_chars = required + remaining
+    secrets.SystemRandom().shuffle(password_chars)
+    return "".join(password_chars)
+
+
+def _derive_name_from_email(email: str) -> str:
+    local_part = email.split("@", 1)[0]
+    tokens = [t for t in re.split(r"[._\-\s]+", local_part) if t]
+    if not tokens:
+        return "Student"
+    return " ".join(token.capitalize() for token in tokens)
 
 
 @router.get("/users", response_model=List[UserSchema])
@@ -360,6 +405,93 @@ def get_system_stats(
             "logins_24h": recent_logins,
             "submissions_24h": recent_submissions
         }
+    }
+
+
+@router.post("/students/bulk-import")
+def bulk_import_students(
+    request: BulkStudentImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Bulk create student accounts from a parsed file payload (admin only)."""
+    if not request.students:
+        raise HTTPException(status_code=400, detail="No students provided")
+
+    created = 0
+    existing_emails: List[str] = []
+    duplicate_emails_in_file: List[str] = []
+    duplicate_student_ids_in_file: List[str] = []
+    existing_student_ids: List[str] = []
+
+    input_emails = [s.email.strip().lower() for s in request.students if s.email]
+    input_student_ids = [s.student_id.strip() for s in request.students if s.student_id.strip()]
+
+    existing_email_set = set(
+        email for (email,) in db.query(User.email).filter(User.email.in_(input_emails)).all()
+    )
+    existing_student_id_set = set()
+    if input_student_ids:
+        existing_student_id_set = set(
+            sid for (sid,) in db.query(User.student_id).filter(User.student_id.in_(input_student_ids)).all()
+        )
+
+    seen_emails = set()
+    seen_student_ids = set()
+
+    for row in request.students:
+        email = row.email.strip().lower()
+        student_id = row.student_id.strip()
+
+        if email in seen_emails:
+            duplicate_emails_in_file.append(email)
+            continue
+        seen_emails.add(email)
+
+        if email in existing_email_set:
+            existing_emails.append(email)
+            continue
+
+        if student_id in seen_student_ids:
+            duplicate_student_ids_in_file.append(student_id)
+            continue
+        seen_student_ids.add(student_id)
+
+        if student_id in existing_student_id_set:
+            existing_student_ids.append(student_id)
+            continue
+
+        full_name = (row.full_name or "").strip() or _derive_name_from_email(email)
+
+        user = User(
+            email=email,
+            hashed_password=get_password_hash(_generate_temp_password()),
+            full_name=full_name,
+            role=UserRole.STUDENT,
+            student_id=student_id,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(user)
+        created += 1
+
+    db.commit()
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        event_type="bulk_student_import",
+        description=f"Bulk imported {created} student account(s)"
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "created": created,
+        "skipped": len(existing_emails) + len(duplicate_emails_in_file) + len(duplicate_student_ids_in_file) + len(existing_student_ids),
+        "existing_emails": sorted(list(set(existing_emails))),
+        "duplicate_emails_in_file": sorted(list(set(duplicate_emails_in_file))),
+        "existing_student_ids": sorted(list(set(existing_student_ids))),
+        "duplicate_student_ids_in_file": sorted(list(set(duplicate_student_ids_in_file))),
     }
 
 

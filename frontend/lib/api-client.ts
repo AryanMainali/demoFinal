@@ -518,6 +518,11 @@ class ApiClient {
         return response.data;
     }
 
+    async bulkImportStudents(students: Array<{ email: string; full_name?: string; student_id?: string }>) {
+        const response = await this.client.post('/admin/students/bulk-import', { students });
+        return response.data;
+    }
+
     // Language endpoints
     async getLanguages() {
         const response = await this.client.get('/languages');
