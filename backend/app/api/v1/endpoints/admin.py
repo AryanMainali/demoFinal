@@ -1,7 +1,9 @@
 from typing import List
+import os
+import tempfile
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, and_, text
 from datetime import datetime, timedelta
 
 from app.api.deps import get_db, get_current_user, require_role
@@ -10,6 +12,9 @@ from app.schemas.user import User as UserSchema, UserUpdate, UserCreate
 from app.schemas.audit_log import AuditLog as AuditLogSchema
 from app.core.security import get_password_hash
 from app.core.logging import logger
+from app.core.config import settings
+from app.core.celery_app import celery_app
+from app.services.s3_storage import s3_service
 
 router = APIRouter()
 
@@ -355,6 +360,58 @@ def get_system_stats(
             "logins_24h": recent_logins,
             "submissions_24h": recent_submissions
         }
+    }
+
+
+@router.get("/system-health")
+def get_system_health(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Get health status for core services (admin only)."""
+    services = [
+        {"name": "API Server", "status": "online"},
+        {"name": "Database", "status": "offline"},
+        {"name": "File Storage", "status": "offline"},
+        {"name": "Grading Engine", "status": "offline"},
+    ]
+
+    # Database: verify query execution through current DB session.
+    try:
+        db.execute(text("SELECT 1"))
+        services[1]["status"] = "online"
+    except Exception as e:
+        logger.warning(f"Database health check failed: {str(e)}")
+
+    # File storage: check S3 bucket access when enabled; otherwise local directory writability.
+    try:
+        if settings.USE_S3_STORAGE:
+            s3_service.s3_client.head_bucket(Bucket=s3_service.bucket_name)
+        else:
+            target_dir = settings.SUBMISSIONS_DIR
+            os.makedirs(target_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=target_dir, delete=True) as temp_file:
+                temp_file.write(b"ok")
+                temp_file.flush()
+        services[2]["status"] = "online"
+    except Exception as e:
+        logger.warning(f"File storage health check failed: {str(e)}")
+
+    # Grading engine: check Celery worker availability.
+    try:
+        inspector = celery_app.control.inspect(timeout=1)
+        ping = inspector.ping() if inspector else None
+        if ping:
+            services[3]["status"] = "online"
+    except Exception as e:
+        logger.warning(f"Grading engine health check failed: {str(e)}")
+
+    overall_status = "online" if all(s["status"] == "online" for s in services) else "degraded"
+
+    return {
+        "overall_status": overall_status,
+        "services": services,
+        "checked_at": datetime.utcnow().isoformat() + "Z",
     }
 
 

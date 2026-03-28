@@ -21,6 +21,12 @@ export default function AdminDashboard() {
         refetchInterval: 30000,
     });
 
+    const { data: systemHealthData } = useQuery({
+        queryKey: ['system-health'],
+        queryFn: () => apiClient.getSystemHealth(),
+        refetchInterval: 30000,
+    });
+
     const recentActivity = [
         { id: 1, user: 'John Smith', action: 'Submitted assignment', time: '2 minutes ago', type: 'submission' },
         { id: 2, user: 'Jane Doe', action: 'Created new course', time: '15 minutes ago', type: 'course' },
@@ -29,12 +35,17 @@ export default function AdminDashboard() {
         { id: 5, user: 'Charlie Davis', action: 'Enrolled in CS101', time: '3 hours ago', type: 'enrollment' },
     ];
 
-    const systemHealth = [
-        { name: 'API Server', status: 'healthy', uptime: '99.9%' },
-        { name: 'Database', status: 'healthy', uptime: '99.8%' },
-        { name: 'File Storage', status: 'healthy', uptime: '100%' },
-        { name: 'Grading Engine', status: 'healthy', uptime: '99.5%' },
+    const defaultSystemHealth = [
+        { name: 'API Server', status: 'offline' },
+        { name: 'Database', status: 'offline' },
+        { name: 'File Storage', status: 'offline' },
+        { name: 'Grading Engine', status: 'offline' },
     ];
+    const systemHealth = systemHealthData?.services || defaultSystemHealth;
+    const allSystemsOnline = systemHealth.every((service: { status: string }) => service.status === 'online');
+    const lastCheckedLabel = systemHealthData?.checked_at
+        ? new Date(systemHealthData.checked_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : 'just now';
 
     return (
         <div className="space-y-6">
@@ -126,30 +137,38 @@ export default function AdminDashboard() {
                                 <CardTitle>System Health</CardTitle>
                                 <CardDescription>Service status</CardDescription>
                             </div>
-                            <Badge variant="success">All Systems Operational</Badge>
+                            <Badge variant={allSystemsOnline ? 'success' : 'warning'}>
+                                {allSystemsOnline ? 'All Systems Online' : 'System Degraded'}
+                            </Badge>
                         </div>
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-4">
-                            {systemHealth.map((service) => (
+                            {systemHealth.map((service: { name: string; status: string }) => (
                                 <div key={service.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                     <div className="flex items-center gap-3">
-                                        <div className={`w-2 h-2 rounded-full ${service.status === 'healthy' ? 'bg-green-500' :
+                                        <div className={`w-2 h-2 rounded-full ${service.status === 'online' ? 'bg-green-500' :
                                             service.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
                                             }`} />
                                         <span className="text-sm font-medium text-gray-700">{service.name}</span>
                                     </div>
-                                    <span className="text-xs text-gray-500">{service.uptime} uptime</span>
+                                    <span className={`text-xs font-medium ${service.status === 'online' ? 'text-green-700' : 'text-red-700'}`}>
+                                        {service.status === 'online' ? 'Online' : 'Offline'}
+                                    </span>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                        <div className={`mt-4 p-4 rounded-lg border ${allSystemsOnline ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
                             <div className="flex items-start gap-3">
-                                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                                <CheckCircle className={`w-5 h-5 flex-shrink-0 ${allSystemsOnline ? 'text-green-600' : 'text-amber-600'}`} />
                                 <div>
-                                    <p className="text-sm font-medium text-green-800">Everything is running smoothly</p>
-                                    <p className="text-xs text-green-600 mt-0.5">Last checked 2 minutes ago</p>
+                                    <p className={`text-sm font-medium ${allSystemsOnline ? 'text-green-800' : 'text-amber-800'}`}>
+                                        {allSystemsOnline ? 'Everything is running smoothly' : 'Some services are currently unavailable'}
+                                    </p>
+                                    <p className={`text-xs mt-0.5 ${allSystemsOnline ? 'text-green-600' : 'text-amber-700'}`}>
+                                        Last checked at {lastCheckedLabel}
+                                    </p>
                                 </div>
                             </div>
                         </div>

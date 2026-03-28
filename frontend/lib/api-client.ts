@@ -508,6 +508,11 @@ class ApiClient {
         return response.data;
     }
 
+    async getSystemHealth() {
+        const response = await this.client.get('/admin/system-health');
+        return response.data;
+    }
+
     async createUser(data: any) {
         const response = await this.client.post('/admin/users', data);
         return response.data;
