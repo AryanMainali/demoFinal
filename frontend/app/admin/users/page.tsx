@@ -161,7 +161,7 @@ export default function UsersPage() {
             return;
         }
 
-        const data = usersToExport.map(user => ({
+        const data = usersToExport.map((user: User) => ({
             full_name: user.full_name,
             email: user.email,
             role: user.role,
