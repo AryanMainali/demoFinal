@@ -129,7 +129,6 @@ const getNavItems = (role: UserRole): NavItem[] => {
         { label: 'Courses', href: `${baseUrl}/courses`, icon: <BookIcon /> },
         { label: 'Languages', href: `${baseUrl}/languages`, icon: <SettingsIcon /> },
         { label: 'Security', href: `${baseUrl}/security`, icon: <AuditIcon /> },
-        { label: 'Reports', href: `${baseUrl}/reports`, icon: <ReportIcon /> },
         { label: 'Settings', href: `${baseUrl}/settings`, icon: <SettingsIcon /> },
     ];
 };
@@ -181,7 +180,6 @@ const getTopNavItems = (role: UserRole) => {
         { label: 'Courses', href: '/admin/courses' },
         { label: 'Languages', href: '/admin/languages' },
         { label: 'Security', href: '/admin/security' },
-        { label: 'Reports', href: '/admin/reports' },
         { label: 'Settings', href: '/admin/settings' },
     ];
 };
@@ -228,29 +226,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
     if (!user) return null;
 
-<<<<<<< HEAD
-    const topNavItems = getTopNavItems(user.role);
-    const isAdmin = user.role === 'ADMIN';
+    const currentUser = user;
+    const navItems = getNavItems(currentUser.role);
+    const topNavItems = getTopNavItems(currentUser.role);
+    const isAdmin = currentUser.role === 'ADMIN';
     const showSidebar = false;
     const showAdminTopNav = isAdmin && pathname.startsWith('/admin');
 
     // For students, remove the primary learning nav from the sidebar since we show it in the top nav
     // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu
-    const sidebarItems: NavItem[] = [];
-=======
-    const currentUser = user!;
-
-    const navItems = getNavItems(currentUser.role);
-    const topNavItems = getTopNavItems(currentUser.role);
-    const isAdmin = currentUser.role === 'ADMIN';
-    const isAdminDashboard = isAdmin && (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/'));
-
-    // For students, remove the primary learning nav from the sidebar since we show it in the top nav
-    // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu
-    const sidebarItems = currentUser.role === 'STUDENT'
+    const sidebarItems: NavItem[] = currentUser.role === 'STUDENT'
         ? navItems.filter(i => !['Dashboard', 'My Courses', 'Assignments', 'Grades', 'Progress', 'Schedule', 'Help', 'Settings'].includes(i.label))
         : navItems;
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
 
     const handleLogout = () => {
         logout();
@@ -281,14 +268,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
     return (
         <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-<<<<<<< HEAD
             {/* Sidebar (used only for admin; students and faculty use top nav only) */}
             {showSidebar && (
-=======
-            {/* Sidebar (was used only for admin; students and faculty use top nav only).
-                We now hide it for all admin pages to match the faculty-style layout. */}
-            {user.role === 'ADMIN' && false && (
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                 <>
                     {/* Mobile sidebar backdrop */}
                     {sidebarOpen && (
@@ -387,21 +368,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             )}
 
             {/* Main Content */}
-<<<<<<< HEAD
             <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${showSidebar ? 'lg:pl-72' : ''}`}>
-=======
-            <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${isAdmin && false ? 'lg:pl-72' : ''}`}>
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                 {/* Top Header */}
                 {(!isAdmin || showAdminTopNav) && (
                 <header className="flex-shrink-0 z-30 bg-white border-b border-gray-200 shadow-sm">
                     <div className="px-3 sm:px-4 lg:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 min-w-0">
                         {/* Left side */}
-<<<<<<< HEAD
                         {showSidebar ? (
-=======
-                        {isAdmin && false ? (
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                             <button
                                 onClick={() => setSidebarOpen(true)}
                                 className="rounded-md p-2 text-gray-500 hover:bg-gray-100 lg:hidden"

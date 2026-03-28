@@ -36,7 +36,7 @@ export function sortByLatest(notifications: NotificationItem[]): NotificationIte
 
 export async function fetchNotificationsByRole(role: UserRole): Promise<NotificationItem[]> {
     try {
-        const notifications = await apiClient.getNotifications(0, 50);
+        const notifications = (await apiClient.getNotifications(0, 50)) as NotificationItem[];
         const filtered = filterNotificationsByRole(notifications, role);
         return sortByLatest(filtered);
     } catch (error) {

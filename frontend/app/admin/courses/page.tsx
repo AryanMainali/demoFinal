@@ -2,12 +2,8 @@
 
 import { useState } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-<<<<<<< HEAD
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-=======
 import { useQuery } from '@tanstack/react-query';
 import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
 import apiClient from '@/lib/api-client';
 import { DataTable } from '@/components/ui/data-table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';

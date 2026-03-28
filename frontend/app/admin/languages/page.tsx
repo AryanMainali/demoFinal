@@ -312,26 +312,12 @@ export default function LanguagesPage() {
 
     return (
         <ProtectedRoute allowedRoles={['ADMIN']}>
-<<<<<<< HEAD
-                <div className="space-y-6">
-                    {/* Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <div>
-                            <h1 className="text-2xl font-bold text-gray-900">Programming Languages</h1>
-                            <p className="text-gray-500 mt-1">Configure supported programming languages for code execution</p>
-                        </div>
-                        <Button onClick={() => setCreateModal(true)}>
-                            <Plus className="w-4 h-4 mr-2" />
-                            Add Language
-                        </Button>
-=======
             <div className="space-y-6">
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900">Programming Languages</h1>
                         <p className="text-gray-500 mt-1">Configure supported programming languages for code execution</p>
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                     </div>
                     <Button onClick={() => setCreateModal(true)}>
                         <Plus className="w-4 h-4 mr-2" />
@@ -531,18 +517,6 @@ export default function LanguagesPage() {
                             <p className="font-medium text-green-600">0</p>
                         </div>
                     </div>
-<<<<<<< HEAD
-                    <ModalFooter>
-                        <Button variant="outline" onClick={() => setTestModal({ open: false })}>
-                            Close
-                        </Button>
-                        <Button>
-                            <Play className="w-4 h-4 mr-2" />
-                            Run Test
-                        </Button>
-                    </ModalFooter>
-                </Modal>
-=======
                 </div>
                 <ModalFooter>
                     <Button variant="outline" onClick={() => setTestModal({ open: false })}>
@@ -554,7 +528,6 @@ export default function LanguagesPage() {
                     </Button>
                 </ModalFooter>
             </Modal>
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
         </ProtectedRoute>
     );
 }

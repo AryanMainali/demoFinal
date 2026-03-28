@@ -117,34 +117,6 @@ export default function SettingsPage() {
 
     return (
         <ProtectedRoute allowedRoles={['ADMIN']}>
-<<<<<<< HEAD
-                <div className="space-y-6">
-                    <InnerHeaderDesign
-                        title="System Settings"
-                        subtitle="Configure system-wide settings and preferences"
-                        actions={
-                            hasChanges ? (
-                                <div className="flex gap-2">
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => window.location.reload()}
-                                        className="border-white/30 text-white hover:bg-white/20 hover:text-white"
-                                    >
-                                        <RefreshCw className="w-4 h-4 mr-2" />
-                                        Discard
-                                    </Button>
-                                    <Button
-                                        onClick={() => saveMutation.mutate(settings)}
-                                        className="bg-white/20 hover:bg-white/30 text-white border border-white/30"
-                                    >
-                                        <Save className="w-4 h-4 mr-2" />
-                                        Save Changes
-                                    </Button>
-                                </div>
-                            ) : undefined
-                        }
-                    />
-=======
             <div className="space-y-6">
                 <InnerHeaderDesign
                     title="System Settings"
@@ -171,7 +143,6 @@ export default function SettingsPage() {
                         ) : undefined
                     }
                 />
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
 
                 {hasChanges && (
                     <Alert type="warning" title="Unsaved Changes">
@@ -656,18 +627,6 @@ export default function SettingsPage() {
                         <Switch checked={true} onChange={() => { }} label="Submissions" />
                         <Switch checked={true} onChange={() => { }} label="Settings" />
                     </div>
-<<<<<<< HEAD
-                    <ModalFooter>
-                        <Button variant="outline" onClick={() => setBackupModal(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={() => setBackupModal(false)}>
-                            <Download className="w-4 h-4 mr-2" />
-                            Download Backup
-                        </Button>
-                    </ModalFooter>
-                </Modal>
-=======
                 </div>
                 <ModalFooter>
                     <Button variant="outline" onClick={() => setBackupModal(false)}>
@@ -679,7 +638,6 @@ export default function SettingsPage() {
                     </Button>
                 </ModalFooter>
             </Modal>
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
         </ProtectedRoute>
     );
 }

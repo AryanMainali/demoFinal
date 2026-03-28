@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { AdminLayout } from "@/components/layouts/AdminLayout";
 import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from "@/lib/api-client";
 import {

@@ -567,15 +567,51 @@ class ApiClient {
         return response.data;
     }
 
-    async getNotifications(unreadOnly: boolean = false, limit: number = 20) {
+    async getNotifications(unreadOnly: boolean, limit?: number): Promise<Array<{
+        id: number;
+        user_id: number;
+        type: string;
+        title: string;
+        message: string;
+        link?: string | null;
+        course_id?: number | null;
+        assignment_id?: number | null;
+        submission_id?: number | null;
+        is_read: boolean;
+        read_at?: string | null;
+        created_at: string;
+    }>>;
+    async getNotifications(skip?: number, limit?: number): Promise<Array<{
+        id: number;
+        user_id: number;
+        type: string;
+        title: string;
+        message: string;
+        link?: string | null;
+        course_id?: number | null;
+        assignment_id?: number | null;
+        submission_id?: number | null;
+        is_read: boolean;
+        read_at?: string | null;
+        created_at: string;
+    }>>;
+    async getNotifications(arg1: boolean | number = false, arg2?: number) {
+        const params = typeof arg1 === 'boolean'
+            ? {
+                unread_only: arg1,
+                limit: arg2 ?? 20,
+            }
+            : {
+                skip: arg1,
+                limit: arg2 ?? 50,
+            };
+
         const response = await this.client.get('/notifications', {
-            params: {
-                unread_only: unreadOnly,
-                limit,
-            },
+            params,
         });
         return response.data as Array<{
             id: number;
+            user_id: number;
             type: string;
             title: string;
             message: string;
@@ -584,6 +620,7 @@ class ApiClient {
             assignment_id?: number | null;
             submission_id?: number | null;
             is_read: boolean;
+            read_at?: string | null;
             created_at: string;
         }>;
     }
@@ -642,14 +679,6 @@ class ApiClient {
         formData.append('reviewer_notes', reviewerNotes);
         const response = await this.client.put(`/submissions/plagiarism-matches/${matchId}/review`, formData, {
             headers: { 'Content-Type': undefined as unknown as string },
-        });
-        return response.data;
-    }
-
-    // Notification endpoints
-    async getNotifications(skip: number = 0, limit: number = 50) {
-        const response = await this.client.get('/notifications', {
-            params: { skip, limit }
         });
         return response.data;
     }

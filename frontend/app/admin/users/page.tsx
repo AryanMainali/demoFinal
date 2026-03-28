@@ -192,19 +192,6 @@ export default function UsersPage() {
 
     return (
         <ProtectedRoute allowedRoles={['ADMIN']}>
-<<<<<<< HEAD
-                <div className="space-y-6">
-                    {/* Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <div>
-                            <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
-                            <p className="text-gray-500 mt-1">Manage all users in the system</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <Button variant="outline" size="sm" onClick={() => refetch()}>
-                                <RefreshCw className="w-4 h-4 mr-2" />
-                                Refresh
-=======
             <div className="space-y-6">
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -221,7 +208,6 @@ export default function UsersPage() {
                             <Button size="sm">
                                 <Plus className="w-4 h-4 mr-2" />
                                 Add User
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
                             </Button>
                         </Link>
                     </div>
@@ -296,45 +282,6 @@ export default function UsersPage() {
                             </div>
                         </div>
 
-<<<<<<< HEAD
-                {/* Reset Password Modal */}
-                <Modal
-                    isOpen={resetPasswordModal.open}
-                    onClose={() => {
-                        setResetPasswordModal({ open: false });
-                        setNewPassword('');
-                    }}
-                    title="Reset Password"
-                    description={`Set a new password for ${resetPasswordModal.user?.full_name}`}
-                >
-                    <div className="space-y-4">
-                        <Input
-                            label="New Password"
-                            type="password"
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            placeholder="Enter new password"
-                        />
-                        <p className="text-sm text-gray-500">
-                            Password must be at least 8 characters with uppercase, lowercase, number, and special character.
-                        </p>
-                    </div>
-                    <ModalFooter>
-                        <Button variant="outline" onClick={() => setResetPasswordModal({ open: false })}>
-                            Cancel
-                        </Button>
-                        <Button
-                            onClick={() => resetPasswordModal.user && resetPasswordMutation.mutate({
-                                userId: resetPasswordModal.user.id,
-                                password: newPassword
-                            })}
-                            disabled={!newPassword || resetPasswordMutation.isPending}
-                        >
-                            {resetPasswordMutation.isPending ? 'Resetting...' : 'Reset Password'}
-                        </Button>
-                    </ModalFooter>
-                </Modal>
-=======
                         {selectedUsers.length > 0 && (
                             <div className="mt-4 p-3 bg-[#862733]/5 rounded-lg flex items-center justify-between">
                                 <span className="text-sm text-[#862733]">
@@ -429,7 +376,6 @@ export default function UsersPage() {
                     </Button>
                 </ModalFooter>
             </Modal>
->>>>>>> da2abc89c08c008b8e8706c8dd5dfbc3ffc328c1
         </ProtectedRoute>
     );
 }
