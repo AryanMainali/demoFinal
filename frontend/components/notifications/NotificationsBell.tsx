@@ -105,7 +105,7 @@ export function NotificationsBell() {
 
         if (roleLower === 'admin') {
             if (n.course_id) return `/admin/courses`;
-            if (n.assignment_id) return `/admin/reports`;
+            if (n.assignment_id) return `/admin/courses`;
             return `/admin/dashboard`;
         }
 

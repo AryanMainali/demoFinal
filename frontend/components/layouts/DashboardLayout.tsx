@@ -131,7 +131,6 @@ const getNavItems = (role: UserRole): NavItem[] => {
         { label: 'Courses', href: `${baseUrl}/courses`, icon: <BookIcon /> },
         { label: 'Languages', href: `${baseUrl}/languages`, icon: <SettingsIcon /> },
         { label: 'Security', href: `${baseUrl}/security`, icon: <AuditIcon /> },
-        { label: 'Reports', href: `${baseUrl}/reports`, icon: <ReportIcon /> },
         { label: 'Settings', href: `${baseUrl}/settings`, icon: <SettingsIcon /> },
     ];
 };
@@ -181,7 +180,8 @@ const getTopNavItems = (role: UserRole) => {
         { label: 'Dashboard', href: '/admin/dashboard' },
         { label: 'Users', href: '/admin/users' },
         { label: 'Courses', href: '/admin/courses' },
-        { label: 'Reports', href: '/admin/reports' },
+        { label: 'Languages', href: '/admin/languages' },
+        { label: 'Security', href: '/admin/security' },
         { label: 'Settings', href: '/admin/settings' },
     ];
 };
@@ -228,16 +228,16 @@ export function DashboardLayout({ children, hideTopNav = false }: DashboardLayou
 
     if (!user) return null;
 
-    const currentUser = user!;
-
+    const currentUser = user;
     const navItems = getNavItems(currentUser.role);
     const topNavItems = getTopNavItems(currentUser.role);
     const isAdmin = currentUser.role === 'ADMIN';
-    const isAdminDashboard = isAdmin && (pathname === '/admin/dashboard' || pathname.startsWith('/admin/dashboard/'));
+    const showSidebar = false;
+    const showAdminTopNav = isAdmin && pathname.startsWith('/admin');
 
     // For students, remove the primary learning nav from the sidebar since we show it in the top nav
     // Also remove 'Help' and 'Settings' from the sidebar and surface them in the profile menu
-    const sidebarItems = currentUser.role === 'STUDENT'
+    const sidebarItems: NavItem[] = currentUser.role === 'STUDENT'
         ? navItems.filter(i => !['Dashboard', 'My Courses', 'Assignments', 'Grades', 'Progress', 'Schedule', 'Help', 'Settings'].includes(i.label))
         : navItems;
 
@@ -270,9 +270,8 @@ export function DashboardLayout({ children, hideTopNav = false }: DashboardLayou
 
     return (
         <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
-            {/* Sidebar (was used only for admin; students and faculty use top nav only).
-                We now hide it for all admin pages to match the faculty-style layout. */}
-            {user.role === 'ADMIN' && false && (
+            {/* Sidebar (used only for admin; students and faculty use top nav only) */}
+            {showSidebar && (
                 <>
                     {/* Mobile sidebar backdrop */}
                     {sidebarOpen && (

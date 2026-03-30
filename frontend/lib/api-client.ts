@@ -599,8 +599,18 @@ class ApiClient {
         return response.data;
     }
 
+    async getSystemHealth() {
+        const response = await this.client.get('/admin/system-health');
+        return response.data;
+    }
+
     async createUser(data: any) {
         const response = await this.client.post('/admin/users', data);
+        return response.data;
+    }
+
+    async bulkImportStudents(students: Array<{ email: string; full_name?: string; student_id?: string }>) {
+        const response = await this.client.post('/admin/students/bulk-import', { students });
         return response.data;
     }
 
@@ -658,6 +668,74 @@ class ApiClient {
         return response.data;
     }
 
+    async getNotifications(unreadOnly: boolean, limit?: number): Promise<Array<{
+        id: number;
+        user_id: number;
+        type: string;
+        title: string;
+        message: string;
+        link?: string | null;
+        course_id?: number | null;
+        assignment_id?: number | null;
+        submission_id?: number | null;
+        is_read: boolean;
+        read_at?: string | null;
+        created_at: string;
+    }>>;
+    async getNotifications(skip?: number, limit?: number): Promise<Array<{
+        id: number;
+        user_id: number;
+        type: string;
+        title: string;
+        message: string;
+        link?: string | null;
+        course_id?: number | null;
+        assignment_id?: number | null;
+        submission_id?: number | null;
+        is_read: boolean;
+        read_at?: string | null;
+        created_at: string;
+    }>>;
+    async getNotifications(arg1: boolean | number = false, arg2?: number) {
+        const params = typeof arg1 === 'boolean'
+            ? {
+                unread_only: arg1,
+                limit: arg2 ?? 20,
+            }
+            : {
+                skip: arg1,
+                limit: arg2 ?? 50,
+            };
+
+        const response = await this.client.get('/notifications', {
+            params,
+        });
+        return response.data as Array<{
+            id: number;
+            user_id: number;
+            type: string;
+            title: string;
+            message: string;
+            link?: string | null;
+            course_id?: number | null;
+            assignment_id?: number | null;
+            submission_id?: number | null;
+            is_read: boolean;
+            read_at?: string | null;
+            created_at: string;
+        }>;
+    }
+
+    async markNotificationRead(notificationId: number) {
+        const response = await this.client.put(`/notifications/${notificationId}/read`);
+        return response.data;
+    }
+
+    async markAllNotificationsRead() {
+        const response = await this.client.put('/notifications/read-all');
+        return response.data;
+    }
+
     // Admin settings endpoints
     async getSettings() {
         const response = await this.client.get('/admin/settings');
@@ -702,14 +780,6 @@ class ApiClient {
         formData.append('reviewer_notes', reviewerNotes);
         const response = await this.client.put(`/submissions/plagiarism-matches/${matchId}/review`, formData, {
             headers: { 'Content-Type': undefined as unknown as string },
-        });
-        return response.data;
-    }
-
-    // Notification endpoints
-    async getNotifications(skip: number = 0, limit: number = 50) {
-        const response = await this.client.get('/notifications', {
-            params: { skip, limit }
         });
         return response.data;
     }
