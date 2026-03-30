@@ -127,10 +127,10 @@ export const assignmentCreateSchema = z.object({
     // Grading weights
     test_weight: z.coerce.number().min(0).max(100).default(70),
     rubric_weight: z.coerce.number().min(0).max(100).default(30),
-
-    // Rubric point scale
+    
+    // Rubric settings (for weighted rubric)
     rubric_min_points: z.coerce.number().min(0).default(0),
-    rubric_max_points: z.coerce.number().min(0).default(10),
+    rubric_max_points: z.coerce.number().min(0.5).default(10),
     
     // Publishing
     is_published: z.coerce.boolean().default(false),
@@ -142,6 +142,10 @@ export const assignmentCreateSchema = z.object({
 .refine((data: any) => data.test_weight + data.rubric_weight === 100, {
     message: 'Test weight and manual weight must sum to 100%',
     path: ['rubric_weight'],
+})
+.refine((data: any) => data.rubric_max_points > data.rubric_min_points, {
+    message: 'Rubric max points must be greater than min points',
+    path: ['rubric_max_points'],
 });
 
 export type AssignmentCreateForm = z.infer<typeof assignmentCreateSchema>;

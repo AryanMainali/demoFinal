@@ -70,8 +70,6 @@ type TestCase = {
     ignore_whitespace: boolean;
     ignore_case: boolean;
     time_limit_seconds: number | null;
-    memory_limit_mb: number | null;
-    order: number;
 };
 
 type RubricItem = {
@@ -79,6 +77,8 @@ type RubricItem = {
     description: string;
     weight: number;
     points: number;
+    minPoints?: number;
+    maxPoints?: number;
     libraryItemId?: number;
 };
 type RubricLibraryItem = {
@@ -196,7 +196,12 @@ export function AssignmentUpsertPage({
         const loadLanguages = async () => {
             try {
                 const list = await apiClient.getLanguages();
-                setLanguages(list || []);
+                // Filter to only Python and Java
+                const filtered = (list || []).filter((lang: Language) => {
+                    const name = lang.name?.toLowerCase() || '';
+                    return name.includes('python') || name.includes('java');
+                });
+                setLanguages(filtered);
             } catch (e) {
                 console.error('Failed to load languages', e);
             }
@@ -265,8 +270,6 @@ export function AssignmentUpsertPage({
                         ignore_whitespace: tc.ignore_whitespace ?? true,
                         ignore_case: tc.ignore_case ?? false,
                         time_limit_seconds: tc.time_limit_seconds ?? null,
-                        memory_limit_mb: tc.memory_limit_mb ?? null,
-                        order: tc.order ?? index,
                     })),
                 );
 
@@ -322,8 +325,6 @@ export function AssignmentUpsertPage({
             ignore_whitespace: true,
             ignore_case: false,
             time_limit_seconds: null,
-            memory_limit_mb: null,
-            order: prev.length,
         }]);
     };
 
@@ -590,8 +591,6 @@ export function AssignmentUpsertPage({
                         ignore_whitespace: tc.ignore_whitespace,
                         ignore_case: tc.ignore_case,
                         time_limit_seconds: tc.time_limit_seconds || undefined,
-                        memory_limit_mb: tc.memory_limit_mb || undefined,
-                        order: index,
                     };
 
                     if (tc.input_type === 'stdin') {
@@ -820,7 +819,7 @@ export function AssignmentUpsertPage({
                 <Modal
                     isOpen={errorModalOpen}
                     onClose={() => { setErrorModalOpen(false); setError(null); }}
-                        title={isEditMode ? 'Error Saving Assignment' : 'Error Creating Assignment'}
+                    title={isEditMode ? 'Error Saving Assignment' : 'Error Creating Assignment'}
                     description="Something went wrong. Please fix the issues below and try again."
                     size="md"
                 >
@@ -990,7 +989,15 @@ export function AssignmentUpsertPage({
                                             <Calendar
                                                 label="Due Date & Time"
                                                 selectedDate={parseDateTimeInput(field.value)}
-                                                onDateChange={(date) => field.onChange(date ? toDateTimeInput(date) : '')}
+                                                onDateChange={(date) => {
+                                                    if (date) {
+                                                        // Set time to 11:59 PM by default
+                                                        date.setHours(23, 59, 0, 0);
+                                                        field.onChange(toDateTimeInput(date));
+                                                    } else {
+                                                        field.onChange('');
+                                                    }
+                                                }}
                                                 includeTime
                                                 error={errors.due_date?.message}
                                                 required
@@ -1080,35 +1087,39 @@ export function AssignmentUpsertPage({
                         {expandedSections.has('tests') && (
                             <CardContent className="pt-2 pb-6 space-y-4">
                                 {testCases.length === 0 ? (
-                                    <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50/50">
-                                        <Target className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-                                        <p className="text-sm text-gray-600 mb-4">
-                                            No test cases yet. Add a few to automatically check student code.
+                                    <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-xl bg-gradient-to-br from-gray-50 to-gray-50/50">
+                                        <div className="relative w-14 h-14 mx-auto mb-4 bg-blue-50 rounded-full flex items-center justify-center">
+                                            <Target className="w-7 h-7 text-blue-600" />
+                                        </div>
+                                        <p className="text-sm font-medium text-gray-700 mb-1">
+                                            No test cases yet
+                                        </p>
+                                        <p className="text-xs text-gray-500 mb-4">
+                                            Add test cases to automatically verify student code submissions
                                         </p>
                                         <Button
                                             type="button"
                                             onClick={addTestCase}
-                                            className="gap-2 h-9 rounded-md px-3"
+                                            className="gap-2 h-9 rounded-md px-4 bg-blue-600 hover:bg-blue-700 text-white"
                                         >
-                                            <Plus className="w-4 h-4" /> Add test case
+                                            <Plus className="w-4 h-4" /> Add First Test Case
                                         </Button>
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
-                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                                             <div className="flex items-center gap-2">
-                                                <p className="text-sm font-medium text-gray-700">
-                                                    Test cases
+                                                <p className="text-sm font-semibold text-gray-900">
+                                                    Test Cases {testCases.length > 0 && <span className="text-gray-500 font-normal">({testCases.length})</span>}
                                                 </p>
-                                                <span className="text-[11px] text-gray-500">
-                                                    All inputs use{' '}
-                                                    <span className="font-semibold">
-                                                        {testInputMode === 'stdin' ? 'stdin' : 'file'} input
+                                                <div className="inline-flex rounded-full border border-gray-300 bg-white p-0.5 text-[11px] font-medium">
+                                                    <span className={`px-2.5 py-1 rounded-full ${testInputMode === 'stdin' ? 'bg-blue-100 text-blue-700' : 'text-gray-600'}`}>
+                                                        {testInputMode === 'stdin' ? '📥 Stdin Input' : '📤 File Input'}
                                                     </span>
-                                                </span>
+                                                </div>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1 text-[11px]">
+                                                <div className="inline-flex rounded-full border border-gray-200 bg-white p-0.5 text-[11px]">
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -1121,12 +1132,12 @@ export function AssignmentUpsertPage({
                                                                 input_filenames: [],
                                                             })));
                                                         }}
-                                                        className={`px-3 py-1 rounded-full transition-colors ${testInputMode === 'stdin'
-                                                                ? 'bg-white text-gray-900 shadow-sm'
-                                                                : 'text-gray-500 hover:text-gray-800'
+                                                        className={`px-3 py-1 rounded-full transition-all ${testInputMode === 'stdin'
+                                                            ? 'bg-blue-600 text-white shadow-sm'
+                                                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                                                             }`}
                                                     >
-                                                        Stdin input
+                                                        Stdin
                                                     </button>
                                                     <button
                                                         type="button"
@@ -1141,22 +1152,22 @@ export function AssignmentUpsertPage({
                                                                 input_filenames: [],
                                                             })));
                                                         }}
-                                                        className={`px-3 py-1 rounded-full transition-colors ${testInputMode === 'file'
-                                                                ? 'bg-white text-gray-900 shadow-sm'
-                                                                : 'text-gray-500 hover:text-gray-800'
+                                                        className={`px-3 py-1 rounded-full transition-all ${testInputMode === 'file'
+                                                            ? 'bg-blue-600 text-white shadow-sm'
+                                                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                                                             }`}
                                                     >
-                                                        File input
+                                                        File
                                                     </button>
                                                 </div>
                                                 <Button
                                                     type="button"
                                                     variant="outline"
                                                     size="sm"
-                                                    className="h-8 gap-1.5"
+                                                    className="h-8 gap-1.5 ml-2"
                                                     onClick={addTestCase}
                                                 >
-                                                    <Plus className="w-4 h-4" /> Add test case
+                                                    <Plus className="w-4 h-4" /> Add
                                                 </Button>
                                             </div>
                                         </div>
@@ -1164,65 +1175,63 @@ export function AssignmentUpsertPage({
                                             {testCases.map((tc, index) => (
                                                 <div
                                                     key={index}
-                                                    className="border border-gray-200 rounded-lg bg-gray-50/60"
+                                                    className="border border-gray-200 rounded-lg bg-white overflow-hidden hover:shadow-sm transition-shadow"
                                                 >
-                                                    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-white/70 rounded-t-lg">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="w-6 h-6 rounded-md bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-medium">
+                                                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-100 to-blue-50 text-blue-600 flex items-center justify-center text-sm font-bold">
                                                                 {index + 1}
-                                                            </span>
+                                                            </div>
                                                             <input
                                                                 type="text"
                                                                 value={tc.name}
                                                                 onChange={(e) => updateTestCase(index, 'name', e.target.value)}
-                                                                className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent min-w-[160px]"
+                                                                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
                                                                 placeholder="Test case name"
                                                             />
                                                             <div className="flex items-center gap-2 ml-2">
-                                                                <label className="inline-flex items-center gap-1 text-[11px] text-gray-600">
+                                                                <label className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer">
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={tc.is_hidden}
                                                                         onChange={(e) => updateTestCase(index, 'is_hidden', e.target.checked)}
-                                                                        className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                        className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                                                                     />
-                                                                    <span>Hidden</span>
+                                                                    <span className="text-gray-700 font-medium">{tc.is_hidden ? 'Hidden' : 'Visible'}</span>
                                                                 </label>
                                                             </div>
                                                         </div>
-                                                        <div className="flex items-center gap-2">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => removeTestCase(index)}
-                                                                className="inline-flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0 rounded-md transition-colors"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeTestCase(index)}
+                                                            className="inline-flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0 rounded-lg transition-colors"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
                                                     </div>
-                                                    <div className="px-3 py-3 space-y-3">
+                                                    <div className="px-4 py-4 space-y-4">
                                                         <div>
-                                                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                                                            <label className="block text-xs font-semibold text-gray-700 mb-1.5 uppercase tracking-wide">
                                                                 Description <span className="text-gray-400 font-normal">(optional)</span>
                                                             </label>
                                                             <textarea
                                                                 value={tc.description}
                                                                 onChange={(e) => updateTestCase(index, 'description', e.target.value)}
-                                                                className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                                                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
                                                                 rows={2}
-                                                                placeholder="Explain what this test is checking..."
+                                                                placeholder="Explain what this test case validates..."
                                                             />
                                                         </div>
-                                                        <div className="flex flex-col md:flex-row md:items-stretch md:gap-4">
-                                                            {/* ── Input side ── */}
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center gap-2 mb-1.5">
-                                                                    <label className="text-xs font-medium text-gray-600">
-                                                                        {testInputMode === 'stdin' ? 'Input (stdin)' : 'Input files'}
-                                                                    </label>
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {/* Input side */}
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                                                                        {testInputMode === 'stdin' ? '📥 Input (Stdin)' : '📁 Input Files'}
+                                                                    </span>
                                                                     {testInputMode === 'file' && tc.inputFiles.length > 0 && (
                                                                         <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[10px] font-medium">
-                                                                            {tc.inputFiles.length} file{tc.inputFiles.length !== 1 ? 's' : ''}
+                                                                            {tc.inputFiles.length}
                                                                         </span>
                                                                     )}
                                                                 </div>
@@ -1230,26 +1239,26 @@ export function AssignmentUpsertPage({
                                                                     <textarea
                                                                         value={tc.input_data}
                                                                         onChange={(e) => updateTestCase(index, 'input_data', e.target.value)}
-                                                                        className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
                                                                         rows={3}
-                                                                        placeholder="What gets passed to stdin..."
+                                                                        placeholder="Enter stdin input..."
                                                                     />
                                                                 ) : (
-                                                                    <div className="rounded-md border border-gray-200 bg-white">
+                                                                    <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
                                                                         {tc.inputFiles.length > 0 && (
-                                                                            <div className="p-2 flex flex-wrap gap-1.5">
+                                                                            <div className="p-2.5 flex flex-wrap gap-1.5">
                                                                                 {tc.inputFiles.map((file) => (
                                                                                     <span
                                                                                         key={file.name}
-                                                                                        className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 border border-gray-200 pl-2.5 pr-1 py-1 text-[11px] text-gray-700 group"
+                                                                                        className="inline-flex items-center gap-2 rounded-lg bg-white border border-gray-300 pl-2.5 pr-1 py-1 text-xs text-gray-700 group hover:shadow-sm"
                                                                                     >
-                                                                                        <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                                                                                        <span className="truncate max-w-[120px]" title={file.name}>{file.name}</span>
-                                                                                        <span className="text-gray-400 text-[10px]">{formatBytes(file.size)}</span>
+                                                                                        <FileText className="w-3.5 h-3.5 text-gray-400" />
+                                                                                        <span className="truncate max-w-[100px]">{file.name}</span>
+                                                                                        <span className="text-gray-400 text-[9px]">{formatBytes(file.size)}</span>
                                                                                         <button
                                                                                             type="button"
                                                                                             onClick={() => removeFileFromTestCase(index, 'inputFiles', file.name)}
-                                                                                            className="ml-0.5 p-0.5 rounded hover:bg-red-100 hover:text-red-600 text-gray-400 transition-colors"
+                                                                                            className="ml-1 p-0.5 rounded hover:bg-red-100 hover:text-red-600 text-gray-400 transition-colors"
                                                                                         >
                                                                                             <X className="w-3 h-3" />
                                                                                         </button>
@@ -1257,9 +1266,9 @@ export function AssignmentUpsertPage({
                                                                                 ))}
                                                                             </div>
                                                                         )}
-                                                                        <label className={`flex items-center justify-center gap-2 cursor-pointer py-2.5 text-[11px] text-gray-500 hover:text-primary hover:bg-gray-50/60 transition-colors ${tc.inputFiles.length > 0 ? 'border-t border-gray-100' : ''}`}>
-                                                                            <Upload className="w-3.5 h-3.5" />
-                                                                            <span>{tc.inputFiles.length > 0 ? 'Add more files' : 'Choose files'}</span>
+                                                                        <label className={`flex items-center justify-center gap-2 cursor-pointer py-3 text-xs text-gray-500 hover:text-blue-600 hover:bg-white transition-colors ${tc.inputFiles.length > 0 ? 'border-t border-gray-200' : ''}`}>
+                                                                            <Upload className="w-4 h-4" />
+                                                                            <span>{tc.inputFiles.length > 0 ? 'Add more' : 'Upload files'}</span>
                                                                             <input
                                                                                 type="file"
                                                                                 multiple
@@ -1276,36 +1285,27 @@ export function AssignmentUpsertPage({
                                                                 )}
                                                             </div>
 
-                                                            {/* ── Expected output side ── */}
-                                                            <div className="flex-1 min-w-0 mt-3 md:mt-0">
-                                                                <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <label className="text-xs font-medium text-gray-600">
-                                                                            Expected output
-                                                                        </label>
-                                                                        {tc.expected_output_type === 'file' && tc.expectedFiles.length > 0 && (
-                                                                            <span className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[10px] font-medium">
-                                                                                {tc.expectedFiles.length} file{tc.expectedFiles.length !== 1 ? 's' : ''}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-0.5 text-[11px]">
+                                                            {/* Expected output side */}
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center justify-between gap-2 mb-2">
+                                                                    <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">✓ Expected Output</span>
+                                                                    <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 text-[11px]">
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => updateTestCase(index, 'expected_output_type', 'text')}
-                                                                            className={`px-2.5 py-1 rounded-full transition-colors ${tc.expected_output_type === 'text'
-                                                                                    ? 'bg-white text-gray-900 shadow-sm'
-                                                                                    : 'text-gray-500 hover:text-gray-800'
+                                                                            className={`px-2.5 py-1 rounded-md transition-all ${tc.expected_output_type === 'text'
+                                                                                ? 'bg-blue-600 text-white'
+                                                                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                                                                                 }`}
                                                                         >
-                                                                            Stdout
+                                                                            Text
                                                                         </button>
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => updateTestCase(index, 'expected_output_type', 'file')}
-                                                                            className={`px-2.5 py-1 rounded-full transition-colors ${tc.expected_output_type === 'file'
-                                                                                    ? 'bg-white text-gray-900 shadow-sm'
-                                                                                    : 'text-gray-500 hover:text-gray-800'
+                                                                            className={`px-2.5 py-1 rounded-md transition-all ${tc.expected_output_type === 'file'
+                                                                                ? 'bg-blue-600 text-white'
+                                                                                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                                                                                 }`}
                                                                         >
                                                                             File
@@ -1316,26 +1316,26 @@ export function AssignmentUpsertPage({
                                                                     <textarea
                                                                         value={tc.expected_output}
                                                                         onChange={(e) => updateTestCase(index, 'expected_output', e.target.value)}
-                                                                        className="w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+                                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-y"
                                                                         rows={3}
-                                                                        placeholder="Exact output expected from the program..."
+                                                                        placeholder="Expected program output..."
                                                                     />
                                                                 ) : (
-                                                                    <div className="rounded-md border border-gray-200 bg-white">
+                                                                    <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
                                                                         {tc.expectedFiles.length > 0 && (
-                                                                            <div className="p-2 flex flex-wrap gap-1.5">
+                                                                            <div className="p-2.5 flex flex-wrap gap-1.5">
                                                                                 {tc.expectedFiles.map((file) => (
                                                                                     <span
                                                                                         key={file.name}
-                                                                                        className="inline-flex items-center gap-1.5 rounded-md bg-gray-100 border border-gray-200 pl-2.5 pr-1 py-1 text-[11px] text-gray-700 group"
+                                                                                        className="inline-flex items-center gap-2 rounded-lg bg-white border border-gray-300 pl-2.5 pr-1 py-1 text-xs text-gray-700 group hover:shadow-sm"
                                                                                     >
-                                                                                        <FileText className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                                                                                        <span className="truncate max-w-[120px]" title={file.name}>{file.name}</span>
-                                                                                        <span className="text-gray-400 text-[10px]">{formatBytes(file.size)}</span>
+                                                                                        <FileText className="w-3.5 h-3.5 text-gray-400" />
+                                                                                        <span className="truncate max-w-[100px]">{file.name}</span>
+                                                                                        <span className="text-gray-400 text-[9px]">{formatBytes(file.size)}</span>
                                                                                         <button
                                                                                             type="button"
                                                                                             onClick={() => removeFileFromTestCase(index, 'expectedFiles', file.name)}
-                                                                                            className="ml-0.5 p-0.5 rounded hover:bg-red-100 hover:text-red-600 text-gray-400 transition-colors"
+                                                                                            className="ml-1 p-0.5 rounded hover:bg-red-100 hover:text-red-600 text-gray-400 transition-colors"
                                                                                         >
                                                                                             <X className="w-3 h-3" />
                                                                                         </button>
@@ -1343,9 +1343,9 @@ export function AssignmentUpsertPage({
                                                                                 ))}
                                                                             </div>
                                                                         )}
-                                                                        <label className={`flex items-center justify-center gap-2 cursor-pointer py-2.5 text-[11px] text-gray-500 hover:text-primary hover:bg-gray-50/60 transition-colors ${tc.expectedFiles.length > 0 ? 'border-t border-gray-100' : ''}`}>
-                                                                            <Upload className="w-3.5 h-3.5" />
-                                                                            <span>{tc.expectedFiles.length > 0 ? 'Add more files' : 'Choose files'}</span>
+                                                                        <label className={`flex items-center justify-center gap-2 cursor-pointer py-3 text-xs text-gray-500 hover:text-green-600 hover:bg-white transition-colors ${tc.expectedFiles.length > 0 ? 'border-t border-gray-200' : ''}`}>
+                                                                            <Upload className="w-4 h-4" />
+                                                                            <span>{tc.expectedFiles.length > 0 ? 'Add more' : 'Upload files'}</span>
                                                                             <input
                                                                                 type="file"
                                                                                 multiple
@@ -1362,25 +1362,30 @@ export function AssignmentUpsertPage({
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <div className="flex flex-wrap items-center gap-4">
-                                                            <label className="inline-flex items-center gap-1 text-[11px] text-gray-600">
+                                                        <div className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                                            <label className="inline-flex items-center gap-2 text-xs text-gray-600 hover:text-gray-900 cursor-pointer">
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={tc.ignore_whitespace}
                                                                     onChange={(e) => updateTestCase(index, 'ignore_whitespace', e.target.checked)}
-                                                                    className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                    className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                                                                 />
-                                                                <span>Ignore whitespace differences</span>
+                                                                <span>Ignore whitespace</span>
                                                             </label>
-                                                            <label className="inline-flex items-center gap-1 text-[11px] text-gray-600">
+                                                            <label className="inline-flex items-center gap-2 text-xs text-gray-600 hover:text-gray-900 cursor-pointer">
                                                                 <input
                                                                     type="checkbox"
                                                                     checked={tc.ignore_case}
                                                                     onChange={(e) => updateTestCase(index, 'ignore_case', e.target.checked)}
-                                                                    className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                    className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
                                                                 />
                                                                 <span>Case-insensitive</span>
                                                             </label>
+                                                            {tc.time_limit_seconds && (
+                                                                <span className="ml-auto text-[11px] text-gray-500">
+                                                                    ⏱ {tc.time_limit_seconds}s timeout
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1437,74 +1442,74 @@ export function AssignmentUpsertPage({
                                             </div>
                                         )}
 
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <span className="text-xs font-medium text-gray-600">Manual rubric type</span>
-                                            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1">
+                                        <div className="flex flex-wrap items-center gap-3 mb-1">
+                                            <span className="text-xs font-bold text-gray-900 uppercase tracking-widest">Rubric Type</span>
+                                            <div className="inline-flex gap-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => setManualRubricType('weighted')}
                                                     className={cn(
-                                                        'px-2.5 py-1 text-xs rounded-md transition-colors',
+                                                        'px-4 py-2 text-sm rounded-lg font-medium transition-all duration-200',
                                                         manualRubricType === 'weighted'
-                                                            ? 'bg-gray-900 text-white'
-                                                            : 'text-gray-700 hover:bg-gray-100',
+                                                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
                                                     )}
                                                 >
-                                                    Weighted
+                                                    ⚖️ Weighted
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => setManualRubricType('unweighted')}
                                                     className={cn(
-                                                        'px-2.5 py-1 text-xs rounded-md transition-colors',
+                                                        'px-4 py-2 text-sm rounded-lg font-medium transition-all duration-200',
                                                         manualRubricType === 'unweighted'
-                                                            ? 'bg-gray-900 text-white'
-                                                            : 'text-gray-700 hover:bg-gray-100',
+                                                            ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+                                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
                                                     )}
                                                 >
-                                                    Unweighted
+                                                    📊 Unweighted
                                                 </button>
                                             </div>
-                                            {manualRubricType === 'unweighted' && (
-                                                <span className="text-[11px] text-gray-600">
-                                                    Unweighted rubric uses the assignment max score. Enter criterion points that sum to that total.
-                                                </span>
-                                            )}
                                         </div>
 
-                                        <div className={manualRubricType === 'unweighted' ? 'bg-blue-50 border border-blue-200 rounded-lg p-3' : 'bg-blue-50 border border-blue-200 rounded-lg p-3'}>
-                                            <div className="flex items-start gap-2">
-                                                <BookOpen className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                                                <div className="text-xs text-blue-700">
-                                                    <div className="font-medium text-blue-800">
+                                        <div className={`rounded-xl border-2 p-4 ${manualRubricType === 'weighted' ? 'border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-50/50' : 'border-purple-200 bg-gradient-to-br from-purple-50 to-purple-50/50'}`}>
+                                            <div className="flex items-start gap-3">
+                                                <div className="text-lg mt-0.5">
+                                                    {manualRubricType === 'weighted' ? '⚖️' : '📊'}
+                                                </div>
+                                                <div className="flex-1 text-sm">
+                                                    <div className={`font-bold mb-2 ${manualRubricType === 'weighted' ? 'text-indigo-900' : 'text-purple-900'}`}>
                                                         {manualRubricType === 'weighted'
-                                                            ? <>Enter rubric points on a <span className="font-semibold">{rubricRangeLabel}</span> scale.</>
-                                                            : <>Enter rubric points that add up to <span className="font-semibold">{watchMaxScore}</span> total.</>
+                                                            ? '⚖️ Weighted Rubric'
+                                                            : '📊 Unweighted Rubric'
                                                         }
                                                     </div>
-                                                    {manualRubricType === 'weighted' ? (
-                                                        <>
-                                                            <div className="mt-0.5">
-                                                        Min: <span className="font-semibold">{Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}</span> · Max:{' '}
-                                                        <span className="font-semibold">{Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}</span> · 1 maps to 0 pts, 5 maps to 100 pts
-                                                            </div>
-                                                            <div className="mt-0.5 text-blue-700/90">
-                                                        Live conversion:{' '}
-                                                        <span className="font-semibold">
-                                                            {rubricConvertedTotal.toFixed(1)} / {watchMaxScore}
-                                                        </span>{' '}
-                                                        pts
-                                                            </div>
-                                                        </>
-                                                    ) : (
-                                                        <div className="mt-0.5 text-blue-700/90">
-                                                            Total:{' '}
-                                                            <span className="font-semibold">
-                                                                {rubricConvertedTotal.toFixed(1)} / {watchMaxScore}
-                                                            </span>{' '}
-                                                            pts
-                                                        </div>
-                                                    )}
+                                                    <div className={`space-y-1.5 ${manualRubricType === 'weighted' ? 'text-indigo-800' : 'text-purple-800'}`}>
+                                                        {manualRubricType === 'weighted' ? (
+                                                            <>
+                                                                <p>Grade on scale: <span className="font-bold">{rubricRangeLabel}</span></p>
+                                                                <p className="text-xs opacity-90">
+                                                                    Points {Number.isFinite(watchRubricMin) ? watchRubricMin : '—'} to {Number.isFinite(watchRubricMax) ? watchRubricMax : '—'} get scaled to 0–{watchMaxScore} points
+                                                                </p>
+                                                                {isRubricScaleReady && (
+                                                                    <div className="mt-2 p-2 bg-white/60 rounded-lg">
+                                                                        <p className="text-[12px] font-semibold">
+                                                                            Current rubric total: <span className="text-indigo-600">{rubricConvertedTotal.toFixed(1)} / {watchMaxScore} pts</span>
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <p>Criteria points must sum to: <span className="font-bold">{watchMaxScore} points</span></p>
+                                                                <div className="mt-2 p-2 bg-white/60 rounded-lg">
+                                                                    <p className="text-[12px] font-semibold">
+                                                                        Current total: <span className={`${rubricConvertedTotal.toFixed(1) === watchMaxScore.toString() ? 'text-green-600' : 'text-orange-600'}`}>{rubricConvertedTotal.toFixed(1)} / {watchMaxScore} pts</span>
+                                                                    </p>
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -1529,16 +1534,23 @@ export function AssignmentUpsertPage({
                                         )}
 
                                         {rubricItems.length === 0 ? (
-                                            <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50/50">
-                                                <Layers className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-                                                <p className="text-sm text-gray-600 mb-4">Add grading criteria for manual scoring</p>
+                                            <div className="text-center py-12 border-2 border-dashed border-indigo-300 rounded-xl bg-gradient-to-b from-indigo-50 to-indigo-50/50">
+                                                <div className="relative w-14 h-14 mx-auto mb-3 bg-indigo-100 rounded-full flex items-center justify-center">
+                                                    <Layers className="w-7 h-7 text-indigo-600" />
+                                                </div>
+                                                <p className="text-sm font-semibold text-gray-900">Add Grading Criteria</p>
+                                                <p className="text-xs text-gray-600 mt-1 mb-4">
+                                                    {manualRubricType === 'weighted' && !isRubricScaleReady
+                                                        ? 'Set rubric bounds first to enable criteria'
+                                                        : 'Define standards for evaluating student work'}
+                                                </p>
                                                 <Button
                                                     type="button"
                                                     onClick={addRubricItem}
-                                                    disabled={!isRubricScaleReady}
-                                                    className="gap-2 h-9 rounded-md px-3"
+                                                    disabled={!isRubricScaleReady && manualRubricType === 'weighted'}
+                                                    className="gap-2 h-9 rounded-lg px-4 bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-gray-300"
                                                 >
-                                                    <Plus className="w-4 h-4" /> Add grading criteria
+                                                    <Plus className="w-4 h-4" /> Add First Criterion
                                                 </Button>
                                             </div>
                                         ) : (
@@ -1557,8 +1569,11 @@ export function AssignmentUpsertPage({
                                                     )}
                                                 </div>
                                                 {rubricItems.map((item, index) => (
-                                                    <div key={index} className="flex items-start gap-2 bg-gray-50 rounded-lg p-3 border border-gray-100">
-                                                        <div className="flex-1 space-y-1.5">
+                                                    <div key={index} className="group flex gap-3 bg-gradient-to-br from-white to-gray-50/50 rounded-xl p-4 border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all">
+                                                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-100 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
+                                                            {index + 1}
+                                                        </div>
+                                                        <div className="flex-1 space-y-2.5 min-w-0">
                                                             {rubricLibrary.length > 0 && (
                                                                 <select
                                                                     value={item.libraryItemId ?? ''}
@@ -1575,9 +1590,9 @@ export function AssignmentUpsertPage({
                                                                             updateRubricItem(index, 'description', selected.description ?? '');
                                                                         }
                                                                     }}
-                                                                    className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white"
+                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white font-medium text-gray-700"
                                                                 >
-                                                                    <option value="">Choose from library (optional)</option>
+                                                                    <option value="">📚 Choose from library...</option>
                                                                     {rubricLibrary.map((ri) => (
                                                                         <option key={ri.id} value={ri.id}>
                                                                             {ri.name}
@@ -1585,22 +1600,17 @@ export function AssignmentUpsertPage({
                                                                     ))}
                                                                 </select>
                                                             )}
-                                                            <div className="flex flex-col gap-2">
-                                                                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                                            <div className="space-y-2">
+                                                                <div className="flex flex-col lg:flex-row lg:items-center gap-2">
                                                                     <input
                                                                         type="text"
                                                                         value={item.name}
                                                                         onChange={(e) => updateRubricItem(index, 'name', e.target.value)}
-                                                                        className="flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                                                        placeholder="Criterion name"
+                                                                        className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400"
+                                                                        placeholder="Criterion title"
                                                                     />
-                                                                    <div className="flex items-center gap-2 sm:w-[220px] justify-end">
-                                                                        <span className="text-[11px] text-gray-500 whitespace-nowrap">
-                                                                            {(() => {
-                                                                                const label = manualRubricType === 'weighted' ? 'Points' : 'Points';
-                                                                                return <>{label} ({manualRubricType === 'weighted' ? rubricRangeLabel : `0–${watchMaxScore}`})</>;
-                                                                            })()}
-                                                                        </span>
+                                                                    <div className="flex items-center gap-2 lg:whitespace-nowrap">
+                                                                        <label className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">Points:</label>
                                                                         <input
                                                                             type="number"
                                                                             min={manualRubricType === 'weighted' ? (Number.isFinite(watchRubricMin) ? watchRubricMin : 0) : 0}
@@ -1614,10 +1624,9 @@ export function AssignmentUpsertPage({
                                                                                     isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value),
                                                                                 )
                                                                             }
-                                                                            className="w-24 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                                                            placeholder="3"
+                                                                            className="w-20 rounded-lg border border-indigo-300 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-indigo-50"
                                                                         />
-                                                                        <span className="text-[11px] text-gray-500 whitespace-nowrap">
+                                                                        <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1.5 rounded-lg">
                                                                             {(() => {
                                                                                 const p = Number(item.points) || 0;
                                                                                 const scaled = convertRubricPoints(
@@ -1627,39 +1636,37 @@ export function AssignmentUpsertPage({
                                                                                     watchMaxScore,
                                                                                     manualRubricType,
                                                                                 );
-                                                                                return <> = {scaled.toFixed(1)} pts</>;
+                                                                                return manualRubricType === 'weighted' ? `→ ${scaled.toFixed(1)}/${watchMaxScore}` : `${scaled.toFixed(1)} pts`;
                                                                             })()}
                                                                         </span>
                                                                     </div>
                                                                 </div>
-                                                                <input
-                                                                    type="text"
+                                                                <textarea
                                                                     value={item.description}
                                                                     onChange={(e) => updateRubricItem(index, 'description', e.target.value)}
-                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                                                                    placeholder="Description (optional)"
+                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400 resize-none"
+                                                                    placeholder="What does excellence look like for this criterion?"
+                                                                    rows={2}
                                                                 />
                                                             </div>
                                                         </div>
                                                         <button
                                                             type="button"
                                                             onClick={() => removeRubricItem(index)}
-                                                            className="inline-flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 h-8 w-8 p-0 rounded-md transition-colors"
+                                                            className="flex-shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 h-9 w-9 p-0 rounded-lg transition-all opacity-0 group-hover:opacity-100"
                                                         >
                                                             <Trash2 className="w-4 h-4" />
                                                         </button>
                                                     </div>
                                                 ))}
-                                                <div className="pt-1">
+                                                <div className="pt-2">
                                                     <Button
                                                         type="button"
-                                                        variant="outline"
-                                                        size="sm"
                                                         onClick={addRubricItem}
-                                                    disabled={!isRubricScaleReady}
-                                                        className="h-8 gap-1.5 text-xs rounded-md"
+                                                        disabled={!isRubricScaleReady && manualRubricType === 'weighted'}
+                                                        className="w-full h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition-all disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500"
                                                     >
-                                                        <Plus className="w-3.5 h-3.5" /> Add another criterion
+                                                        <Plus className="w-4 h-4" /> Add Another Criterion
                                                     </Button>
                                                 </div>
                                             </div>
@@ -1870,8 +1877,8 @@ export function AssignmentUpsertPage({
                                     onDrop={handleDrop}
                                     onClick={() => attachmentInputRef.current?.click()}
                                     className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${isDragging
-                                            ? 'border-primary bg-primary/5 scale-[1.01]'
-                                            : 'border-gray-300 hover:border-primary/50 hover:bg-gray-50'
+                                        ? 'border-primary bg-primary/5 scale-[1.01]'
+                                        : 'border-gray-300 hover:border-primary/50 hover:bg-gray-50'
                                         }`}
                                 >
                                     <input

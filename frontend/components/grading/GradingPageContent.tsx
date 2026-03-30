@@ -114,6 +114,8 @@ interface RubricItemFlat {
     description?: string | null;
     weight: number;
     points: number;
+    min_points?: number;
+    max_points?: number;
 }
 
 interface RubricFlat {
@@ -1677,16 +1679,17 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             rubricItems={assignment.rubric.items.map(item => ({
                                                 itemId: item.id,
                                                 name: item.name,
-                                                description: `${item.points ? `${Number(item.points).toFixed(2)} pts` : 'N/A'} • ${item.description || 'No description'}`,
+                                                description: item.description || 'No description',
                                                 weight: item.weight,
-                                                maxPoints: item.points,
-                                                earnedPoints: Math.min(rubricScores[item.id] || 0, item.points),
+                                                minPoints: item.min_points ?? 0,
+                                                maxPoints: item.max_points ?? item.points ?? 0,
+                                                earnedPoints: Math.min(rubricScores[item.id] || 0, item.max_points ?? item.points ?? 0),
                                             }))}
                                             mode={assignment.rubric.items.some(i => i.weight > 0) ? 'weight' : 'points'}
                                             maxScore={assignment.max_score}
                                             onScoreChange={(itemId, score) => {
                                                 const item = assignment.rubric?.items.find(i => i.id === itemId);
-                                                const maxScore = item?.points || 0;
+                                                const maxScore = item?.max_points ?? item?.points ?? 0;
                                                 handleRubricScoreChange(itemId, Math.min(Math.max(0, score), maxScore));
                                             }}
                                             onTotalScoreChange={handleRubricTotalChange}

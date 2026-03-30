@@ -5,6 +5,7 @@ This guide helps you set up and run both the **Kriterion Grading System** (Pytho
 ## Prerequisites Check
 
 Your system has the following tools installed:
+
 - ✅ **Java 19** (OpenJDK) - for running Java assignments
 - ✅ **Python 3.12.3** - for backend API
 - ✅ **Node.js v22.12.0** - for frontend
@@ -86,22 +87,26 @@ The frontend will be available at `http://localhost:3000`
 ## Part 3: Java Setup & Testing
 
 ### Current Java Installation
+
 - **Version**: OpenJDK 19
 - **Location**: `/usr/libexec/java_home` (macOS standard location)
 
 ### Running Java Code
 
 #### Compile Java Files
+
 ```bash
 find . -name "*.java" -type f | xargs javac
 ```
 
 #### Run Java Code
+
 ```bash
 java -cp /path/to/compiled/classes ClassName
 ```
 
 #### Run Java Simple Programs
+
 ```bash
 # Compile single file
 javac HelloWorld.java
@@ -147,6 +152,7 @@ wait $BACKEND_PID $FRONTEND_PID
 ```
 
 Save this as `run-all.sh` and make it executable:
+
 ```bash
 chmod +x run-all.sh
 ./run-all.sh
@@ -155,7 +161,9 @@ chmod +x run-all.sh
 ## Troubleshooting
 
 ### Java "command not found"
+
 **Solution**: Ensure Java is in your PATH
+
 ```bash
 # Check Java is installed
 java -version
@@ -165,13 +173,17 @@ export PATH="/usr/libexec/java_home -v 19:$PATH"
 ```
 
 ### Python ModuleNotFoundError
+
 **Solution**: Activate virtual environment first
+
 ```bash
 source /Users/abhishekamgain/Desktop/Kriterion/backend/venv/bin/activate
 ```
 
 ### Port Already in Use
+
 **Solution**: Kill the process using the port
+
 ```bash
 # For port 8000 (backend)
 lsof -i :8000 | grep LISTEN | awk '{print $2}' | xargs kill -9
@@ -181,7 +193,9 @@ lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill -9
 ```
 
 ### Frontend Can't Connect to Backend
+
 **Solution**: Check CORS settings in backend and ensure:
+
 1. Backend is running on `http://localhost:8000`
 2. Frontend `.env.local` has `NEXT_PUBLIC_API_URL=http://localhost:8000`
 3. Backend has CORS enabled for `localhost:3000`
@@ -189,6 +203,7 @@ lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill -9
 ## Supported Languages
 
 Kriterion supports multiple programming languages for assignments:
+
 - 🐍 **Python**
 - ☕ **Java**
 - And others configured by administrators

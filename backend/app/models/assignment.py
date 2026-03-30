@@ -33,10 +33,6 @@ class Assignment(Base):
     language_id = Column(Integer, ForeignKey("languages.id"), nullable=False)
     # Utility files stored as list of {"filename": str, "s3_key": str, "size": int, ...}
     utility_files_json = Column(JSON, nullable=True)
-
-    # Manual rubric scale bounds (e.g. 0–10, 0–5, etc.)
-    rubric_min_points = Column(Float, default=0.0)
-    rubric_max_points = Column(Float, default=10.0)
     
     # Scoring
     max_score = Column(Float, default=100.0)
@@ -74,15 +70,14 @@ class Assignment(Base):
     # Relationships
     course = relationship("Course", back_populates="assignments")
     language = relationship("Language", back_populates="assignments")
-    test_cases = relationship("TestCase", back_populates="assignment", cascade="all, delete-orphan",
-                             order_by="TestCase.order")
+    test_cases = relationship("TestCase", back_populates="assignment", cascade="all, delete-orphan")
     rubric_rows = relationship("Rubric", back_populates="assignment", cascade="all, delete-orphan",
                                order_by="Rubric.id")
     submissions = relationship("Submission", back_populates="assignment", cascade="all, delete-orphan")
 
     @property
     def rubric(self):
-        """For API response: build rubric payload from rubric_rows (id, name, description, weight, points)."""
+        """For API response: build rubric payload from rubric_rows (id, name, description, weight, points, min_points, max_points)."""
         if not self.rubric_rows:
             return None
         total = sum(getattr(row, "points", 0) or 0 for row in self.rubric_rows)
@@ -94,6 +89,8 @@ class Assignment(Base):
                     "description": getattr(row.rubric_item, "description", None) or None,
                     "weight": row.weight,
                     "points": getattr(row, "points", 0) or 0,
+                    "min_points": getattr(row, "min_points", 0) or 0,
+                    "max_points": getattr(row, "max_points", 5) or 5,
                 }
                 for row in self.rubric_rows
             ],
@@ -129,23 +126,15 @@ class TestCase(Base):
     expected_output_file_s3_key = Column(String(512), nullable=True)
     expected_output_files_json = Column(JSON, nullable=True)  # list of {"filename": str, "s3_key": str} for multiple expected files
 
-    # Scoring
-    points = Column(Float, default=10.0)
-
     # Visibility
     is_hidden = Column(Boolean, default=False)  # Hidden tests only shown after grading
 
     # Comparison settings
     ignore_whitespace = Column(Boolean, default=True)
     ignore_case = Column(Boolean, default=False)
-    use_regex = Column(Boolean, default=False)
     
     # Execution limits (overrides assignment defaults if set)
     time_limit_seconds = Column(Integer, nullable=True)
-    memory_limit_mb = Column(Integer, nullable=True)
-    
-    # Ordering
-    order = Column(Integer, default=0)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -160,14 +149,19 @@ class TestCase(Base):
 
 
 class Rubric(Base):
+    """Rubric - Links assignment to rubric items with per-item grading scale."""
     __tablename__ = "rubrics"
     id = Column(Integer, primary_key=True, index=True)
     assignment_id = Column(Integer, ForeignKey("assignments.id"), nullable=False, index=True)
     rubric_item_id = Column(Integer, ForeignKey("rubric_items.id"), nullable=False, index=True)
-    # Percentage weight (0–100) of this criterion in the assignment's max_score.
-    weight = Column(Float, default=0.0)
-    # Points allocated to this criterion (for display and validation).
-    points = Column(Float, default=0.0)
+    
+    # Per-item grading scale (min and max points for this criterion)
+    min_points = Column(Float, default=0.0)
+    max_points = Column(Float, default=5.0)
+    
+    # Weight and points
+    weight = Column(Float, default=0.0)  # Percentage weight for weighted rubrics
+    points = Column(Float, default=0.0)  # Points allocated to this criterion
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -189,7 +183,7 @@ class RubricItem(Base):
     description = Column(Text, nullable=True)
 
     # Relationships
-    scores = relationship("RubricScore", back_populates="item", cascade="all, delete-orphan")
-
+    scores = relationship("RubricScore", back_populates="item")
+    
     def __repr__(self):
         return f"<RubricItem {self.name}>"

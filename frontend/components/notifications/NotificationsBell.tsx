@@ -162,9 +162,8 @@ export function NotificationsBell() {
                                 <button
                                     key={n.id}
                                     onClick={() => handleNotificationClick(n)}
-                                    className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                                        n.is_read ? 'bg-white' : 'bg-[#862733]/5'
-                                    }`}
+                                    className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors ${n.is_read ? 'bg-white' : 'bg-[#862733]/5'
+                                        }`}
                                 >
                                     <div className="flex items-start justify-between gap-3">
                                         <p className="text-sm font-semibold text-gray-900 line-clamp-1">{n.title}</p>

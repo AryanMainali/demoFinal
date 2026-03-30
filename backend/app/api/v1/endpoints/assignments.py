@@ -412,12 +412,11 @@ async def create_assignment(
                     input_type=(getattr(tc_data, "input_type", None) or "stdin").strip().lower() or "stdin",
                     input_filename=(getattr(tc_data, "input_filename", None) or "").strip() or None,
                     expected_output_type=(getattr(tc_data, "expected_output_type", None) or "text").strip().lower() or "text",
-                    points=tc_data.points,
                     is_hidden=tc_data.is_hidden,
                     ignore_whitespace=tc_data.ignore_whitespace,
                     ignore_case=tc_data.ignore_case,
                     time_limit_seconds=tc_data.time_limit_seconds,
-                    order=tc_data.order if tc_data.order is not None else idx
+                    order=idx
                 )
                 db.add(test_case)
                 db.flush()
@@ -438,8 +437,10 @@ async def create_assignment(
                 row = Rubric(
                     assignment_id=assignment.id,
                     rubric_item_id=ri.id,
-                    weight=item_data.weight or 0.0,
-                    points=getattr(item_data, "points", 0) or 0.0,
+                    min_points=getattr(item_data, "min_points", 0.0) or 0.0,
+                    max_points=getattr(item_data, "max_points", 5.0) or 5.0,
+                    weight=getattr(item_data, "weight", 0.0) or 0.0,
+                    points=getattr(item_data, "points", 0.0) or 0.0,
                 )
                 db.add(row)
 

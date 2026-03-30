@@ -39,6 +39,7 @@ interface RubricItemScore {
     description?: string;
     weight: number;
     maxPoints: number;
+    minPoints?: number;
     earnedPoints: number;
     override?: number;
 }
@@ -60,6 +61,9 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
     onTotalScoreChange,
     onCalculate,
 }) => {
+    // Validation state
+    const [errors, setErrors] = useState<Record<number, string>>({});
+
     // Calculate total automatically based on mode
     const calculatedTotal = useMemo(() => {
         if (mode === 'points') {
@@ -74,82 +78,142 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
         }
     }, [rubricItems, mode, maxScore]);
 
+    // Total points across all criteria
+    const totalCriteriaPoints = useMemo(
+        () => rubricItems.reduce((sum, item) => sum + item.maxPoints, 0),
+        [rubricItems]
+    );
+
+    // Validation: Check if points add up correctly
+    const isPointsValid = useMemo(() => {
+        if (mode === 'points') {
+            return Math.abs(totalCriteriaPoints - maxScore) < 0.01;
+        }
+        return true;
+    }, [mode, totalCriteriaPoints, maxScore]);
+
     useEffect(() => {
         onTotalScoreChange(calculatedTotal);
     }, [calculatedTotal, onTotalScoreChange]);
 
+    const handleScoreChange = (itemId: number, score: number) => {
+        const item = rubricItems.find(i => i.itemId === itemId);
+        if (!item) return;
+
+        // Validation
+        const newErrors = { ...errors };
+        if (score < (item.minPoints ?? 0)) {
+            newErrors[itemId] = `Minimum score is ${(item.minPoints ?? 0).toFixed(1)}`;
+        } else if (score > item.maxPoints) {
+            newErrors[itemId] = `Maximum score is ${item.maxPoints.toFixed(1)}`;
+        } else {
+            delete newErrors[itemId];
+        }
+        setErrors(newErrors);
+        onScoreChange(itemId, score);
+    };
+
     return (
-        <div className="space-y-3">
-            {/* Rubric Items - Clean and focused */}
-            <div className="space-y-2">
-                {rubricItems.map((item) => {
-                    const displayScore = item.override !== undefined ? item.override : item.earnedPoints;
-                    const percentage = item.maxPoints > 0 ? (displayScore / item.maxPoints) * 100 : 0;
-
-                    return (
-                        <div
-                            key={item.itemId}
-                            className="bg-[#1e1e1e] rounded-lg border border-[#3c3c3c] p-3 hover:border-[#505050] transition-colors"
-                        >
-                            <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-[12px] font-semibold text-white">{item.name}</p>
-                                </div>
-
-                                {/* Score input */}
-                                <div className="flex flex-col items-end gap-2 shrink-0">
-                                    <div className="flex items-center gap-1">
-                                        <input
-                                            type="number"
-                                            value={displayScore}
-                                            onChange={(e) => {
-                                                const raw = parseFloat(e.target.value);
-                                                onScoreChange(item.itemId, Number.isFinite(raw) ? raw : 0);
-                                            }}
-                                            step="0.01"
-                                            inputMode="decimal"
-                                            min="0"
-                                            max={item.maxPoints}
-                                            className="w-24 bg-[#252526] border border-[#505050] rounded px-2 py-1.5 text-[11px] font-medium font-mono tabular-nums text-[#d4d4d4] text-center focus:outline-none focus:ring-1 focus:ring-[#862733] focus:border-[#862733]"
-                                        />
-                                        <span className="text-[11px] text-white w-14 text-left">/{item.maxPoints.toFixed(2)}</span>
-                                    </div>
-                                    {/* Progress bar */}
-                                    <div className="w-24 h-1.5 bg-[#333] rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all ${percentage >= 80
-                                                ? 'bg-[#4ec9b0]'
-                                                : percentage >= 60
-                                                    ? 'bg-[#dcdcaa]'
-                                                    : percentage > 0
-                                                        ? 'bg-[#f44747]'
-                                                        : 'bg-[#505050]'
-                                                }`}
-                                            style={{ width: `${Math.min(percentage, 100)}%` }}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-
-            {/* Info tooltip and Calculate button */}
-            <div className="space-y-2.5">
-                <div className="text-[10px] text-white bg-[#0c0c0c] border border-[#3c3c3c] rounded-lg p-2.5">
+        <div className="space-y-4">
+            {/* Header with total info */}
+            <div className="border border-gray-300 rounded-lg p-3 bg-gray-50">
+                <div className="flex items-center justify-between gap-4">
                     <div>
-                        <strong className="text-white"> Rubric score:</strong> Enter the points earned for each criterion.
+                        <p className="text-sm font-semibold text-gray-900">Assignment Total Points: {maxScore}</p>
+                        {mode === 'points' && (
+                            <p className={`text-xs mt-1 ${isPointsValid ? 'text-green-700' : 'text-red-700'}`}>
+                                Criteria Total: <span className="font-semibold">{totalCriteriaPoints.toFixed(1)}</span>
+                                {!isPointsValid && ` (Must equal ${maxScore})`}
+                            </p>
+                        )}
+                    </div>
+                    <div className="text-right">
+                        <p className="text-xs text-gray-600">Total Score</p>
+                        <p className="text-2xl font-bold text-gray-900">{calculatedTotal.toFixed(1)}</p>
                     </div>
                 </div>
-                {onCalculate && (
-                    <button
-                        onClick={onCalculate}
-                        className="w-full px-4 py-2.5 bg-gradient-to-r from-[#862733] to-[#a83d4a] hover:from-[#9d3340] hover:to-[#b94a55] text-white text-[12px] font-semibold rounded-lg border border-[#c85060]/50 transition-all duration-200 flex items-center justify-center gap-2"
-                    >
-                        <span> Calculate Total Score</span>
-                    </button>
+            </div>
+
+            {/* Rubric Items Table */}
+            <div className="overflow-x-auto">
+                <table className="w-full border-collapse border border-gray-300">
+                    <thead>
+                        <tr className="bg-gray-100">
+                            <th className="border border-gray-300 px-3 py-2 text-left text-xs font-bold text-gray-900">Criterion</th>
+                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Points</th>
+                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Min</th>
+                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Max</th>
+                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rubricItems.map((item, idx) => {
+                            const displayScore = item.override !== undefined ? item.override : item.earnedPoints;
+                            const hasError = errors[item.itemId];
+
+                            return (
+                                <tr key={item.itemId} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                                    <td className="border border-gray-300 px-3 py-2">
+                                        <div>
+                                            <p className="text-sm font-semibold text-gray-900">{item.name}</p>
+                                            {item.description && (
+                                                <p className="text-xs text-gray-600 mt-1">{item.description}</p>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="border border-gray-300 px-3 py-2 text-center">
+                                        <p className="text-sm font-bold text-gray-900">{item.maxPoints.toFixed(1)}</p>
+                                    </td>
+                                    <td className="border border-gray-300 px-3 py-2 text-center">
+                                        <p className="text-sm text-gray-700">{(item.minPoints ?? 0).toFixed(1)}</p>
+                                    </td>
+                                    <td className="border border-gray-300 px-3 py-2 text-center">
+                                        <p className="text-sm text-gray-700">{item.maxPoints.toFixed(1)}</p>
+                                    </td>
+                                    <td className="border border-gray-300 px-3 py-2 text-center">
+                                        <div>
+                                            <input
+                                                type="number"
+                                                value={displayScore}
+                                                onChange={(e) => {
+                                                    const raw = parseFloat(e.target.value);
+                                                    handleScoreChange(item.itemId, Number.isFinite(raw) ? raw : 0);
+                                                }}
+                                                step="0.1"
+                                                inputMode="decimal"
+                                                min={item.minPoints ?? 0}
+                                                max={item.maxPoints}
+                                                className={`w-16 px-2 py-1 text-sm font-semibold text-center rounded border ${hasError
+                                                        ? 'border-red-500 bg-red-50 text-red-700'
+                                                        : 'border-gray-300 bg-white text-gray-900'
+                                                    } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
+                                            />
+                                            {hasError && (
+                                                <p className="text-xs text-red-600 mt-1">{hasError}</p>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Info and Validation */}
+            <div className="space-y-2">
+                {!isPointsValid && mode === 'points' && (
+                    <div className="border border-red-300 rounded-lg bg-red-50 p-3">
+                        <p className="text-sm text-red-800">
+                            <span className="font-semibold">Validation Error:</span> Criteria points must sum to {maxScore}. Currently: {totalCriteriaPoints.toFixed(1)}
+                        </p>
+                    </div>
                 )}
+                <div className="border border-gray-300 rounded-lg bg-gray-50 p-3">
+                    <p className="text-xs text-gray-700">
+                        <span className="font-semibold">Instructions:</span> Enter the points earned for each criterion. Scores must be between the Min and Max values shown.
+                    </p>
+                </div>
             </div>
         </div>
     );
@@ -326,235 +390,235 @@ export const TestDataCreator: React.FC<TestDataCreatorProps> = ({ assignmentId, 
                         <DialogTitle className="text-[#d4d4d4]">Add Test Case</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 max-h-[65vh] overflow-y-auto">
-                    {/* Test name */}
-                    <div>
-                        <label className="text-[10px] text-[#858585] uppercase tracking-wider mb-1 block">
-                            Test Name *
-                        </label>
-                        <input
-                            type="text"
-                            value={testName}
-                            onChange={(e) => setTestName(e.target.value)}
-                            placeholder="e.g., Test Case 1"
-                            className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733]"
-                        />
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                        <label className="text-[10px] text-[#858585] uppercase tracking-wider mb-1 block">
-                            Description (optional)
-                        </label>
-                        <textarea
-                            value={testDescription}
-                            onChange={(e) => setTestDescription(e.target.value)}
-                            placeholder="Describe test case purpose..."
-                            rows={2}
-                            className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733] resize-none"
-                        />
-                    </div>
-
-                    {/* INPUT SECTION */}
-                    <div className="border-t border-[#3c3c3c] pt-3">
-                        <label className="text-[10px] font-semibold text-[#cccccc] uppercase tracking-wider mb-2 block">
-                            📥 Input Configuration
-                        </label>
-
-                        {/* Input mode toggle */}
-                        <div className="flex gap-2 mb-3">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setInputMode('stdin');
-                                    setInputFiles([]);
-                                }}
-                                className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${inputMode === 'stdin'
-                                    ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
-                                    : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
-                                    }`}
-                            >
-                                Stdin
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setInputMode('file');
-                                    setStdinData('');
-                                }}
-                                className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${inputMode === 'file'
-                                    ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
-                                    : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
-                                    }`}
-                            >
-                                Files
-                            </button>
+                        {/* Test name */}
+                        <div>
+                            <label className="text-[10px] text-[#858585] uppercase tracking-wider mb-1 block">
+                                Test Name *
+                            </label>
+                            <input
+                                type="text"
+                                value={testName}
+                                onChange={(e) => setTestName(e.target.value)}
+                                placeholder="e.g., Test Case 1"
+                                className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733]"
+                            />
                         </div>
 
-                        {/* Input content */}
-                        {inputMode === 'stdin' ? (
-                            <div>
-                                <textarea
-                                    value={stdinData}
-                                    onChange={(e) => setStdinData(e.target.value)}
-                                    placeholder="Enter stdin input..."
-                                    rows={3}
-                                    className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733] font-mono resize-none"
-                                />
-                            </div>
-                        ) : (
-                            <div className="space-y-2">
-                                <button
-                                    type="button"
-                                    onClick={handleAddInputFile}
-                                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border-2 border-dashed border-[#3c3c3c] text-[#858585] hover:border-[#862733] hover:text-[#d4d4d4] transition-colors text-[11px]"
-                                >
-                                    <Upload className="w-4 h-4" />
-                                    Add Input File(s)
-                                </button>
-                                <input
-                                    ref={inputFileRef}
-                                    type="file"
-                                    multiple
-                                    hidden
-                                    onChange={handleInputFileSelect}
-                                />
-                                {inputFiles.length > 0 && (
-                                    <div className="space-y-1">
-                                        {inputFiles.map((f, idx) => (
-                                            <div key={idx} className="flex items-center justify-between px-2 py-1.5 rounded bg-[#252526] border border-[#3c3c3c]">
-                                                <span className="text-[10px] text-[#cccccc] font-mono truncate">{f.filename}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setInputFiles(prev => prev.filter((_, i) => i !== idx))}
-                                                    className="text-[#858585] hover:text-[#f44747]"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* OUTPUT SECTION */}
-                    <div className="border-t border-[#3c3c3c] pt-3">
-                        <label className="text-[10px] font-semibold text-[#cccccc] uppercase tracking-wider mb-2 block">
-                            📤 Expected Output Configuration
-                        </label>
-
-                        {/* Output mode toggle */}
-                        <div className="flex gap-2 mb-3">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setOutputMode('stdout');
-                                    setOutputFiles([]);
-                                }}
-                                className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${outputMode === 'stdout'
-                                    ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
-                                    : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
-                                    }`}
-                            >
-                                Stdout
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setOutputMode('files');
-                                    setExpectedStdout('');
-                                }}
-                                className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${outputMode === 'files'
-                                    ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
-                                    : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
-                                    }`}
-                            >
-                                Files
-                            </button>
+                        {/* Description */}
+                        <div>
+                            <label className="text-[10px] text-[#858585] uppercase tracking-wider mb-1 block">
+                                Description (optional)
+                            </label>
+                            <textarea
+                                value={testDescription}
+                                onChange={(e) => setTestDescription(e.target.value)}
+                                placeholder="Describe test case purpose..."
+                                rows={2}
+                                className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733] resize-none"
+                            />
                         </div>
 
-                        {/* Output content */}
-                        {outputMode === 'stdout' ? (
-                            <div>
-                                <textarea
-                                    value={expectedStdout}
-                                    onChange={(e) => setExpectedStdout(e.target.value)}
-                                    placeholder="Enter expected stdout..."
-                                    rows={3}
-                                    className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733] font-mono resize-none"
-                                />
-                            </div>
-                        ) : (
-                            <div className="space-y-2">
+                        {/* INPUT SECTION */}
+                        <div className="border-t border-[#3c3c3c] pt-3">
+                            <label className="text-[10px] font-semibold text-[#cccccc] uppercase tracking-wider mb-2 block">
+                                📥 Input Configuration
+                            </label>
+
+                            {/* Input mode toggle */}
+                            <div className="flex gap-2 mb-3">
                                 <button
                                     type="button"
-                                    onClick={handleAddOutputFile}
-                                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border-2 border-dashed border-[#3c3c3c] text-[#858585] hover:border-[#862733] hover:text-[#d4d4d4] transition-colors text-[11px]"
+                                    onClick={() => {
+                                        setInputMode('stdin');
+                                        setInputFiles([]);
+                                    }}
+                                    className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${inputMode === 'stdin'
+                                        ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
+                                        : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
+                                        }`}
                                 >
-                                    <Upload className="w-4 h-4" />
-                                    Add Output File(s)
+                                    Stdin
                                 </button>
-                                <input
-                                    ref={outputFileRef}
-                                    type="file"
-                                    multiple
-                                    hidden
-                                    onChange={handleOutputFileSelect}
-                                />
-                                {outputFiles.length > 0 && (
-                                    <div className="space-y-1">
-                                        {outputFiles.map((f, idx) => (
-                                            <div key={idx} className="flex items-center justify-between px-2 py-1.5 rounded bg-[#252526] border border-[#3c3c3c]">
-                                                <span className="text-[10px] text-[#cccccc] font-mono truncate">{f.filename}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setOutputFiles(prev => prev.filter((_, i) => i !== idx))}
-                                                    className="text-[#858585] hover:text-[#f44747]"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setInputMode('file');
+                                        setStdinData('');
+                                    }}
+                                    className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${inputMode === 'file'
+                                        ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
+                                        : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
+                                        }`}
+                                >
+                                    Files
+                                </button>
                             </div>
-                        )}
-                    </div>
 
-                    {/* Options */}
-                    <div className="flex items-center gap-2 border-t border-[#3c3c3c] pt-3">
-                        <input
-                            type="checkbox"
-                            id="is_hidden"
-                            checked={isHidden}
-                            onChange={(e) => setIsHidden(e.target.checked)}
-                            className="w-3 h-3 rounded bg-[#252526] border border-[#505050]"
-                        />
-                        <label
-                            htmlFor="is_hidden"
-                            className="text-[10px] text-[#858585] cursor-pointer"
-                        >
-                            🔒 Hidden from students
-                        </label>
-                    </div>
+                            {/* Input content */}
+                            {inputMode === 'stdin' ? (
+                                <div>
+                                    <textarea
+                                        value={stdinData}
+                                        onChange={(e) => setStdinData(e.target.value)}
+                                        placeholder="Enter stdin input..."
+                                        rows={3}
+                                        className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733] font-mono resize-none"
+                                    />
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleAddInputFile}
+                                        className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border-2 border-dashed border-[#3c3c3c] text-[#858585] hover:border-[#862733] hover:text-[#d4d4d4] transition-colors text-[11px]"
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        Add Input File(s)
+                                    </button>
+                                    <input
+                                        ref={inputFileRef}
+                                        type="file"
+                                        multiple
+                                        hidden
+                                        onChange={handleInputFileSelect}
+                                    />
+                                    {inputFiles.length > 0 && (
+                                        <div className="space-y-1">
+                                            {inputFiles.map((f, idx) => (
+                                                <div key={idx} className="flex items-center justify-between px-2 py-1.5 rounded bg-[#252526] border border-[#3c3c3c]">
+                                                    <span className="text-[10px] text-[#cccccc] font-mono truncate">{f.filename}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setInputFiles(prev => prev.filter((_, i) => i !== idx))}
+                                                        className="text-[#858585] hover:text-[#f44747]"
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
 
-                    {/* Action buttons */}
-                    <div className="flex gap-2 pt-2 border-t border-[#3c3c3c]">
-                        <button
-                            onClick={handleAddTestCase}
-                            disabled={loading || !testName.trim()}
-                            className="flex-1 py-2 px-3 rounded bg-gradient-to-r from-[#862733] to-[#a83d4a] hover:from-[#9d3340] hover:to-[#b94a55] disabled:opacity-50 text-white border border-[#c85060]/50 text-[11px] font-medium transition-all"
-                        >
-                            {loading ? 'Adding...' : '➕ Add Test Case'}
-                        </button>
-                        <button
-                            onClick={resetForm}
-                            className="flex-1 py-2 px-3 rounded bg-[#3c3c3c] border border-[#3c3c3c] text-[#858585] hover:bg-[#505050] text-[11px] font-medium"
-                        >
-                            Cancel
-                        </button>
-                    </div>
+                        {/* OUTPUT SECTION */}
+                        <div className="border-t border-[#3c3c3c] pt-3">
+                            <label className="text-[10px] font-semibold text-[#cccccc] uppercase tracking-wider mb-2 block">
+                                📤 Expected Output Configuration
+                            </label>
+
+                            {/* Output mode toggle */}
+                            <div className="flex gap-2 mb-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setOutputMode('stdout');
+                                        setOutputFiles([]);
+                                    }}
+                                    className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${outputMode === 'stdout'
+                                        ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
+                                        : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
+                                        }`}
+                                >
+                                    Stdout
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setOutputMode('files');
+                                        setExpectedStdout('');
+                                    }}
+                                    className={`flex-1 py-1.5 rounded text-[10px] font-medium transition-colors ${outputMode === 'files'
+                                        ? 'bg-[#862733]/30 border border-[#862733] text-[#cccccc]'
+                                        : 'bg-[#252526] border border-[#3c3c3c] text-[#858585] hover:bg-[#2a2d2e]'
+                                        }`}
+                                >
+                                    Files
+                                </button>
+                            </div>
+
+                            {/* Output content */}
+                            {outputMode === 'stdout' ? (
+                                <div>
+                                    <textarea
+                                        value={expectedStdout}
+                                        onChange={(e) => setExpectedStdout(e.target.value)}
+                                        placeholder="Enter expected stdout..."
+                                        rows={3}
+                                        className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-3 py-2 text-[11px] text-[#d4d4d4] placeholder-[#505050] focus:outline-none focus:border-[#862733] font-mono resize-none"
+                                    />
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleAddOutputFile}
+                                        className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border-2 border-dashed border-[#3c3c3c] text-[#858585] hover:border-[#862733] hover:text-[#d4d4d4] transition-colors text-[11px]"
+                                    >
+                                        <Upload className="w-4 h-4" />
+                                        Add Output File(s)
+                                    </button>
+                                    <input
+                                        ref={outputFileRef}
+                                        type="file"
+                                        multiple
+                                        hidden
+                                        onChange={handleOutputFileSelect}
+                                    />
+                                    {outputFiles.length > 0 && (
+                                        <div className="space-y-1">
+                                            {outputFiles.map((f, idx) => (
+                                                <div key={idx} className="flex items-center justify-between px-2 py-1.5 rounded bg-[#252526] border border-[#3c3c3c]">
+                                                    <span className="text-[10px] text-[#cccccc] font-mono truncate">{f.filename}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setOutputFiles(prev => prev.filter((_, i) => i !== idx))}
+                                                        className="text-[#858585] hover:text-[#f44747]"
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Options */}
+                        <div className="flex items-center gap-2 border-t border-[#3c3c3c] pt-3">
+                            <input
+                                type="checkbox"
+                                id="is_hidden"
+                                checked={isHidden}
+                                onChange={(e) => setIsHidden(e.target.checked)}
+                                className="w-3 h-3 rounded bg-[#252526] border border-[#505050]"
+                            />
+                            <label
+                                htmlFor="is_hidden"
+                                className="text-[10px] text-[#858585] cursor-pointer"
+                            >
+                                🔒 Hidden from students
+                            </label>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex gap-2 pt-2 border-t border-[#3c3c3c]">
+                            <button
+                                onClick={handleAddTestCase}
+                                disabled={loading || !testName.trim()}
+                                className="flex-1 py-2 px-3 rounded bg-gradient-to-r from-[#862733] to-[#a83d4a] hover:from-[#9d3340] hover:to-[#b94a55] disabled:opacity-50 text-white border border-[#c85060]/50 text-[11px] font-medium transition-all"
+                            >
+                                {loading ? 'Adding...' : '➕ Add Test Case'}
+                            </button>
+                            <button
+                                onClick={resetForm}
+                                className="flex-1 py-2 px-3 rounded bg-[#3c3c3c] border border-[#3c3c3c] text-[#858585] hover:bg-[#505050] text-[11px] font-medium"
+                            >
+                                Cancel
+                            </button>
+                        </div>
                     </div>
                 </DialogContent>
             </Dialog>

@@ -15,14 +15,10 @@ class TestCaseBase(BaseModel):
     input_filename: Optional[str] = None  # e.g. input.txt (when input_type=file)
     expected_output_type: Optional[str] = "text"  # 'text' | 'file'
     expected_output_files_json: Optional[List[dict]] = None  # list of {"filename": str, "s3_key": str}
-    points: float = 10.0
     is_hidden: bool = False
     ignore_whitespace: bool = True
     ignore_case: bool = False
-    use_regex: bool = False
     time_limit_seconds: Optional[int] = None
-    memory_limit_mb: Optional[int] = None
-    order: int = 0
 
 
 class TestCaseCreate(TestCaseBase):
@@ -51,6 +47,9 @@ class TestCase(TestCaseBase):
 class RubricItemBase(BaseModel):
     name: str
     description: Optional[str] = None
+    # Per-item grading scale
+    min_points: float = 0.0
+    max_points: float = 5.0
     # Percentage weight (0–100) of this criterion in the final score
     weight: float = 0.0
     # Points allocated to this criterion
@@ -116,10 +115,6 @@ class AssignmentBase(BaseModel):
     enable_ai_detection: bool = True
     ai_detection_threshold: float = 50.0
     
-    # Manual rubric scale bounds (e.g. 0–10, 0–5, etc.)
-    rubric_min_points: float = 0.0
-    rubric_max_points: float = 10.0
-    
     is_published: bool = False
 
     @model_validator(mode='after')
@@ -160,9 +155,6 @@ class AssignmentUpdate(BaseModel):
     plagiarism_threshold: Optional[float] = None
     enable_ai_detection: Optional[bool] = None
     ai_detection_threshold: Optional[float] = None
-    
-    rubric_min_points: Optional[float] = None
-    rubric_max_points: Optional[float] = None
     
     is_published: Optional[bool] = None
     test_cases: Optional[List[TestCaseCreate]] = None
