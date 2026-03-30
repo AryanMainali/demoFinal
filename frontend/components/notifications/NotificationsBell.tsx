@@ -45,7 +45,7 @@ export function NotificationsBell() {
 
     const notificationsQuery = useQuery({
         queryKey: ['notifications', user?.id],
-        queryFn: () => apiClient.getNotifications(false, 30),
+        queryFn: () => apiClient.getNotifications(0, 30),
         enabled: !!user,
         refetchInterval: 45000,
     });
@@ -54,14 +54,14 @@ export function NotificationsBell() {
     const unreadCount = useMemo(() => notifications.filter((n) => !n.is_read).length, [notifications]);
 
     const markReadMutation = useMutation({
-        mutationFn: (notificationId: number) => apiClient.markNotificationRead(notificationId),
+        mutationFn: (notificationId: number) => apiClient.markNotificationAsRead(notificationId, true),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['notifications', user?.id] });
         },
     });
 
     const markAllReadMutation = useMutation({
-        mutationFn: () => apiClient.markAllNotificationsRead(),
+        mutationFn: () => apiClient.markAllNotificationsAsRead(),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['notifications', user?.id] });
         },

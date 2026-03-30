@@ -126,15 +126,21 @@ class TestCase(Base):
     expected_output_file_s3_key = Column(String(512), nullable=True)
     expected_output_files_json = Column(JSON, nullable=True)  # list of {"filename": str, "s3_key": str} for multiple expected files
 
+    # Scoring
+    points = Column(Float, default=10.0, nullable=False)
+    order = Column(Integer, default=0, nullable=False)
+
     # Visibility
     is_hidden = Column(Boolean, default=False)  # Hidden tests only shown after grading
 
     # Comparison settings
     ignore_whitespace = Column(Boolean, default=True)
     ignore_case = Column(Boolean, default=False)
-    
+    use_regex = Column(Boolean, default=False)
+
     # Execution limits (overrides assignment defaults if set)
     time_limit_seconds = Column(Integer, nullable=True)
+    memory_limit_mb = Column(Integer, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

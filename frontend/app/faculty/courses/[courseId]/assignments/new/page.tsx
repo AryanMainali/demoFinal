@@ -75,10 +75,9 @@ type TestCase = {
 type RubricItem = {
     name: string;
     description: string;
-    weight: number;
-    points: number;
-    minPoints?: number;
-    maxPoints?: number;
+    minPoints: number;   // rubric scale minimum (e.g. 0)
+    maxPoints: number;   // rubric scale maximum (e.g. 5)
+    totalPoints: number; // assignment points for this criterion (e.g. 40)
     libraryItemId?: number;
 };
 type RubricLibraryItem = {
@@ -129,9 +128,8 @@ export function AssignmentUpsertPage({
     const [testCases, setTestCases] = useState<TestCase[]>([]);
     const [testInputMode, setTestInputMode] = useState<'stdin' | 'file'>('stdin');
 
-    // Rubric: points must sum to 10 (scaled to max score)
+    // Rubric: per-criterion min/max scale + total points (must sum to max_score)
     const [rubricEnabled, setRubricEnabled] = useState(false);
-    const [manualRubricType, setManualRubricType] = useState<'weighted' | 'unweighted'>('weighted');
     const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
     const [rubricLibrary, setRubricLibrary] = useState<RubricLibraryItem[]>([]);
 
@@ -163,6 +161,12 @@ export function AssignmentUpsertPage({
     const [isDragging, setIsDragging] = useState(false);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
 
+    const defaultDueDate = (() => {
+        const d = new Date();
+        d.setHours(23, 59, 0, 0);
+        return toDateTimeInput(d);
+    })();
+
     const { register, control, handleSubmit, formState: { errors }, watch, setValue, reset } = useForm<AssignmentCreateForm>({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(assignmentCreateSchema) as any,
@@ -171,7 +175,7 @@ export function AssignmentUpsertPage({
             language_id: undefined as unknown as number,
             description: '',
             instructions: '',
-            due_date: '',
+            due_date: defaultDueDate,
             max_score: 100,
             passing_score: 60,
             rubric_min_points: 1,
@@ -202,11 +206,18 @@ export function AssignmentUpsertPage({
                     return name.includes('python') || name.includes('java');
                 });
                 setLanguages(filtered);
+                // Default to Python if not in edit mode
+                if (!isEditMode && filtered.length > 0) {
+                    const pythonLang = filtered.find((l: Language) => l.name?.toLowerCase().includes('python'));
+                    const defaultLang = pythonLang || filtered[0];
+                    setValue('language_id', defaultLang.id, { shouldValidate: false });
+                }
             } catch (e) {
                 console.error('Failed to load languages', e);
             }
         };
         loadLanguages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // If editing, load existing assignment and prefill the same form
@@ -277,13 +288,13 @@ export function AssignmentUpsertPage({
                 const rubric = existing.rubric?.items ?? [];
                 if (Array.isArray(rubric) && rubric.length > 0) {
                     setRubricEnabled(true);
-                    setManualRubricType(rubric.some((item: any) => Number(item.weight ?? 0) > 0) ? 'weighted' : 'unweighted');
                     setRubricItems(
                         rubric.map((item: any) => ({
                             name: item.name ?? '',
                             description: item.description ?? '',
-                            weight: item.weight ?? 0,
-                            points: Number(item.points ?? 0),
+                            minPoints: Number(item.min_points ?? 0),
+                            maxPoints: Number(item.max_points ?? 5),
+                            totalPoints: Number(item.points ?? 0),
                         })),
                     );
                 }
@@ -382,8 +393,9 @@ export function AssignmentUpsertPage({
             {
                 name: `Criterion ${prev.length + 1}`,
                 description: '',
-                weight: 0,
-                points: 0,
+                minPoints: 0,
+                maxPoints: 5,
+                totalPoints: 0,
             },
         ]);
     };
@@ -395,21 +407,7 @@ export function AssignmentUpsertPage({
     const updateRubricItem = (index: number, field: keyof RubricItem, value: string | number) => {
         setRubricItems(prev => {
             const updated = [...prev];
-            if (field === 'points') {
-                const minRaw = (watch as any)('rubric_min_points');
-                const maxRaw = (watch as any)('rubric_max_points');
-                const minScale = typeof minRaw === 'number' ? minRaw : Number(minRaw);
-                const maxScale = typeof maxRaw === 'number' ? maxRaw : Number(maxRaw);
-                const v = typeof value === 'number' ? value : Number(value);
-                if (Number.isFinite(minScale) && Number.isFinite(maxScale) && Number.isFinite(v)) {
-                    const clamped = Math.min(maxScale, Math.max(minScale, v));
-                    updated[index] = { ...updated[index], [field]: clamped };
-                } else {
-                    updated[index] = { ...updated[index], [field]: Number.isFinite(v) ? v : 0 };
-                }
-            } else {
-                updated[index] = { ...updated[index], [field]: value };
-            }
+            updated[index] = { ...updated[index], [field]: value };
             return updated;
         });
     };
@@ -451,21 +449,6 @@ export function AssignmentUpsertPage({
         return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     };
 
-    const convertRubricPoints = (
-        rawPoints: number,
-        minScale: number,
-        maxScale: number,
-        assignmentMax: number,
-        rubricType: 'weighted' | 'unweighted',
-    ) => {
-        const clamped = Math.min(maxScale, Math.max(minScale, rawPoints));
-        if (rubricType === 'unweighted') {
-            return clamped;
-        }
-        if (maxScale <= minScale) return 0;
-        return ((clamped - minScale) / (maxScale - minScale)) * assignmentMax;
-    };
-
     // ─── Form Submit ───
     const onSubmit: SubmitHandler<AssignmentCreateForm> = async (values: AssignmentCreateForm) => {
         setError(null);
@@ -483,40 +466,22 @@ export function AssignmentUpsertPage({
             }
 
             if (rubricEnabled && rubricItems.length > 0) {
-                if (manualRubricType === 'unweighted') {
-                    const maxScore = Number(values.max_score) || 100;
-                    const pointsSum = rubricItems.reduce((s, i) => s + (Number(i.points) || 0), 0);
-                    if (Math.abs(pointsSum - maxScore) > 0.01) {
-                        setError(`Rubric points must sum to ${maxScore}. Current total: ${pointsSum.toFixed(1)}.`);
-                        setErrorModalOpen(true);
-                        setLoading(false);
-                        return;
-                    }
-                } else {
-                    const minScale = Number((values as any).rubric_min_points);
-                    const maxScale = Number((values as any).rubric_max_points);
-                    if (!Number.isFinite(minScale) || !Number.isFinite(maxScale)) {
-                        setError('Enter rubric min and max points before adding criteria.');
-                        setErrorModalOpen(true);
-                        setLoading(false);
-                        return;
-                    }
-                    if (maxScale <= minScale) {
-                        setError('Rubric max points must be greater than rubric min points.');
-                        setErrorModalOpen(true);
-                        setLoading(false);
-                        return;
-                    }
-                    const invalidItem = rubricItems.find((item) => {
-                        const pts = Number(item.points);
-                        return !Number.isFinite(pts) || pts < minScale || pts > maxScale;
-                    });
-                    if (invalidItem) {
-                        setError(`Each rubric criterion must stay between ${minScale} and ${maxScale}.`);
-                        setErrorModalOpen(true);
-                        setLoading(false);
-                        return;
-                    }
+                const maxScore = Number(values.max_score) || 100;
+                const pointsSum = rubricItems.reduce((s, i) => s + (Number(i.totalPoints) || 0), 0);
+                if (Math.abs(pointsSum - maxScore) > 0.01) {
+                    setError(`Rubric total points must sum to the assignment max score (${maxScore}). Current total: ${pointsSum.toFixed(1)}.`);
+                    setErrorModalOpen(true);
+                    setLoading(false);
+                    return;
+                }
+                const invalidItem = rubricItems.find((item) => {
+                    return Number(item.maxPoints) <= Number(item.minPoints);
+                });
+                if (invalidItem) {
+                    setError(`Each criterion's rubric max must be greater than its rubric min.`);
+                    setErrorModalOpen(true);
+                    setLoading(false);
+                    return;
                 }
             }
 
@@ -620,29 +585,20 @@ export function AssignmentUpsertPage({
 
             if (rubricEnabled && rubricItems.length > 0) {
                 const maxScore = Number(values.max_score) || 100;
-                const minScale = Number((values as any).rubric_min_points);
-                const maxScale = Number((values as any).rubric_max_points);
                 payload.rubric = {
                     items: rubricItems.map((item) => {
-                        const points = Number(item.points) || 0;
-                        const weight = manualRubricType === 'unweighted'
-                            ? 0
-                            : convertRubricPoints(points, minScale, maxScale, 100, 'weighted');
+                        const totalPts = Number(item.totalPoints) || 0;
+                        const weight = maxScore > 0 ? (totalPts / maxScore) * 100 : 0;
                         return {
                             name: item.name.trim(),
                             description: (item.description || '').trim() || undefined,
+                            min_points: Number(item.minPoints) || 0,
+                            max_points: Number(item.maxPoints) || 5,
+                            points: totalPts,
                             weight,
-                            points,
                         };
                     }),
                 };
-                if (manualRubricType === 'weighted') {
-                    payload.rubric_min_points = (values as any).rubric_min_points ?? 0;
-                    payload.rubric_max_points = (values as any).rubric_max_points ?? 10;
-                } else {
-                    payload.rubric_min_points = 0;
-                    payload.rubric_max_points = Number(values.max_score) || 100;
-                }
             }
 
             const supplementaryFiles = attachmentFiles.map(af => af.file);
@@ -729,26 +685,6 @@ export function AssignmentUpsertPage({
     const watchDesc = watch('description');
     const watchDueDate = watch('due_date');
     const watchMaxScore = Number(watch('max_score')) || 100;
-    const watchRubricMinRaw = (watch as any)('rubric_min_points');
-    const watchRubricMaxRaw = (watch as any)('rubric_max_points');
-    const watchRubricMin = Number.isFinite(watchRubricMinRaw) ? Number(watchRubricMinRaw) : Number(watchRubricMinRaw);
-    const watchRubricMax = Number.isFinite(watchRubricMaxRaw) ? Number(watchRubricMaxRaw) : Number(watchRubricMaxRaw);
-    const rubricRangeLabel = manualRubricType === 'unweighted'
-        ? `0–${watchMaxScore}`
-        : `${Number.isFinite(watchRubricMin) ? watchRubricMin : '—'}–${Number.isFinite(watchRubricMax) ? watchRubricMax : '—'}`;
-    const rubricConvertedTotal = rubricItems.reduce(
-        (s, i) => s + convertRubricPoints(
-            Number(i.points) || 0,
-            Number.isFinite(watchRubricMin) ? watchRubricMin : 1,
-            Number.isFinite(watchRubricMax) ? watchRubricMax : 5,
-            watchMaxScore,
-            manualRubricType,
-        ),
-        0,
-    );
-    const isRubricScaleReady = manualRubricType === 'unweighted'
-        ? Number.isFinite(watchMaxScore) && watchMaxScore > 0
-        : Number.isFinite(watchRubricMin) && Number.isFinite(watchRubricMax) && watchRubricMax > watchRubricMin;
 
     const completionSteps = [
         { label: 'Title', done: !!watchTitle?.trim() },
@@ -991,13 +927,19 @@ export function AssignmentUpsertPage({
                                                 selectedDate={parseDateTimeInput(field.value)}
                                                 onDateChange={(date) => {
                                                     if (date) {
-                                                        // Set time to 11:59 PM by default
-                                                        date.setHours(23, 59, 0, 0);
+                                                        // Only reset time to 11:59 PM if no time was previously set
+                                                        const prev = parseDateTimeInput(field.value);
+                                                        if (!prev) {
+                                                            date.setHours(23, 59, 0, 0);
+                                                        } else {
+                                                            date.setHours(prev.getHours(), prev.getMinutes(), 0, 0);
+                                                        }
                                                         field.onChange(toDateTimeInput(date));
                                                     } else {
                                                         field.onChange('');
                                                     }
                                                 }}
+                                                minDate={new Date()}
                                                 includeTime
                                                 error={errors.due_date?.message}
                                                 required
@@ -1430,108 +1372,19 @@ export function AssignmentUpsertPage({
 
                                 {rubricEnabled && (
                                     <>
-                                        {manualRubricType === 'weighted' ? (
-                                            !isRubricScaleReady ? (
-                                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                                    <span className="font-medium">First set rubric bounds.</span> Enter <span className="font-semibold">min</span> and <span className="font-semibold">max</span> points to unlock adding criteria.
-                                                </div>
-                                            ) : null
-                                        ) : (
-                                            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-                                                <span className="font-medium">Unweighted rubric.</span> Criteria points must add up to the assignment max score.
-                                            </div>
-                                        )}
-
-                                        <div className="flex flex-wrap items-center gap-3 mb-1">
-                                            <span className="text-xs font-bold text-gray-900 uppercase tracking-widest">Rubric Type</span>
-                                            <div className="inline-flex gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setManualRubricType('weighted')}
-                                                    className={cn(
-                                                        'px-4 py-2 text-sm rounded-lg font-medium transition-all duration-200',
-                                                        manualRubricType === 'weighted'
-                                                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
-                                                    )}
-                                                >
-                                                    ⚖️ Weighted
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setManualRubricType('unweighted')}
-                                                    className={cn(
-                                                        'px-4 py-2 text-sm rounded-lg font-medium transition-all duration-200',
-                                                        manualRubricType === 'unweighted'
-                                                            ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
-                                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200',
-                                                    )}
-                                                >
-                                                    📊 Unweighted
-                                                </button>
-                                            </div>
+                                        {/* Summary banner */}
+                                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 flex items-center justify-between gap-3">
+                                            <span>Each criterion has its own rubric scale (e.g. 0–5) and total assignment points. A score of <strong>max</strong> on the scale earns all total points. Total points must sum to <strong>{watchMaxScore}</strong>.</span>
+                                            {(() => {
+                                                const total = rubricItems.reduce((s, i) => s + (Number(i.totalPoints) || 0), 0);
+                                                const ok = Math.abs(total - watchMaxScore) < 0.01;
+                                                return rubricItems.length > 0 ? (
+                                                    <span className={`font-semibold whitespace-nowrap ${ok ? 'text-green-700' : 'text-orange-700'}`}>
+                                                        {total.toFixed(1)} / {watchMaxScore} pts
+                                                    </span>
+                                                ) : null;
+                                            })()}
                                         </div>
-
-                                        <div className={`rounded-xl border-2 p-4 ${manualRubricType === 'weighted' ? 'border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-50/50' : 'border-purple-200 bg-gradient-to-br from-purple-50 to-purple-50/50'}`}>
-                                            <div className="flex items-start gap-3">
-                                                <div className="text-lg mt-0.5">
-                                                    {manualRubricType === 'weighted' ? '⚖️' : '📊'}
-                                                </div>
-                                                <div className="flex-1 text-sm">
-                                                    <div className={`font-bold mb-2 ${manualRubricType === 'weighted' ? 'text-indigo-900' : 'text-purple-900'}`}>
-                                                        {manualRubricType === 'weighted'
-                                                            ? '⚖️ Weighted Rubric'
-                                                            : '📊 Unweighted Rubric'
-                                                        }
-                                                    </div>
-                                                    <div className={`space-y-1.5 ${manualRubricType === 'weighted' ? 'text-indigo-800' : 'text-purple-800'}`}>
-                                                        {manualRubricType === 'weighted' ? (
-                                                            <>
-                                                                <p>Grade on scale: <span className="font-bold">{rubricRangeLabel}</span></p>
-                                                                <p className="text-xs opacity-90">
-                                                                    Points {Number.isFinite(watchRubricMin) ? watchRubricMin : '—'} to {Number.isFinite(watchRubricMax) ? watchRubricMax : '—'} get scaled to 0–{watchMaxScore} points
-                                                                </p>
-                                                                {isRubricScaleReady && (
-                                                                    <div className="mt-2 p-2 bg-white/60 rounded-lg">
-                                                                        <p className="text-[12px] font-semibold">
-                                                                            Current rubric total: <span className="text-indigo-600">{rubricConvertedTotal.toFixed(1)} / {watchMaxScore} pts</span>
-                                                                        </p>
-                                                                    </div>
-                                                                )}
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <p>Criteria points must sum to: <span className="font-bold">{watchMaxScore} points</span></p>
-                                                                <div className="mt-2 p-2 bg-white/60 rounded-lg">
-                                                                    <p className="text-[12px] font-semibold">
-                                                                        Current total: <span className={`${rubricConvertedTotal.toFixed(1) === watchMaxScore.toString() ? 'text-green-600' : 'text-orange-600'}`}>{rubricConvertedTotal.toFixed(1)} / {watchMaxScore} pts</span>
-                                                                    </p>
-                                                                </div>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {manualRubricType === 'weighted' && (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                <Input
-                                                    label="Rubric min points"
-                                                    type="number"
-                                                    step="0.5"
-                                                    min={0}
-                                                    {...(register as any)('rubric_min_points')}
-                                                />
-                                                <Input
-                                                    label="Rubric max points (total)"
-                                                    type="number"
-                                                    step="0.5"
-                                                    min={0.5}
-                                                    {...(register as any)('rubric_max_points')}
-                                                />
-                                            </div>
-                                        )}
 
                                         {rubricItems.length === 0 ? (
                                             <div className="text-center py-12 border-2 border-dashed border-indigo-300 rounded-xl bg-gradient-to-b from-indigo-50 to-indigo-50/50">
@@ -1539,132 +1392,101 @@ export function AssignmentUpsertPage({
                                                     <Layers className="w-7 h-7 text-indigo-600" />
                                                 </div>
                                                 <p className="text-sm font-semibold text-gray-900">Add Grading Criteria</p>
-                                                <p className="text-xs text-gray-600 mt-1 mb-4">
-                                                    {manualRubricType === 'weighted' && !isRubricScaleReady
-                                                        ? 'Set rubric bounds first to enable criteria'
-                                                        : 'Define standards for evaluating student work'}
-                                                </p>
+                                                <p className="text-xs text-gray-600 mt-1 mb-4">Define standards for evaluating student work</p>
                                                 <Button
                                                     type="button"
                                                     onClick={addRubricItem}
-                                                    disabled={!isRubricScaleReady && manualRubricType === 'weighted'}
-                                                    className="gap-2 h-9 rounded-lg px-4 bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-gray-300"
+                                                    className="gap-2 h-9 rounded-lg px-4 bg-indigo-600 hover:bg-indigo-700 text-white"
                                                 >
                                                     <Plus className="w-4 h-4" /> Add First Criterion
                                                 </Button>
                                             </div>
                                         ) : (
                                             <div className="space-y-2">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <label className="block text-sm font-medium text-gray-700">Criteria</label>
-                                                    {rubricItems.length > 0 && (
-                                                        <span className="text-[11px] text-gray-600">
-                                                            <>Converted total:{' '}
-                                                                <span className="text-emerald-600 font-semibold">
-                                                                    {rubricConvertedTotal.toFixed(1)} / {watchMaxScore}
-                                                                </span>{' '}
-                                                                pts
-                                                            </>
-                                                        </span>
-                                                    )}
-                                                </div>
                                                 {rubricItems.map((item, index) => (
-                                                    <div key={index} className="group flex gap-3 bg-gradient-to-br from-white to-gray-50/50 rounded-xl p-4 border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all">
-                                                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-100 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
-                                                            {index + 1}
+                                                    <div key={index} className="group rounded-xl p-4 border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all bg-white space-y-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex-shrink-0 w-7 h-7 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
+                                                                {index + 1}
+                                                            </div>
+                                                            <input
+                                                                type="text"
+                                                                value={item.name}
+                                                                onChange={(e) => updateRubricItem(index, 'name', e.target.value)}
+                                                                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400"
+                                                                placeholder="Criterion title (e.g. Code Quality)"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeRubricItem(index)}
+                                                                className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                                                                title="Remove criterion"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
                                                         </div>
-                                                        <div className="flex-1 space-y-2.5 min-w-0">
-                                                            {rubricLibrary.length > 0 && (
-                                                                <select
-                                                                    value={item.libraryItemId ?? ''}
-                                                                    onChange={(e) => {
-                                                                        const selectedId = e.target.value ? Number(e.target.value) : undefined;
-                                                                        if (!selectedId) {
-                                                                            updateRubricItem(index, 'libraryItemId', undefined as unknown as number);
-                                                                            return;
-                                                                        }
-                                                                        const selected = rubricLibrary.find((ri) => ri.id === selectedId);
-                                                                        updateRubricItem(index, 'libraryItemId', selectedId);
-                                                                        if (selected) {
-                                                                            updateRubricItem(index, 'name', selected.name);
-                                                                            updateRubricItem(index, 'description', selected.description ?? '');
-                                                                        }
-                                                                    }}
-                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white font-medium text-gray-700"
-                                                                >
-                                                                    <option value="">📚 Choose from library...</option>
-                                                                    {rubricLibrary.map((ri) => (
-                                                                        <option key={ri.id} value={ri.id}>
-                                                                            {ri.name}
-                                                                        </option>
-                                                                    ))}
-                                                                </select>
-                                                            )}
-                                                            <div className="space-y-2">
-                                                                <div className="flex flex-col lg:flex-row lg:items-center gap-2">
-                                                                    <input
-                                                                        type="text"
-                                                                        value={item.name}
-                                                                        onChange={(e) => updateRubricItem(index, 'name', e.target.value)}
-                                                                        className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400"
-                                                                        placeholder="Criterion title"
-                                                                    />
-                                                                    <div className="flex items-center gap-2 lg:whitespace-nowrap">
-                                                                        <label className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">Points:</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            min={manualRubricType === 'weighted' ? (Number.isFinite(watchRubricMin) ? watchRubricMin : 0) : 0}
-                                                                            max={manualRubricType === 'weighted' ? (Number.isFinite(watchRubricMax) ? watchRubricMax : watchMaxScore) : watchMaxScore}
-                                                                            step={0.5}
-                                                                            value={item.points}
-                                                                            onChange={(e) =>
-                                                                                updateRubricItem(
-                                                                                    index,
-                                                                                    'points',
-                                                                                    isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value),
-                                                                                )
-                                                                            }
-                                                                            className="w-20 rounded-lg border border-indigo-300 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-indigo-50"
-                                                                        />
-                                                                        <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1.5 rounded-lg">
-                                                                            {(() => {
-                                                                                const p = Number(item.points) || 0;
-                                                                                const scaled = convertRubricPoints(
-                                                                                    p,
-                                                                                    Number.isFinite(watchRubricMin) ? watchRubricMin : 1,
-                                                                                    Number.isFinite(watchRubricMax) ? watchRubricMax : 5,
-                                                                                    watchMaxScore,
-                                                                                    manualRubricType,
-                                                                                );
-                                                                                return manualRubricType === 'weighted' ? `→ ${scaled.toFixed(1)}/${watchMaxScore}` : `${scaled.toFixed(1)} pts`;
-                                                                            })()}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                                <textarea
-                                                                    value={item.description}
-                                                                    onChange={(e) => updateRubricItem(index, 'description', e.target.value)}
-                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400 resize-none"
-                                                                    placeholder="What does excellence look like for this criterion?"
-                                                                    rows={2}
+
+                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pl-10">
+                                                            {/* Rubric Scale */}
+                                                            <div>
+                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Min</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min={0}
+                                                                    step={1}
+                                                                    value={item.minPoints}
+                                                                    onChange={(e) => updateRubricItem(index, 'minPoints', parseFloat(e.target.value) || 0)}
+                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                    placeholder="0"
                                                                 />
                                                             </div>
+                                                            <div>
+                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Max</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min={1}
+                                                                    step={1}
+                                                                    value={item.maxPoints}
+                                                                    onChange={(e) => updateRubricItem(index, 'maxPoints', parseFloat(e.target.value) || 5)}
+                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                    placeholder="5"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Total Points</label>
+                                                                <div className="relative">
+                                                                    <input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        step={1}
+                                                                        value={item.totalPoints}
+                                                                        onChange={(e) => updateRubricItem(index, 'totalPoints', parseFloat(e.target.value) || 0)}
+                                                                        className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                        placeholder="e.g. 40"
+                                                                    />
+                                                                </div>
+                                                                <p className="text-[10px] text-indigo-600 mt-0.5 text-center">
+                                                                    {item.minPoints} → 0 pts · {item.maxPoints} → {item.totalPoints} pts
+                                                                </p>
+                                                            </div>
                                                         </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => removeRubricItem(index)}
-                                                            className="flex-shrink-0 inline-flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 h-9 w-9 p-0 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
+
+                                                        <div className="pl-10">
+                                                            <textarea
+                                                                value={item.description}
+                                                                onChange={(e) => updateRubricItem(index, 'description', e.target.value)}
+                                                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400 resize-none"
+                                                                placeholder="Describe what excellence looks like for this criterion..."
+                                                                rows={2}
+                                                            />
+                                                        </div>
                                                     </div>
                                                 ))}
                                                 <div className="pt-2">
                                                     <Button
                                                         type="button"
                                                         onClick={addRubricItem}
-                                                        disabled={!isRubricScaleReady && manualRubricType === 'weighted'}
-                                                        className="w-full h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition-all disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500"
+                                                        className="w-full h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition-all"
                                                     >
                                                         <Plus className="w-4 h-4" /> Add Another Criterion
                                                     </Button>

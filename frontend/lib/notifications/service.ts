@@ -5,7 +5,7 @@ import apiClient from '@/lib/api-client';
 export interface NotificationItem {
     id: number;
     user_id: number;
-    type: NotificationType;
+    type: string;
     title: string;
     message: string;
     link?: string;
@@ -17,8 +17,10 @@ export interface NotificationItem {
     created_at: string;
 }
 
-export function supportsRole(type: NotificationType, role: UserRole): boolean {
-    return NOTIFICATION_TYPE_CONFIG[type].roles.includes(role);
+export function supportsRole(type: string, role: UserRole): boolean {
+    const config = NOTIFICATION_TYPE_CONFIG[type as NotificationType];
+    if (!config) return true; // show unknown types to all roles
+    return config.roles.includes(role);
 }
 
 export function filterNotificationsByRole(

@@ -168,8 +168,30 @@ class StudentInfo(BaseModel):
         from_attributes = True
 
 
+class GroupMemberInSubmission(BaseModel):
+    id: int
+    user_id: int
+    full_name: str
+    email: str
+    student_id: Optional[str] = None
+    is_leader: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class GroupInSubmission(BaseModel):
+    id: int
+    name: str
+    members: List[GroupMemberInSubmission] = []
+
+    class Config:
+        from_attributes = True
+
+
 class SubmissionWithStudent(Submission):
     student: Optional[StudentInfo] = None
+    group: Optional[GroupInSubmission] = None
 
     class Config:
         from_attributes = True
@@ -177,6 +199,7 @@ class SubmissionWithStudent(Submission):
 
 class SubmissionDetailWithStudent(SubmissionDetail):
     student: Optional[StudentInfo] = None
+    group: Optional[GroupInSubmission] = None
 
     class Config:
         from_attributes = True

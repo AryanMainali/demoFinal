@@ -112,11 +112,28 @@ interface StudentInfo {
     student_id?: string;
 }
 
+interface GroupMemberInfo {
+    id: number;
+    user_id: number;
+    full_name: string;
+    email: string;
+    student_id: string | null;
+    is_leader: boolean;
+}
+
+interface GroupInfo {
+    id: number;
+    name: string;
+    members: GroupMemberInfo[];
+}
+
 interface SubmissionItem {
     id: number;
     assignment_id: number;
     student_id: number;
     student?: StudentInfo;
+    group_id?: number | null;
+    group?: GroupInfo | null;
     attempt_number: number;
     status: string;
     submitted_at: string;
@@ -148,6 +165,15 @@ interface StudentGroup {
     latestSubmission: SubmissionItem;
     bestScore: number | null;
     totalAttempts: number;
+}
+
+interface AssignmentGroupEntry {
+    groupId: number;
+    groupName: string;
+    members: GroupMemberInfo[];
+    submissions: SubmissionItem[];
+    latestSubmission: SubmissionItem;
+    bestScore: number | null;
 }
 
 interface BulkRunResult {
@@ -194,6 +220,18 @@ const getStatusBadge = (status: string) => {
             return 'bg-orange-100 text-orange-700 border-orange-200';
         default:
             return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
+};
+
+const formatStatus = (status: string) => {
+    switch (status) {
+        case 'autograded': return 'Auto-graded';
+        case 'manual_review': return 'Needs Review';
+        case 'completed': return 'Completed';
+        case 'graded': return 'Graded';
+        case 'pending': return 'Pending';
+        case 'error': return 'Error';
+        default: return status ? status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
     }
 };
 
@@ -504,6 +542,38 @@ export default function AssignmentDetailPageContent() {
         } catch { /* ignore */ }
         finally { setLoadingMatches(null); }
     };
+
+    // Group submissions by group_id (for group assignments)
+    const assignmentGroupEntries: AssignmentGroupEntry[] = useMemo(() => {
+        if (!assignment?.allow_groups) return [];
+        const map = new Map<number, SubmissionItem[]>();
+        for (const sub of submissions) {
+            if (!sub.group_id) continue;
+            if (!map.has(sub.group_id)) map.set(sub.group_id, []);
+            map.get(sub.group_id)!.push(sub);
+        }
+        const entries: AssignmentGroupEntry[] = [];
+        for (const [groupId, subs] of map) {
+            const sorted = [...subs].sort((a, b) =>
+                new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime()
+            );
+            const latest = sorted[0];
+            const groupInfo = latest.group;
+            const best = sorted.reduce<number | null>((acc, s) => {
+                if (s.final_score === null) return acc;
+                return acc === null ? s.final_score : Math.max(acc, s.final_score);
+            }, null);
+            entries.push({
+                groupId,
+                groupName: groupInfo?.name ?? `Group ${groupId}`,
+                members: groupInfo?.members ?? [],
+                submissions: sorted,
+                latestSubmission: latest,
+                bestScore: best,
+            });
+        }
+        return entries.sort((a, b) => a.groupName.localeCompare(b.groupName));
+    }, [submissions, assignment?.allow_groups]);
 
     // Group submissions by student
     const studentGroups: StudentGroup[] = useMemo(() => {
@@ -1461,27 +1531,115 @@ export default function AssignmentDetailPageContent() {
                                         </p>
                                     </CardContent>
                                 </Card>
+                            ) : assignment?.allow_groups ? (
+                                /* ── GROUP MODE: one card per group ── */
+                                <div className="space-y-3">
+                                    {assignmentGroupEntries.length === 0 ? (
+                                        <Card>
+                                            <CardContent className="py-12 text-center">
+                                                <Users className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                                                <p className="text-gray-500 font-medium">No group submissions yet</p>
+                                                <p className="text-sm text-gray-400 mt-1">Submissions will appear here once groups start submitting.</p>
+                                            </CardContent>
+                                        </Card>
+                                    ) : assignmentGroupEntries.map((entry) => {
+                                        const latest = entry.latestSubmission;
+                                        const submitter = latest.student;
+                                        return (
+                                            <Card
+                                                key={entry.groupId}
+                                                className="overflow-hidden transition-shadow hover:shadow-md cursor-pointer"
+                                                onClick={() => navigateToGrading(latest.student_id)}
+                                            >
+                                                <div className="p-4 hover:bg-gray-50/50 transition-colors">
+                                                    <div className="flex items-start gap-4">
+                                                        {/* Group icon */}
+                                                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                                                            <Users className="w-5 h-5 text-primary" />
+                                                        </div>
+
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                                <p className="font-semibold text-gray-900">{entry.groupName}</p>
+                                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                                                                    {entry.members.length} members
+                                                                </span>
+                                                                {latest.is_late && (
+                                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-700">
+                                                                        <Clock className="w-3 h-3" /> Late
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {/* Member avatars */}
+                                                            <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                                                                {entry.members.map((m) => (
+                                                                    <div key={m.user_id} className="flex items-center gap-1 text-[10px] text-gray-500">
+                                                                        <div className="w-5 h-5 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0">
+                                                                            <span className="text-[8px] font-bold text-gray-600">
+                                                                                {m.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                                                            </span>
+                                                                        </div>
+                                                                        <span>{m.full_name}{m.is_leader ? ' 👑' : ''}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                            <p className="text-[11px] text-gray-400">
+                                                                Submitted by: <span className="text-gray-600 font-medium">{submitter?.full_name ?? `Student #${latest.student_id}`}</span>
+                                                                {' · '}{formatDateTime(latest.submitted_at)}
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="hidden sm:flex items-center gap-6 text-sm shrink-0">
+                                                            <div className="text-center">
+                                                                <p className="text-xs text-gray-500">Tests</p>
+                                                                <p className="font-semibold text-gray-900">
+                                                                    {latest.tests_total > 0 ? `${latest.tests_passed}/${latest.tests_total}` : '—'}
+                                                                </p>
+                                                            </div>
+                                                            <div className="text-center min-w-[70px]">
+                                                                <p className="text-xs text-gray-500">Score</p>
+                                                                <p className={`text-lg font-bold ${getScoreColor(latest.final_score, assignment.max_score)}`}>
+                                                                    {latest.final_score !== null ? latest.final_score.toFixed(1) : '—'}
+                                                                    <span className="text-xs text-gray-400 font-normal">/{assignment.max_score}</span>
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="shrink-0">
+                                                            <span className={`inline-block px-2.5 py-1 text-xs font-medium rounded-full border ${getStatusBadge(latest.status)}`}>
+                                                                {formatStatus(latest.status)}
+                                                            </span>
+                                                        </div>
+
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={(e) => { e.stopPropagation(); navigateToGrading(latest.student_id); }}
+                                                            className="h-8 px-3 text-xs shrink-0 gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white"
+                                                        >
+                                                            <Edit className="w-3.5 h-3.5" /> Grade
+                                                        </Button>
+
+                                                        <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                                                    </div>
+                                                </div>
+                                            </Card>
+                                        );
+                                    })}
+                                </div>
                             ) : (
+                                /* ── INDIVIDUAL MODE ── */
                                 <div className="space-y-3">
                                     {filteredGroups.map((group) => {
-                                        const isExpanded = expandedStudents.has(group.student.id);
                                         const latest = group.latestSubmission;
                                         const hasFlagged = group.submissions.some(s => s.plagiarism_flagged || s.ai_flagged);
 
                                         return (
-                                            <Card key={group.student.id} className={`overflow-hidden transition-shadow hover:shadow-md ${hasFlagged ? 'border-l-4 border-l-red-500' : ''}`}>
-                                                {/* Student Row */}
-                                                <div
-                                                    className="flex items-center gap-4 p-4 cursor-pointer hover:bg-gray-50/50 transition-colors"
-                                                    onClick={() => toggleExpanded(group.student.id)}
-                                                >
-                                                    <button className="shrink-0 text-gray-400">
-                                                        {isExpanded
-                                                            ? <ChevronDown className="w-5 h-5" />
-                                                            : <ChevronRight className="w-5 h-5" />
-                                                        }
-                                                    </button>
-
+                                            <Card
+                                                key={group.student.id}
+                                                className={`overflow-hidden transition-shadow hover:shadow-md cursor-pointer ${hasFlagged ? 'border-l-4 border-l-red-500' : ''}`}
+                                                onClick={() => navigateToGrading(group.student.id)}
+                                            >
+                                                <div className="flex items-center gap-4 p-4 hover:bg-gray-50/50 transition-colors">
                                                     <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
                                                         latest.plagiarism_flagged ? 'bg-red-100' : 'bg-primary/10'
                                                     }`}>
@@ -1511,7 +1669,6 @@ export default function AssignmentDetailPageContent() {
                                                             {group.student.email}
                                                             {group.student.student_id && <> · ID: {group.student.student_id}</>}
                                                         </p>
-                                                        {/* Inline plagiarism match info */}
                                                         {latest.plagiarism_checked && latest.plagiarism_score !== null && latest.plagiarism_score > 0 && latest.plagiarism_report?.matches?.length > 0 && (
                                                             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                                                 <span className="text-[10px] text-gray-400">Matched with:</span>
@@ -1531,8 +1688,8 @@ export default function AssignmentDetailPageContent() {
 
                                                     <div className="hidden sm:flex items-center gap-6 text-sm shrink-0">
                                                         <div className="text-center">
-                                                            <p className="text-xs text-gray-500">Attempts</p>
-                                                            <p className="font-semibold text-gray-900">{group.totalAttempts}</p>
+                                                            <p className="text-xs text-gray-500">Submitted</p>
+                                                            <p className="text-xs font-medium text-gray-700">{formatDateTime(latest.submitted_at)}</p>
                                                         </div>
                                                         <div className="text-center">
                                                             <p className="text-xs text-gray-500">Tests</p>
@@ -1541,15 +1698,14 @@ export default function AssignmentDetailPageContent() {
                                                             </p>
                                                         </div>
                                                         <div className="text-center min-w-[70px]">
-                                                            <p className="text-xs text-gray-500">Best Score</p>
-                                                            <p className={`text-lg font-bold ${getScoreColor(group.bestScore, assignment.max_score)}`}>
-                                                                {group.bestScore !== null ? group.bestScore.toFixed(1) : '—'}
+                                                            <p className="text-xs text-gray-500">Score</p>
+                                                            <p className={`text-lg font-bold ${getScoreColor(latest.final_score, assignment.max_score)}`}>
+                                                                {latest.final_score !== null ? latest.final_score.toFixed(1) : '—'}
                                                                 <span className="text-xs text-gray-400 font-normal">/{assignment.max_score}</span>
                                                             </p>
                                                         </div>
                                                     </div>
 
-                                                    {/* Plagiarism similarity column */}
                                                     {latest.plagiarism_checked && latest.plagiarism_score !== null && latest.plagiarism_score > 0 && (
                                                         <div className="hidden lg:flex flex-col items-center min-w-[70px] shrink-0">
                                                             <p className="text-xs text-gray-500 mb-0.5">Similarity</p>
@@ -1566,7 +1722,7 @@ export default function AssignmentDetailPageContent() {
 
                                                     <div className="shrink-0">
                                                         <span className={`inline-block px-2.5 py-1 text-xs font-medium rounded-full border ${getStatusBadge(latest.status)}`}>
-                                                            {latest.status}
+                                                            {formatStatus(latest.status)}
                                                         </span>
                                                     </div>
 
@@ -1577,93 +1733,9 @@ export default function AssignmentDetailPageContent() {
                                                     >
                                                         <Edit className="w-3.5 h-3.5" /> Grade
                                                     </Button>
+
+                                                    <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
                                                 </div>
-
-                                                {/* Expanded: All Submissions */}
-                                                {isExpanded && (
-                                                    <div className="border-t bg-gray-50/50">
-                                                        <div className="px-4 py-3">
-                                                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                                                                All Submissions ({group.totalAttempts})
-                                                            </p>
-                                                            <div className="space-y-2">
-                                                                {group.submissions.map((sub, idx) => (
-                                                                    <div
-                                                                        key={sub.id}
-                                                                        className={`flex items-center gap-4 p-3 rounded-xl border bg-white cursor-pointer hover:shadow-sm transition-all ${
-                                                                            idx === 0 ? 'border-primary/30 ring-1 ring-primary/10' : 'border-gray-200'
-                                                                        }`}
-                                                                        onClick={(e) => { e.stopPropagation(); navigateToGrading(group.student.id); }}
-                                                                    >
-                                                                        <div className="flex items-center gap-2 shrink-0">
-                                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-                                                                                idx === 0 ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-500'
-                                                                            }`}>
-                                                                                #{sub.attempt_number}
-                                                                            </div>
-                                                                            {idx === 0 && (
-                                                                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                                                                                    Latest
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <p className="text-sm text-gray-700">
-                                                                                {formatDateTime(sub.submitted_at)}
-                                                                            </p>
-                                                                            <div className="flex items-center gap-3 mt-0.5">
-                                                                                <span className={`text-xs font-medium px-1.5 py-0.5 rounded border ${getStatusBadge(sub.status)}`}>
-                                                                                    {sub.status}
-                                                                                </span>
-                                                                                {sub.is_late && (
-                                                                                    <span className="text-[10px] text-amber-600 font-medium">
-                                                                                        Late ({sub.late_penalty_applied}% penalty)
-                                                                                    </span>
-                                                                                )}
-                                                                                {(sub.plagiarism_flagged || sub.ai_flagged) && (
-                                                                                    <span className="text-[10px] text-red-600 font-medium flex items-center gap-0.5">
-                                                                                        <AlertTriangle className="w-3 h-3" />
-                                                                                        {sub.plagiarism_flagged && 'Plagiarism'}
-                                                                                        {sub.plagiarism_flagged && sub.ai_flagged && ' & '}
-                                                                                        {sub.ai_flagged && 'AI'}
-                                                                                    </span>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-
-                                                                        <div className="hidden sm:flex items-center gap-4 shrink-0">
-                                                                            {sub.tests_total > 0 && (
-                                                                                <div className="text-center">
-                                                                                    <p className="text-xs text-gray-500">Tests</p>
-                                                                                    <p className={`text-sm font-semibold ${sub.tests_passed === sub.tests_total ? 'text-green-600' : 'text-gray-700'}`}>
-                                                                                        {sub.tests_passed}/{sub.tests_total}
-                                                                                    </p>
-                                                                                </div>
-                                                                            )}
-                                                                            {sub.plagiarism_checked && sub.plagiarism_score !== null && sub.plagiarism_score > 0 && (
-                                                                                <div className="text-center">
-                                                                                    <p className="text-xs text-gray-500">Similarity</p>
-                                                                                    <p className={`text-sm font-semibold ${sub.plagiarism_flagged ? 'text-red-600' : 'text-gray-500'}`}>
-                                                                                        {sub.plagiarism_score.toFixed(0)}%
-                                                                                    </p>
-                                                                                </div>
-                                                                            )}
-                                                                            <div className="text-center min-w-[60px]">
-                                                                                <p className="text-xs text-gray-500">Score</p>
-                                                                                <p className={`text-sm font-bold ${getScoreColor(sub.final_score, sub.max_score)}`}>
-                                                                                    {sub.final_score !== null ? sub.final_score.toFixed(1) : '—'}
-                                                                                </p>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
                                             </Card>
                                         );
                                     })}

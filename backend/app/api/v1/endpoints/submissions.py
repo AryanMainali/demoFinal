@@ -23,6 +23,8 @@ from app.schemas.submission import (
     SubmissionWithStudent,
     SubmissionDetailWithStudent,
     PlagiarismMatchOut,
+    GroupInSubmission,
+    GroupMemberInSubmission,
 )
 from sqlalchemy.orm import joinedload
 from app.core.config import settings
@@ -70,10 +72,23 @@ def list_submissions(
 ):
     """List submissions - students see their own, faculty/assistant see submissions from their courses"""
     query = db.query(Submission)
-    
+
     if current_user.role == UserRole.STUDENT:
-        # Students only see their own submissions
-        query = query.filter(Submission.student_id == current_user.id)
+        # Students see their own submissions + group members' submissions (for group assignments)
+        student_group_ids = [
+            gm.group_id for gm in db.query(GroupMembership).filter(
+                GroupMembership.user_id == current_user.id
+            ).all()
+        ]
+        if student_group_ids:
+            query = query.filter(
+                or_(
+                    Submission.student_id == current_user.id,
+                    Submission.group_id.in_(student_group_ids)
+                )
+            )
+        else:
+            query = query.filter(Submission.student_id == current_user.id)
     elif current_user.role == UserRole.FACULTY:
         # Faculty see submissions from their courses
         course_ids = [c.id for c in db.query(Course).filter(Course.instructor_id == current_user.id).all()]
@@ -128,12 +143,39 @@ def list_assignment_submissions(
 
     submissions = (
         db.query(Submission)
-        .options(joinedload(Submission.student))
+        .options(
+            joinedload(Submission.student),
+            joinedload(Submission.group).joinedload(Group.memberships).joinedload(GroupMembership.user),
+        )
         .filter(Submission.assignment_id == assignment_id)
         .order_by(desc(Submission.submitted_at))
         .all()
     )
-    return submissions
+
+    # Build response manually to attach group member info
+    result = []
+    for sub in submissions:
+        sub_dict = SubmissionWithStudent.model_validate(sub)
+        if sub.group:
+            members = [
+                GroupMemberInSubmission(
+                    id=m.id,
+                    user_id=m.user_id,
+                    full_name=m.user.full_name if m.user else "",
+                    email=m.user.email if m.user else "",
+                    student_id=m.user.student_id if m.user else None,
+                    is_leader=m.is_leader,
+                )
+                for m in sub.group.memberships
+                if m.user is not None
+            ]
+            sub_dict.group = GroupInSubmission(
+                id=sub.group.id,
+                name=sub.group.name,
+                members=members,
+            )
+        result.append(sub_dict)
+    return result
 
 
 def _get_assignment_ids_for_grader(db: Session, user: User) -> List[int]:
@@ -293,20 +335,24 @@ async def create_submission(
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
     
+    # Find previous submissions for this student (used for attempt tracking and replacement)
+    previous_submissions = db.query(Submission).filter(
+        and_(
+            Submission.assignment_id == assignment_id,
+            Submission.student_id == current_user.id
+        )
+    ).order_by(Submission.attempt_number.asc()).all()
+
+    prev_attempt_number = previous_submissions[-1].attempt_number if previous_submissions else 0
+    new_attempt_number = prev_attempt_number + 1
+
     # Check max attempts
-    if assignment.max_attempts > 0:
-        attempt_count = db.query(Submission).filter(
-            and_(
-                Submission.assignment_id == assignment_id,
-                Submission.student_id == current_user.id
-            )
-        ).count()
-        if attempt_count >= assignment.max_attempts:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Maximum attempts ({assignment.max_attempts}) reached"
-            )
-    
+    if assignment.max_attempts > 0 and new_attempt_number > assignment.max_attempts:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Maximum attempts ({assignment.max_attempts}) reached"
+        )
+
     # Verify group if provided
     if group_id:
         if not assignment.allow_groups:
@@ -350,14 +396,30 @@ async def create_submission(
             )
         late_penalty = min(days_late * assignment.late_penalty_per_day, 100.0)
     
-    # Get attempt number
-    attempt_number = db.query(Submission).filter(
-        and_(
-            Submission.assignment_id == assignment_id,
-            Submission.student_id == current_user.id
-        )
-    ).count() + 1
-    
+    # Delete old submissions and their physical files (replace model: one submission per student)
+    use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
+    for old_sub in previous_submissions:
+        # Remove physical files
+        if use_s3:
+            for old_file in old_sub.files:
+                try:
+                    s3_service.delete_file(old_file.file_path)
+                except Exception as del_err:
+                    logger.warning(f"Could not delete S3 file {old_file.file_path}: {del_err}")
+        else:
+            old_sub_dir = Path(settings.SUBMISSIONS_DIR) / str(old_sub.id)
+            if old_sub_dir.exists():
+                try:
+                    shutil.rmtree(old_sub_dir)
+                except Exception as del_err:
+                    logger.warning(f"Could not delete local submission dir {old_sub_dir}: {del_err}")
+        db.delete(old_sub)  # cascade deletes SubmissionFile, TestResult, RubricScore
+
+    if previous_submissions:
+        db.flush()  # apply deletes before inserting new submission
+
+    attempt_number = new_attempt_number
+
     # Create submission
     submission = Submission(
         assignment_id=assignment_id,
@@ -865,16 +927,39 @@ def save_manual_grade(
     )
     db.add(audit)
 
+    score_display = f"{submission.final_score:.1f}" if submission.final_score is not None else "available in gradebook"
+    grade_title = f"Assignment graded: {submission.assignment.title}"
+    grade_message = f"Your submission has been graded. Score: {score_display}."
+
+    # Notify the submitter
     create_notification(
         db,
         user_id=submission.student_id,
         notification_type=NotificationType.ASSIGNMENT_GRADED,
-        title=f"Assignment graded: {submission.assignment.title}",
-        message=f"Your submission has been graded. Latest score: {submission.final_score if submission.final_score is not None else 'available in gradebook'}.",
+        title=grade_title,
+        message=grade_message,
         course_id=submission.assignment.course_id,
         assignment_id=submission.assignment_id,
         submission_id=submission.id,
     )
+
+    # If group submission, notify all other group members
+    if submission.group_id:
+        group_members = db.query(GroupMembership).filter(
+            GroupMembership.group_id == submission.group_id,
+            GroupMembership.user_id != submission.student_id,
+        ).all()
+        for gm in group_members:
+            create_notification(
+                db,
+                user_id=gm.user_id,
+                notification_type=NotificationType.ASSIGNMENT_GRADED,
+                title=grade_title,
+                message=f"Your group submission has been graded. Score: {score_display}.",
+                course_id=submission.assignment.course_id,
+                assignment_id=submission.assignment_id,
+                submission_id=submission.id,
+            )
 
     db.commit()
 

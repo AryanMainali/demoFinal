@@ -54,14 +54,20 @@ const InteractiveTerminalInner = forwardRef<InteractiveTerminalRef, InteractiveT
         const inputRef = useRef<HTMLInputElement>(null);
         const localOutputEndRef = useRef<HTMLDivElement>(null);
         const outputEndRef = outputEndRefProp ?? localOutputEndRef;
+        const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
         useImperativeHandle(ref, () => ({
             focusInput: () => inputRef.current?.focus(),
         }), []);
 
         useEffect(() => {
-            outputEndRef?.current?.scrollIntoView({ behavior: 'smooth' });
-        }, [output, outputEndRef]);
+            const container = scrollContainerRef.current;
+            if (!container) return;
+            const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            if (distanceFromBottom <= 80) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }, [output]);
 
         const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
             if (e.key === 'Enter') {
@@ -81,6 +87,7 @@ const InteractiveTerminalInner = forwardRef<InteractiveTerminalRef, InteractiveT
                 style={{ minHeight, maxHeight }}
             >
                 <div
+                    ref={scrollContainerRef}
                     className="flex-1 min-h-0 overflow-y-auto overflow-x-auto p-2 font-mono text-[12px] leading-relaxed"
                     role="log"
                     aria-label="Terminal output"

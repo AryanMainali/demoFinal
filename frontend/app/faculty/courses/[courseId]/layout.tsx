@@ -4,7 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname, useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { LayoutDashboard, FileText, Users, UserCog } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, UserCog, UsersRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BackLink } from '@/components/ui/BackLink';
 import apiClient from '@/lib/api-client';
@@ -57,6 +57,7 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
         { label: 'Overview', href: `/faculty/courses/${courseId}`, icon: LayoutDashboard },
         { label: 'Assignments', href: `/faculty/courses/${courseId}/assignments`, icon: FileText },
         { label: 'Students', href: `/faculty/courses/${courseId}/students`, icon: Users },
+        { label: 'Groups', href: `/faculty/courses/${courseId}/groups`, icon: UsersRound },
         { label: 'Assistants', href: `/faculty/courses/${courseId}/assistants`, icon: UserCog },
     ];
 

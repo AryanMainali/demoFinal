@@ -101,10 +101,14 @@ export default function AssignmentsPage() {
         });
     };
 
-    const { data: allAssignments = [], isLoading, isFetching, refetch } = useQuery({
+    const { data: allAssignments = [], isLoading, isFetching, refetch, error: assignmentsError } = useQuery({
         queryKey: ['course-assignments', courseId],
         queryFn: () => apiClient.getCourseAssignments(courseId, true, 'all') as Promise<Assignment[]>,
         enabled: !!courseId && !isNaN(courseId),
+        retry: (failureCount, error: any) => {
+            if (error?.response?.status === 403 || error?.response?.status === 404) return false;
+            return failureCount < 2;
+        },
     });
 
     const { data: courseReport } = useQuery<CourseReport | null>({
@@ -191,6 +195,25 @@ export default function AssignmentsPage() {
 
     if (isLoading) {
         return <CourseLoadingPage message="Loading assignments..." />;
+    }
+
+    if (assignmentsError) {
+        const status = (assignmentsError as any)?.response?.status;
+        const detail = (assignmentsError as any)?.response?.data?.detail;
+        return (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+                <AlertCircle className="w-14 h-14 text-red-400 mb-4" />
+                <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                    {status === 403 ? 'Access Denied' : 'Failed to Load Assignments'}
+                </h2>
+                <p className="text-gray-500 max-w-sm mb-6">
+                    {typeof detail === 'string' ? detail : status === 403 ? 'You are not authorized to view assignments for this course.' : 'An error occurred while loading assignments.'}
+                </p>
+                <Button onClick={() => refetch()} variant="outline" className="gap-2">
+                    <RefreshCw className="w-4 h-4" /> Try Again
+                </Button>
+            </div>
+        );
     }
 
     return (

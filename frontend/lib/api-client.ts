@@ -201,6 +201,52 @@ class ApiClient {
         return response.data;
     }
 
+    async getCourseGroups(courseId: number) {
+        const response = await this.client.get(`/courses/${courseId}/groups`);
+        return response.data as Array<{
+            id: number;
+            name: string;
+            max_members: number;
+            created_at: string;
+            members: Array<{ id: number; user_id: number; full_name: string; email: string; student_id: string | null; is_leader: boolean }>;
+        }>;
+    }
+
+    async getMyGroup(courseId: number): Promise<{
+        id: number;
+        name: string;
+        max_members: number;
+        created_at: string;
+        members: Array<{ id: number; user_id: number; full_name: string; email: string; student_id: string | null; is_leader: boolean }>;
+    } | null> {
+        try {
+            const response = await this.client.get(`/courses/${courseId}/groups/my`);
+            return response.data;
+        } catch {
+            return null;
+        }
+    }
+
+    async createCourseGroup(courseId: number, data: { name: string; max_members: number }) {
+        const response = await this.client.post(`/courses/${courseId}/groups`, data);
+        return response.data;
+    }
+
+    async deleteCourseGroup(courseId: number, groupId: number) {
+        const response = await this.client.delete(`/courses/${courseId}/groups/${groupId}`);
+        return response.data;
+    }
+
+    async addGroupMember(courseId: number, groupId: number, userId: number) {
+        const response = await this.client.post(`/courses/${courseId}/groups/${groupId}/members`, { user_id: userId });
+        return response.data;
+    }
+
+    async removeGroupMember(courseId: number, groupId: number, userId: number) {
+        const response = await this.client.delete(`/courses/${courseId}/groups/${groupId}/members/${userId}`);
+        return response.data;
+    }
+
     async getCourseAssistants(courseId: number) {
         const response = await this.client.get(`/courses/${courseId}/assistants`);
         return response.data;
@@ -292,11 +338,6 @@ class ApiClient {
     async getSubmission(id: number) {
         const response = await this.client.get(`/submissions/${id}`);
         return response.data;
-    }
-
-    async getSubmissionFileContent(submissionId: number, fileId: number) {
-        const response = await this.client.get(`/submissions/${submissionId}/files/${fileId}/content`);
-        return response.data as { id: number; filename: string; content: string };
     }
 
     async getAssignmentSubmissions(assignmentId: number) {
@@ -614,37 +655,6 @@ class ApiClient {
 
     async updateNotificationSettings(data: Record<string, boolean>) {
         const response = await this.client.put('/settings/notifications/settings', data);
-        return response.data;
-    }
-
-    async getNotifications(unreadOnly: boolean = false, limit: number = 20) {
-        const response = await this.client.get('/notifications', {
-            params: {
-                unread_only: unreadOnly,
-                limit,
-            },
-        });
-        return response.data as Array<{
-            id: number;
-            type: string;
-            title: string;
-            message: string;
-            link?: string | null;
-            course_id?: number | null;
-            assignment_id?: number | null;
-            submission_id?: number | null;
-            is_read: boolean;
-            created_at: string;
-        }>;
-    }
-
-    async markNotificationRead(notificationId: number) {
-        const response = await this.client.put(`/notifications/${notificationId}/read`);
-        return response.data;
-    }
-
-    async markAllNotificationsRead() {
-        const response = await this.client.put('/notifications/read-all');
         return response.data;
     }
 

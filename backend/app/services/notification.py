@@ -106,6 +106,31 @@ def notify_faculty_submission_received(
         return None
 
 
+def notify_faculty_course_assigned(
+    db: Session,
+    faculty_id: int,
+    course_id: int,
+    course_code: str,
+    course_name: str,
+) -> Optional[Notification]:
+    """Notify faculty when admin assigns them to a course as instructor."""
+    try:
+        notification = create_notification(
+            db=db,
+            user_id=faculty_id,
+            notification_type=NotificationType.COURSE_ASSIGNED,
+            title="Course Assigned",
+            message=f"You have been assigned as instructor for {course_code} — {course_name}.",
+            link=f"/faculty/courses/{course_id}",
+            course_id=course_id,
+        )
+        logger.info(f"Created course-assigned notification for faculty {faculty_id}")
+        return notification
+    except Exception as e:
+        logger.error(f"Failed to create course-assigned notification: {str(e)}")
+        return None
+
+
 def notify_student_grade_posted(
     db: Session,
     student_id: int,

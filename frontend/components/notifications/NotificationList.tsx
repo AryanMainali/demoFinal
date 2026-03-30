@@ -34,7 +34,8 @@ interface NotificationRowProps {
 }
 
 function NotificationRow({ notification, onClick }: NotificationRowProps) {
-    const typeLabel = NOTIFICATION_TYPE_CONFIG[notification.type].label;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const typeLabel = (NOTIFICATION_TYPE_CONFIG as any)[notification.type]?.label ?? notification.title ?? 'Notification';
     
     // Parse timestamp - backend sends UTC, append 'Z' if not present to ensure proper parsing
     const timestamp = notification.created_at.endsWith('Z') 

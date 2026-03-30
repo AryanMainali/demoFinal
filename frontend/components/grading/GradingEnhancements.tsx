@@ -61,16 +61,12 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
     onTotalScoreChange,
     onCalculate,
 }) => {
-    // Validation state
     const [errors, setErrors] = useState<Record<number, string>>({});
 
-    // Calculate total automatically based on mode
     const calculatedTotal = useMemo(() => {
         if (mode === 'points') {
-            // Sum all earned points
             return rubricItems.reduce((sum, item) => sum + (item.override ?? item.earnedPoints), 0);
         } else {
-            // Weight mode: (earned / max) * weight, then sum
             return rubricItems.reduce((sum, item) => {
                 const percentage = item.maxPoints > 0 ? (item.override ?? item.earnedPoints) / item.maxPoints : 0;
                 return sum + ((item.weight / 100) * maxScore * percentage);
@@ -78,19 +74,13 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
         }
     }, [rubricItems, mode, maxScore]);
 
-    // Total points across all criteria
     const totalCriteriaPoints = useMemo(
         () => rubricItems.reduce((sum, item) => sum + item.maxPoints, 0),
         [rubricItems]
     );
 
-    // Validation: Check if points add up correctly
-    const isPointsValid = useMemo(() => {
-        if (mode === 'points') {
-            return Math.abs(totalCriteriaPoints - maxScore) < 0.01;
-        }
-        return true;
-    }, [mode, totalCriteriaPoints, maxScore]);
+    const scorePercent = maxScore > 0 ? Math.min((calculatedTotal / maxScore) * 100, 100) : 0;
+    const scoreColor = scorePercent >= 90 ? '#4ec9b0' : scorePercent >= 70 ? '#569cd6' : scorePercent >= 50 ? '#dcdcaa' : '#f44747';
 
     useEffect(() => {
         onTotalScoreChange(calculatedTotal);
@@ -99,13 +89,11 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
     const handleScoreChange = (itemId: number, score: number) => {
         const item = rubricItems.find(i => i.itemId === itemId);
         if (!item) return;
-
-        // Validation
         const newErrors = { ...errors };
         if (score < (item.minPoints ?? 0)) {
-            newErrors[itemId] = `Minimum score is ${(item.minPoints ?? 0).toFixed(1)}`;
+            newErrors[itemId] = `Min: ${(item.minPoints ?? 0).toFixed(1)}`;
         } else if (score > item.maxPoints) {
-            newErrors[itemId] = `Maximum score is ${item.maxPoints.toFixed(1)}`;
+            newErrors[itemId] = `Max: ${item.maxPoints.toFixed(1)}`;
         } else {
             delete newErrors[itemId];
         }
@@ -114,107 +102,121 @@ export const RubricGrader: React.FC<RubricGraderProps> = ({
     };
 
     return (
-        <div className="space-y-4">
-            {/* Header with total info */}
-            <div className="border border-gray-300 rounded-lg p-3 bg-gray-50">
-                <div className="flex items-center justify-between gap-4">
+        <div className="space-y-3">
+            {/* Score Summary Card */}
+            <div className="rounded-xl bg-[#1a1a2e] border border-[#3c3c3c] p-3 relative overflow-hidden">
+                <div
+                    className="absolute inset-0 opacity-10 transition-all duration-500"
+                    style={{ background: `linear-gradient(135deg, ${scoreColor}33 0%, transparent 70%)` }}
+                />
+                <div className="relative flex items-center justify-between">
                     <div>
-                        <p className="text-sm font-semibold text-gray-900">Assignment Total Points: {maxScore}</p>
-                        {mode === 'points' && (
-                            <p className={`text-xs mt-1 ${isPointsValid ? 'text-green-700' : 'text-red-700'}`}>
-                                Criteria Total: <span className="font-semibold">{totalCriteriaPoints.toFixed(1)}</span>
-                                {!isPointsValid && ` (Must equal ${maxScore})`}
-                            </p>
-                        )}
+                        <p className="text-[10px] text-[#858585] uppercase tracking-widest mb-0.5">Rubric Score</p>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-3xl font-bold tabular-nums" style={{ color: scoreColor }}>
+                                {calculatedTotal.toFixed(1)}
+                            </span>
+                            <span className="text-[#858585] text-sm">/ {maxScore}</span>
+                        </div>
                     </div>
                     <div className="text-right">
-                        <p className="text-xs text-gray-600">Total Score</p>
-                        <p className="text-2xl font-bold text-gray-900">{calculatedTotal.toFixed(1)}</p>
+                        <div
+                            className="w-14 h-14 rounded-full border-2 flex items-center justify-center"
+                            style={{ borderColor: scoreColor }}
+                        >
+                            <span className="text-xs font-bold" style={{ color: scoreColor }}>
+                                {scorePercent.toFixed(0)}%
+                            </span>
+                        </div>
                     </div>
+                </div>
+                {/* Progress bar */}
+                <div className="mt-2.5 h-1.5 rounded-full bg-[#3c3c3c] overflow-hidden">
+                    <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${scorePercent}%`, backgroundColor: scoreColor }}
+                    />
                 </div>
             </div>
 
-            {/* Rubric Items Table */}
-            <div className="overflow-x-auto">
-                <table className="w-full border-collapse border border-gray-300">
-                    <thead>
-                        <tr className="bg-gray-100">
-                            <th className="border border-gray-300 px-3 py-2 text-left text-xs font-bold text-gray-900">Criterion</th>
-                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Points</th>
-                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Min</th>
-                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Max</th>
-                            <th className="border border-gray-300 px-3 py-2 text-center text-xs font-bold text-gray-900">Score</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rubricItems.map((item, idx) => {
-                            const displayScore = item.override !== undefined ? item.override : item.earnedPoints;
-                            const hasError = errors[item.itemId];
-
-                            return (
-                                <tr key={item.itemId} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                    <td className="border border-gray-300 px-3 py-2">
-                                        <div>
-                                            <p className="text-sm font-semibold text-gray-900">{item.name}</p>
-                                            {item.description && (
-                                                <p className="text-xs text-gray-600 mt-1">{item.description}</p>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="border border-gray-300 px-3 py-2 text-center">
-                                        <p className="text-sm font-bold text-gray-900">{item.maxPoints.toFixed(1)}</p>
-                                    </td>
-                                    <td className="border border-gray-300 px-3 py-2 text-center">
-                                        <p className="text-sm text-gray-700">{(item.minPoints ?? 0).toFixed(1)}</p>
-                                    </td>
-                                    <td className="border border-gray-300 px-3 py-2 text-center">
-                                        <p className="text-sm text-gray-700">{item.maxPoints.toFixed(1)}</p>
-                                    </td>
-                                    <td className="border border-gray-300 px-3 py-2 text-center">
-                                        <div>
-                                            <input
-                                                type="number"
-                                                value={displayScore}
-                                                onChange={(e) => {
-                                                    const raw = parseFloat(e.target.value);
-                                                    handleScoreChange(item.itemId, Number.isFinite(raw) ? raw : 0);
-                                                }}
-                                                step="0.1"
-                                                inputMode="decimal"
-                                                min={item.minPoints ?? 0}
-                                                max={item.maxPoints}
-                                                className={`w-16 px-2 py-1 text-sm font-semibold text-center rounded border ${hasError
-                                                        ? 'border-red-500 bg-red-50 text-red-700'
-                                                        : 'border-gray-300 bg-white text-gray-900'
-                                                    } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                                            />
-                                            {hasError && (
-                                                <p className="text-xs text-red-600 mt-1">{hasError}</p>
-                                            )}
-                                        </div>
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
-            </div>
-
-            {/* Info and Validation */}
+            {/* Rubric Items */}
             <div className="space-y-2">
-                {!isPointsValid && mode === 'points' && (
-                    <div className="border border-red-300 rounded-lg bg-red-50 p-3">
-                        <p className="text-sm text-red-800">
-                            <span className="font-semibold">Validation Error:</span> Criteria points must sum to {maxScore}. Currently: {totalCriteriaPoints.toFixed(1)}
-                        </p>
-                    </div>
-                )}
-                <div className="border border-gray-300 rounded-lg bg-gray-50 p-3">
-                    <p className="text-xs text-gray-700">
-                        <span className="font-semibold">Instructions:</span> Enter the points earned for each criterion. Scores must be between the Min and Max values shown.
-                    </p>
-                </div>
+                {rubricItems.map((item) => {
+                    const displayScore = item.override !== undefined ? item.override : item.earnedPoints;
+                    const itemPercent = item.maxPoints > 0 ? Math.min((displayScore / item.maxPoints) * 100, 100) : 0;
+                    const itemColor = itemPercent >= 90 ? '#4ec9b0' : itemPercent >= 70 ? '#569cd6' : itemPercent >= 50 ? '#dcdcaa' : '#f44747';
+                    const hasError = errors[item.itemId];
+
+                    return (
+                        <div key={item.itemId}
+                            className="rounded-lg border border-[#3c3c3c] bg-[#252526] p-3 transition-all hover:border-[#505050]"
+                        >
+                            <div className="flex items-start justify-between gap-3 mb-2">
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[12px] font-semibold text-white leading-tight truncate">{item.name}</p>
+                                    {item.description && item.description !== 'No description' && (
+                                        <p className="text-[10px] text-[#858585] mt-0.5 leading-snug">{item.description}</p>
+                                    )}
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[9px] text-[#858585] bg-[#1e1e1e] px-1.5 py-0.5 rounded">
+                                            max {item.maxPoints.toFixed(0)} pts
+                                        </span>
+                                        {mode === 'weight' && item.weight > 0 && (
+                                            <span className="text-[9px] text-[#569cd6] bg-[#1e1e1e] px-1.5 py-0.5 rounded">
+                                                {item.weight}%
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col items-center gap-1 shrink-0">
+                                    <input
+                                        type="number"
+                                        value={displayScore}
+                                        onChange={(e) => {
+                                            const raw = parseFloat(e.target.value);
+                                            handleScoreChange(item.itemId, Number.isFinite(raw) ? raw : 0);
+                                        }}
+                                        step="0.5"
+                                        inputMode="decimal"
+                                        min={item.minPoints ?? 0}
+                                        max={item.maxPoints}
+                                        className={`w-16 px-2 py-1.5 text-sm font-bold text-center rounded-lg border bg-[#1e1e1e] text-white focus:outline-none transition-colors ${
+                                            hasError
+                                                ? 'border-[#f44747] focus:border-[#f44747]'
+                                                : 'border-[#505050] focus:border-[#862733]'
+                                        }`}
+                                    />
+                                    {hasError ? (
+                                        <p className="text-[9px] text-[#f44747]">{hasError}</p>
+                                    ) : (
+                                        <p className="text-[9px] text-[#858585]">/ {item.maxPoints.toFixed(0)}</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Per-item progress bar */}
+                            <div className="h-1 rounded-full bg-[#1e1e1e] overflow-hidden">
+                                <div
+                                    className="h-full rounded-full transition-all duration-300"
+                                    style={{ width: `${itemPercent}%`, backgroundColor: itemColor }}
+                                />
+                            </div>
+                        </div>
+                    );
+                })}
             </div>
+
+            {/* Apply to Grade button */}
+            {onCalculate && (
+                <button
+                    onClick={onCalculate}
+                    className="w-full h-8 text-[11px] font-semibold rounded-lg bg-[#862733] hover:bg-[#a03040] text-white transition-colors flex items-center justify-center gap-1.5"
+                >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Apply Rubric Score ({calculatedTotal.toFixed(1)} pts)
+                </button>
+            )}
         </div>
     );
 };

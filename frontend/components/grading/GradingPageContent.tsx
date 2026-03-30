@@ -15,6 +15,8 @@ import { useInteractiveTerminal } from '@/hooks/useInteractiveTerminal';
 
 import {
     ArrowLeft,
+    ChevronLeft,
+    ChevronRight,
     Play,
     FileCode,
     Target,
@@ -76,11 +78,28 @@ interface TestResultOut {
     timed_out?: boolean;
 }
 
+interface GroupMemberInfo {
+    id: number;
+    user_id: number;
+    full_name: string;
+    email: string;
+    student_id: string | null;
+    is_leader: boolean;
+}
+
+interface GroupInfo {
+    id: number;
+    name: string;
+    members: GroupMemberInfo[];
+}
+
 interface SubmissionItem {
     id: number;
     assignment_id: number;
     student_id: number;
     student?: StudentInfo;
+    group_id?: number | null;
+    group?: GroupInfo | null;
     attempt_number: number;
     status: string;
     submitted_at: string;
@@ -202,6 +221,18 @@ const getScoreColor = (score: number | null, max: number) => {
     if (pct >= 70) return 'text-[#569cd6]';
     if (pct >= 50) return 'text-[#dcdcaa]';
     return 'text-[#f44747]';
+};
+
+const formatStatus = (status: string) => {
+    switch (status) {
+        case 'autograded': return 'Auto-graded';
+        case 'manual_review': return 'Needs Review';
+        case 'completed': return 'Completed';
+        case 'graded': return 'Graded';
+        case 'pending': return 'Pending';
+        case 'error': return 'Error';
+        default: return status ? status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Unknown';
+    }
 };
 
 /* ====================================================================
@@ -487,6 +518,31 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
         [studentSubs, studentId]
     );
 
+    // Student navigation: get unique students (ordered by name) from all submissions
+    const sortedStudentList = useMemo(() => {
+        const seen = new Set<number>();
+        const list: { id: number; full_name: string }[] = [];
+        for (const sub of allSubs) {
+            if (sub.student && !seen.has(sub.student_id)) {
+                seen.add(sub.student_id);
+                list.push({ id: sub.student_id, full_name: sub.student.full_name });
+            }
+        }
+        return list.sort((a, b) => a.full_name.localeCompare(b.full_name));
+    }, [allSubs]);
+
+    const currentStudentIndex = useMemo(() =>
+        sortedStudentList.findIndex(s => s.id === studentId),
+        [sortedStudentList, studentId]
+    );
+
+    const prevStudent = currentStudentIndex > 0 ? sortedStudentList[currentStudentIndex - 1] : null;
+    const nextStudent = currentStudentIndex < sortedStudentList.length - 1 ? sortedStudentList[currentStudentIndex + 1] : null;
+
+    const navigateToStudent = (sid: number) => {
+        router.push(`${assignmentListHref}/grade/${sid}`);
+    };
+
     const hasStdinInput = customInput.trim().length > 0;
     const hasTestFileInput = inputFileContent.trim().length > 0;
 
@@ -526,12 +582,23 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
         const savedRubricTotal = (selectedSub.rubric_scores || []).reduce((sum, rs) => sum + Number(rs.score ?? 0), 0);
 
         setRubricScores(savedRubricScores);
-        setRubricTotalScore(Number.isFinite(savedRubricTotal) ? savedRubricTotal : 0);
+        // Use the aggregate rubric_score from the submission if per-item scores aren't populated
+        const rubricTotal = savedRubricTotal > 0
+            ? savedRubricTotal
+            : (selectedSub.rubric_score != null ? Number(selectedSub.rubric_score) : 0);
+        setRubricTotalScore(Number.isFinite(rubricTotal) ? rubricTotal : 0);
+
+        // Always load existing final score, falling back to raw_score if final_score is null
+        const existingScore = selectedSub.final_score !== null
+            ? selectedSub.final_score
+            : selectedSub.raw_score !== null
+                ? selectedSub.raw_score
+                : null;
 
         setGradeState({
             testOverrides: overrides,
             feedback: selectedSub.feedback || '',
-            finalScore: selectedSub.final_score !== null ? selectedSub.final_score.toFixed(1) : '',
+            finalScore: existingScore !== null ? Number(existingScore).toFixed(1) : '',
         });
 
         if (files.length > 0) {
@@ -539,7 +606,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             loadFileContent(selectedSub.id, mainFile.id);
             setSelectedFileId(mainFile.id);
         }
-    }, [selectedSub?.id, selectedSub?.rubric_scores, selectedSub?.feedback, selectedSub?.final_score]);
+    }, [selectedSub?.id, selectedSub?.rubric_scores, selectedSub?.feedback, selectedSub?.final_score, selectedSub?.raw_score, selectedSub?.rubric_score]);
 
     const loadFileContent = useCallback(async (subId: number, fileId: number) => {
         if (fileContents[fileId]) return;
@@ -952,18 +1019,54 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                     </Button>
                     <div className="h-3 w-px bg-[#5a5a5a]" />
                     <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-6 h-6 rounded-full bg-[#862733]/30 flex items-center justify-center shrink-0">
-                            <User className="w-3.5 h-3.5 text-[#862733]" />
-                        </div>
-                        <span className="text-xs text-white font-medium truncate">{student.full_name}</span>
-                        <span className="text-[10px] text-[#858585] truncate">{student.email}</span>
+                        {selectedSub?.group ? (
+                            <>
+                                <div className="w-6 h-6 rounded-full bg-[#0e639c]/30 flex items-center justify-center shrink-0">
+                                    <Users className="w-3.5 h-3.5 text-[#4fc1ff]" />
+                                </div>
+                                <span className="text-xs text-[#4fc1ff] font-medium truncate">{selectedSub.group.name}</span>
+                                <span className="text-[10px] text-[#858585]">·</span>
+                                <span className="text-[10px] text-[#858585] truncate">submitted by {student.full_name}</span>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-6 h-6 rounded-full bg-[#862733]/30 flex items-center justify-center shrink-0">
+                                    <User className="w-3.5 h-3.5 text-[#862733]" />
+                                </div>
+                                <span className="text-xs text-white font-medium truncate">{student.full_name}</span>
+                                <span className="text-[10px] text-[#858585] truncate">{student.email}</span>
+                            </>
+                        )}
                     </div>
                     <div className="h-3 w-px bg-[#5a5a5a]" />
                     <span className="text-xs text-[#cccccc] truncate">
                         {assignment.course?.code} &mdash; {assignment.title}
                     </span>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
+                    {/* Student navigation */}
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => prevStudent && navigateToStudent(prevStudent.id)}
+                            disabled={!prevStudent}
+                            title={prevStudent ? `Previous: ${prevStudent.full_name}` : 'No previous student'}
+                            className="h-6 w-6 flex items-center justify-center rounded text-[#858585] hover:bg-[#505050] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <span className="text-[10px] text-[#858585]">
+                            {sortedStudentList.length > 0 ? `${currentStudentIndex + 1} / ${sortedStudentList.length}` : ''}
+                        </span>
+                        <button
+                            onClick={() => nextStudent && navigateToStudent(nextStudent.id)}
+                            disabled={!nextStudent}
+                            title={nextStudent ? `Next: ${nextStudent.full_name}` : 'No next student'}
+                            className="h-6 w-6 flex items-center justify-center rounded text-[#858585] hover:bg-[#505050] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                    <div className="h-3 w-px bg-[#5a5a5a]" />
                     <span className="text-[10px] text-[#858585]">{assignment.language?.display_name || 'N/A'}</span>
                     <div className="h-3 w-px bg-[#5a5a5a]" />
                     <span className="text-[10px] text-[#858585]">{assignment.max_score} pts</span>
@@ -973,22 +1076,12 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             {/* ===== Toolbar ===== */}
             <div className="flex items-center justify-between bg-[#252526] px-3 py-1 border-b border-[#3c3c3c] shadow-[inset_0_-1px_0_0_rgba(255,255,255,0.03)] shrink-0">
                 <div className="flex items-center gap-2">
-                    {/* Submission selector */}
-                    <div className="relative">
-                        <select
-                            value={selectedSubId || ''}
-                            onChange={(e) => setSelectedSubId(Number(e.target.value))}
-                            className="h-6 pl-2 pr-6 text-[10px] rounded bg-[#3c3c3c] text-[#cccccc] border border-[#505050] appearance-none cursor-pointer focus:outline-none focus:border-[#862733]"
-                        >
-                            {studentSubs.map((sub, idx) => (
-                                <option key={sub.id} value={sub.id}>
-                                    Attempt #{sub.attempt_number}{idx === 0 ? ' (Latest)' : ''} - {format(new Date(sub.submitted_at), 'MMM dd, hh:mm a')}
-                                    {sub.final_score !== null ? ` · ${sub.final_score.toFixed(2)}pts` : ''}
-                                </option>
-                            ))}
-                        </select>
-                        <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[#858585] pointer-events-none" />
-                    </div>
+                    {/* Submission info */}
+                    {selectedSub && (
+                        <span className="text-[10px] text-[#858585] bg-[#3c3c3c] px-2 py-1 rounded border border-[#505050]">
+                            Submitted {format(new Date(selectedSub.submitted_at), 'MMM dd, hh:mm a')}
+                        </span>
+                    )}
                     {selectedSub?.is_late && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#665500]/30 text-[#dcdcaa]">
                             <Clock className="w-3 h-3 inline mr-0.5" /> Late ({selectedSub.late_penalty_applied}%)
@@ -1048,13 +1141,6 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                             : (<>{selectedTestCases.size > 0 ? `Run ${selectedTestCases.size} Test${selectedTestCases.size > 1 ? 's' : ''}` : 'Run All Tests'}</>)
                         }
                     </Button>
-                    <Button onClick={saveGrade} disabled={isSaving || !selectedSub} size="sm"
-                        className="h-6 px-3 text-[10px] bg-[#862733] hover:bg-[#a03040] text-white border-0">
-                        {isSaving
-                            ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Saving...</>
-                            : <><Save className="w-3 h-3 mr-1" /> Save Grade</>
-                        }
-                    </Button>
                 </div>
             </div>
 
@@ -1079,23 +1165,10 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                 {/* Explorer Sidebar */}
                 {explorerOpen && selectedSub && (
                     <div className="w-56 bg-[#252526] border-r border-[#3c3c3c] flex flex-col min-h-0 shrink-0">
-                        <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#bbbbbb]">
+                        <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[#bbbbbb] border-b border-[#3c3c3c]">
                             Submitted Files
                         </div>
-                        <div className="px-2 py-1">
-                            <select
-                                value={selectedSubId ?? studentSubs[0]?.id ?? ''}
-                                onChange={(e) => setSelectedSubId(Number(e.target.value))}
-                                className="w-full px-2 py-1.5 text-[11px] text-[#cccccc] bg-[#1e1e1e] border border-[#3c3c3c] rounded cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#569cd6]"
-                            >
-                                {studentSubs.map((sub, idx) => (
-                                    <option key={sub.id} value={sub.id} className="bg-[#252526] text-white">
-                                        Attempt {sub.attempt_number}{idx === 0 ? ' (Latest)' : ''}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="flex-1 overflow-y-auto px-1">
+                        <div className="flex-1 overflow-y-auto px-1 pt-1">
                             {subFiles.length === 0 ? (
                                 <div className="py-8 text-center text-[11px] text-[#858585]">No files</div>
                             ) : (
@@ -1114,6 +1187,29 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                 </div>
                             )}
                         </div>
+
+                        {/* Group Members */}
+                        {selectedSub?.group && (
+                            <div className="border-t border-[#3c3c3c] shrink-0 px-3 py-2">
+                                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#4fc1ff] mb-1.5">
+                                    <Users className="w-3 h-3" /> Group · {selectedSub.group.name}
+                                </div>
+                                <div className="space-y-1">
+                                    {selectedSub.group.members.map((m) => (
+                                        <div key={m.user_id} className={`flex items-center gap-1.5 px-1.5 py-1 rounded text-[11px] ${m.user_id === selectedSub.student_id || m.user_id === student.id ? 'bg-[#862733]/20 text-white' : 'text-[#cccccc]'}`}>
+                                            <div className="w-5 h-5 rounded-full bg-[#3c3c3c] flex items-center justify-center shrink-0 text-[8px] font-bold text-[#cccccc]">
+                                                {m.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                                            </div>
+                                            <span className="flex-1 truncate">{m.full_name}</span>
+                                            {m.is_leader && <span className="text-[8px] text-[#dcdcaa]">👑</span>}
+                                            {(m.user_id === selectedSub.student_id) && (
+                                                <span className="text-[8px] px-1 bg-[#862733]/30 text-[#ce9178] rounded">submitter</span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Allowed File Extension */}
                         <div className="border-t border-[#3c3c3c] shrink-0 px-3 py-2">
@@ -1599,11 +1695,11 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
 
                     <div className="flex-1 overflow-y-auto p-4 text-[13px] leading-relaxed">
                         {rightPanel === 'grading' && selectedSub && (
-                            <div className="space-y-5">
-                                {/* Score Summary */}
-                                <div className="bg-[#1e1e1e] rounded-xl p-4 border border-[#3c3c3c]">
-                                    <p className="text-[11px] text-[#858585] uppercase tracking-wider mb-3">Score Summary</p>
-                                    <div className="flex items-end gap-1 mb-3">
+                            <div className="space-y-4">
+                                {/* Final Score input */}
+                                <div className="rounded-xl bg-gradient-to-br from-[#1e1e1e] to-[#252526] border border-[#3c3c3c] p-4">
+                                    <p className="text-[10px] text-[#858585] uppercase tracking-widest mb-3">Final Grade</p>
+                                    <div className="flex items-center gap-3 mb-3">
                                         <input
                                             type="number"
                                             value={gradeState.finalScore}
@@ -1622,64 +1718,72 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 const rounded = Math.round(raw * 2) / 2;
                                                 setGradeState(p => ({ ...p, finalScore: String(rounded) }));
                                             }}
-                                            placeholder="-"
+                                            placeholder="—"
                                             step="0.5"
                                             min="0"
                                             max={assignment.max_score}
-                                            className="w-28 bg-[#3c3c3c] border border-[#505050] rounded px-2 py-1 text-xl font-bold font-mono tabular-nums tracking-tight text-white text-center focus:outline-none focus:border-[#862733]"
+                                            className="w-24 bg-[#3c3c3c] border border-[#505050] rounded-lg px-3 py-2 text-2xl font-bold font-mono text-white text-center focus:outline-none focus:border-[#862733] transition-colors"
                                         />
-                                        <span className="text-lg text-[#858585] pb-1">/ {assignment.max_score}</span>
+                                        <div>
+                                            <p className="text-[#858585] text-xs">/ {assignment.max_score} pts</p>
+                                            {gradeState.finalScore !== '' && (
+                                                <p className="text-[10px] font-semibold mt-0.5" style={{
+                                                    color: (() => {
+                                                        const pct = (parseFloat(gradeState.finalScore) / assignment.max_score) * 100;
+                                                        return pct >= 90 ? '#4ec9b0' : pct >= 70 ? '#569cd6' : pct >= 50 ? '#dcdcaa' : '#f44747';
+                                                    })()
+                                                }}>
+                                                    {((parseFloat(gradeState.finalScore) / assignment.max_score) * 100).toFixed(0)}%
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                                        <div className="bg-[#333] rounded p-2">
-                                            <span className="text-[#858585]">Test Score</span>
-                                            <p className="text-white font-semibold">{formatScore(selectedSub.test_score)}</p>
+                                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                                        <div className="bg-[#2a2a2a] rounded-lg px-2.5 py-2">
+                                            <p className="text-[#858585] mb-0.5">Auto Score</p>
+                                            <p className="text-white font-semibold">{formatScore(selectedSub.test_score)}<span className="text-[#858585]">%</span></p>
                                         </div>
-                                        <div className="bg-[#333] rounded p-2">
-                                            <span className="text-[#858585]">Status</span>
-                                            <p className="text-white font-semibold capitalize">{selectedSub.status}</p>
+                                        <div className="bg-[#2a2a2a] rounded-lg px-2.5 py-2">
+                                            <p className="text-[#858585] mb-0.5">Status</p>
+                                            <p className="text-white font-semibold">{formatStatus(selectedSub.status)}</p>
                                         </div>
-                                        <div className="bg-[#333] rounded p-2">
-                                            <span className="text-[#858585]">Late Penalty</span>
+                                        <div className="bg-[#2a2a2a] rounded-lg px-2.5 py-2">
+                                            <p className="text-[#858585] mb-0.5">Tests</p>
+                                            <p className="text-white font-semibold">
+                                                {selectedSub.tests_total > 0
+                                                    ? `${selectedSub.tests_passed}/${selectedSub.tests_total}`
+                                                    : '—'}
+                                            </p>
+                                        </div>
+                                        <div className="bg-[#2a2a2a] rounded-lg px-2.5 py-2">
+                                            <p className="text-[#858585] mb-0.5">Penalty</p>
                                             <p className={`font-semibold ${selectedSub.late_penalty_applied > 0 ? 'text-[#dcdcaa]' : 'text-[#858585]'}`}>
                                                 {selectedSub.late_penalty_applied > 0 ? `-${selectedSub.late_penalty_applied}%` : 'None'}
                                             </p>
                                         </div>
-                                        <div className="bg-[#333] rounded p-2">
-                                            <span className="text-[#858585]">Submitted</span>
-                                            <p className="text-white font-semibold">{format(new Date(selectedSub.submitted_at), 'MMM dd')}</p>
-                                        </div>
                                     </div>
                                 </div>
 
-                                {/* (Auto-graded per-test details removed from grading panel to keep grading focused on final score and rubric) */}
-
-                                {/* Flags */}
+                                {/* Integrity Flags */}
                                 {(selectedSub.plagiarism_flagged || selectedSub.ai_flagged) && (
                                     <div className="bg-[#5c1e1e]/20 border border-[#f44747]/30 rounded-lg p-3">
-                                        <p className="text-[11px] font-semibold text-[#f44747] flex items-center gap-1 mb-1">
+                                        <p className="text-[11px] font-semibold text-[#f44747] flex items-center gap-1.5 mb-1">
                                             <AlertTriangle className="w-3.5 h-3.5" /> Integrity Flags
                                         </p>
-                                        {selectedSub.plagiarism_flagged && <p className="text-[10px] text-[#f44747]">Plagiarism flagged</p>}
-                                        {selectedSub.ai_flagged && <p className="text-[10px] text-[#f44747]">AI-generated content detected</p>}
+                                        {selectedSub.plagiarism_flagged && <p className="text-[10px] text-[#f44747]/80">• Plagiarism flagged</p>}
+                                        {selectedSub.ai_flagged && <p className="text-[10px] text-[#f44747]/80">• AI-generated content detected</p>}
                                     </div>
                                 )}
 
-                                {/* Rubric Grader - if assignment has rubric */}
+                                {/* Rubric Grader */}
                                 {assignment.rubric && assignment.rubric.items?.length > 0 && (
-                                    <div className="border-t border-[#3c3c3c] pt-4">
-                                        <div className="mb-3">
-                                            <div className="flex items-center justify-between gap-2 mb-1">
-                                                <p className="text-[11px] text-[#858585] uppercase tracking-wider font-semibold">Rubric-Based Grading</p>
-                                                <span className="text-[11px] text-white font-medium">/{assignment.rubric.total_points} pts</span>
-                                            </div>
-                                            <p className="text-[10px] text-[#858585]">Evaluate based on rubric criteria</p>
-                                        </div>
+                                    <div>
+                                        <p className="text-[10px] text-[#858585] uppercase tracking-widest mb-2">Rubric Criteria</p>
                                         <RubricGrader
                                             rubricItems={assignment.rubric.items.map(item => ({
                                                 itemId: item.id,
                                                 name: item.name,
-                                                description: item.description || 'No description',
+                                                description: item.description || '',
                                                 weight: item.weight,
                                                 minPoints: item.min_points ?? 0,
                                                 maxPoints: item.max_points ?? item.points ?? 0,
@@ -1689,18 +1793,14 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             maxScore={assignment.max_score}
                                             onScoreChange={(itemId, score) => {
                                                 const item = assignment.rubric?.items.find(i => i.id === itemId);
-                                                const maxScore = item?.max_points ?? item?.points ?? 0;
-                                                handleRubricScoreChange(itemId, Math.min(Math.max(0, score), maxScore));
+                                                const maxPts = item?.max_points ?? item?.points ?? 0;
+                                                handleRubricScoreChange(itemId, Math.min(Math.max(0, score), maxPts));
                                             }}
                                             onTotalScoreChange={handleRubricTotalChange}
                                             onCalculate={() => {
-                                                // Calculate and set as the final score
                                                 const roundedTotal = Math.round(rubricTotalScore * 2) / 2;
                                                 setGradeState(prev => ({ ...prev, finalScore: String(roundedTotal) }));
-                                                toast({
-                                                    title: '✅ Score Calculated',
-                                                    description: `Rubric total: ${roundedTotal.toFixed(1)}/${assignment.max_score} pts`
-                                                });
+                                                toast({ title: 'Score applied', description: `${roundedTotal.toFixed(1)} / ${assignment.max_score} pts` });
                                             }}
                                         />
                                     </div>
@@ -2022,11 +2122,13 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                         ))}
                                     </div>
                                 </div>
-                                {selectedSub.error_message && (
-                                    <div className="bg-[#5c1e1e]/20 border border-[#f44747]/30 rounded-lg p-3">
-                                        <p className="text-[11px] font-semibold text-[#f44747] mb-1">Submission Error</p>
-                                        <pre className="text-[10px] text-[#f44747] whitespace-pre-wrap">{selectedSub.error_message}</pre>
-                                    </div>
+                                {selectedSub.error_message && selectedSub.status !== 'autograded' && selectedSub.status !== 'graded' && selectedSub.status !== 'completed' && (
+                                    <details className="rounded-lg border border-[#3c3c3c] bg-[#252526] overflow-hidden">
+                                        <summary className="text-[10px] text-[#858585] px-3 py-2 cursor-pointer select-none hover:text-[#cccccc] hover:bg-[#2d2d2d] transition-colors">
+                                            Previous grading error (stale)
+                                        </summary>
+                                        <pre className="text-[10px] text-[#858585] whitespace-pre-wrap px-3 pb-3 pt-1 border-t border-[#3c3c3c]">{selectedSub.error_message}</pre>
+                                    </details>
                                 )}
                             </div>
                         )}
@@ -2376,7 +2478,13 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                     </div>
 
                     {/* Save button at bottom of right panel */}
-                    <div className="px-4 py-3 border-t border-[#3c3c3c] shrink-0">
+                    <div className="px-4 py-3 border-t border-[#3c3c3c] shrink-0 space-y-2">
+                        {selectedSub?.group && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#4fc1ff] bg-[#0e639c]/10 border border-[#0e639c]/30 rounded px-2.5 py-1.5">
+                                <Users className="w-3 h-3 shrink-0" />
+                                <span>Grade applies to all {selectedSub.group.members.length} members of <strong>{selectedSub.group.name}</strong></span>
+                            </div>
+                        )}
                         <Button onClick={saveGrade} disabled={isSaving} className="w-full bg-[#862733] hover:bg-[#a03040] text-white h-9 text-[12px]">
                             {isSaving
                                 ? <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> Saving...</>

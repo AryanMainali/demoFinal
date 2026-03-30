@@ -21,6 +21,7 @@ class NotificationType(str, PyEnum):
     NEW_USER_REGISTERED = "NEW_USER_REGISTERED"
     COURSE_APPROVAL_REQUIRED = "COURSE_APPROVAL_REQUIRED"
     SYSTEM_ALERT = "SYSTEM_ALERT"
+    COURSE_ASSIGNED = "course_assigned"
 
 
 class Notification(Base):
