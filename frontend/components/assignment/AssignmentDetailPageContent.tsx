@@ -1640,25 +1640,13 @@ export default function AssignmentDetailPageContent() {
                                                 onClick={() => navigateToGrading(group.student.id)}
                                             >
                                                 <div className="flex items-center gap-4 p-4 hover:bg-gray-50/50 transition-colors">
-                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                                                        latest.plagiarism_flagged ? 'bg-red-100' : 'bg-primary/10'
-                                                    }`}>
-                                                        <User className={`w-5 h-5 ${latest.plagiarism_flagged ? 'text-red-500' : 'text-primary'}`} />
+                                                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                                        <User className="w-5 h-5 text-primary" />
                                                     </div>
 
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-2 flex-wrap">
                                                             <p className="font-semibold text-gray-900 truncate">{group.student.full_name}</p>
-                                                            {latest.plagiarism_flagged && (
-                                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700 border border-red-200">
-                                                                    <Shield className="w-3 h-3" /> PLAGIARISM
-                                                                </span>
-                                                            )}
-                                                            {!latest.plagiarism_flagged && hasFlagged && (
-                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-700">
-                                                                    <AlertTriangle className="w-3 h-3" /> Flagged
-                                                                </span>
-                                                            )}
                                                             {latest.is_late && (
                                                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-700">
                                                                     <Clock className="w-3 h-3" /> Late
@@ -1669,21 +1657,6 @@ export default function AssignmentDetailPageContent() {
                                                             {group.student.email}
                                                             {group.student.student_id && <> · ID: {group.student.student_id}</>}
                                                         </p>
-                                                        {latest.plagiarism_checked && latest.plagiarism_score !== null && latest.plagiarism_score > 0 && latest.plagiarism_report?.matches?.length > 0 && (
-                                                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                                                <span className="text-[10px] text-gray-400">Matched with:</span>
-                                                                {latest.plagiarism_report.matches.slice(0, 3).map((pm: any, i: number) => (
-                                                                    <span key={i} className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                                                                        pm.similarity_percentage >= (assignment.plagiarism_threshold ?? 30) ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-amber-50 text-amber-600 border border-amber-200'
-                                                                    }`}>
-                                                                        {pm.student_name} ({pm.similarity_percentage.toFixed(0)}%)
-                                                                    </span>
-                                                                ))}
-                                                                {latest.plagiarism_report.matches.length > 3 && (
-                                                                    <span className="text-[10px] text-gray-400">+{latest.plagiarism_report.matches.length - 3} more</span>
-                                                                )}
-                                                            </div>
-                                                        )}
                                                     </div>
 
                                                     <div className="hidden sm:flex items-center gap-6 text-sm shrink-0">
@@ -1706,17 +1679,22 @@ export default function AssignmentDetailPageContent() {
                                                         </div>
                                                     </div>
 
-                                                    {latest.plagiarism_checked && latest.plagiarism_score !== null && latest.plagiarism_score > 0 && (
+                                                    {latest.plagiarism_checked && (
                                                         <div className="hidden lg:flex flex-col items-center min-w-[70px] shrink-0">
                                                             <p className="text-xs text-gray-500 mb-0.5">Similarity</p>
-                                                            <p className={`text-lg font-bold ${latest.plagiarism_score >= (assignment.plagiarism_threshold ?? 30) ? 'text-red-600' : latest.plagiarism_score >= 20 ? 'text-amber-600' : 'text-gray-500'}`}>
-                                                                {latest.plagiarism_score.toFixed(0)}%
+                                                            {latest.plagiarism_flagged && (
+                                                                <span className="text-[9px] font-bold text-red-600 uppercase tracking-wide mb-0.5">Flagged</span>
+                                                            )}
+                                                            <p className={`text-lg font-bold ${latest.plagiarism_flagged || (latest.plagiarism_score ?? 0) >= (assignment.plagiarism_threshold ?? 30) ? 'text-red-600' : (latest.plagiarism_score ?? 0) >= 20 ? 'text-amber-600' : 'text-gray-500'}`}>
+                                                                {latest.plagiarism_score !== null ? `${latest.plagiarism_score.toFixed(0)}%` : '—'}
                                                             </p>
-                                                            <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden mt-0.5">
-                                                                <div className={`h-full rounded-full ${
-                                                                    latest.plagiarism_score >= (assignment.plagiarism_threshold ?? 30) ? 'bg-red-500' : latest.plagiarism_score >= 20 ? 'bg-amber-500' : 'bg-gray-400'
-                                                                }`} style={{ width: `${Math.min(latest.plagiarism_score, 100)}%` }} />
-                                                            </div>
+                                                            {latest.plagiarism_score !== null && latest.plagiarism_score > 0 && (
+                                                                <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden mt-0.5">
+                                                                    <div className={`h-full rounded-full ${
+                                                                        latest.plagiarism_flagged || latest.plagiarism_score >= (assignment.plagiarism_threshold ?? 30) ? 'bg-red-500' : latest.plagiarism_score >= 20 ? 'bg-amber-500' : 'bg-gray-400'
+                                                                    }`} style={{ width: `${Math.min(latest.plagiarism_score, 100)}%` }} />
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
 

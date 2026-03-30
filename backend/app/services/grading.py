@@ -75,6 +75,19 @@ class GradingService:
 
         logger.info(f"Starting grading for submission {submission_id}")
 
+        # Preserve manually-graded state so bulk re-grading doesn't wipe hand-entered scores
+        was_manually_graded = (
+            submission.override_score is not None
+            or str(submission.status or "").lower() == "completed"
+        )
+        saved_final_score = submission.final_score
+        saved_raw_score = submission.raw_score
+        saved_rubric_score = submission.rubric_score
+        saved_override_score = submission.override_score
+        saved_status = submission.status
+        saved_graded_at = submission.graded_at
+        saved_graded_by = getattr(submission, "graded_by", None)
+
         temp_dir = None
         try:
             submission.status = SubmissionStatus.PENDING
@@ -129,7 +142,28 @@ class GradingService:
             submission.tests_total = total_count
             submission.test_score = test_score if total_count > 0 else None
 
-            if assignment.rubric:
+            # If the submission was manually graded, restore all hand-entered grade fields
+            # so that bulk execution only refreshes test results without wiping the grade.
+            if was_manually_graded:
+                submission.final_score = saved_final_score
+                submission.raw_score = saved_raw_score
+                submission.rubric_score = saved_rubric_score
+                submission.override_score = saved_override_score
+                submission.status = saved_status
+                submission.graded_at = saved_graded_at
+                if saved_graded_by is not None:
+                    submission.graded_by = saved_graded_by
+                self.db.commit()
+                logger.info(f"Submission {submission_id} re-graded (tests only); manual grade preserved")
+                return {
+                    "submission_id": submission_id,
+                    "status": str(saved_status).split(".")[-1] if saved_status else "completed",
+                    "test_score": test_score,
+                    "tests_passed": passed_count,
+                    "total_tests": total_count,
+                    "final_score": saved_final_score,
+                }
+            elif assignment.rubric:
                 submission.rubric_score = None
                 submission.raw_score = None
                 submission.final_score = None
@@ -143,6 +177,21 @@ class GradingService:
                     "test_score": test_score,
                     "tests_passed": passed_count,
                     "total_tests": total_count,
+                }
+            elif total_count == 0:
+                # No test cases and no rubric — leave ungraded for faculty to grade manually
+                submission.raw_score = None
+                submission.final_score = None
+                submission.status = SubmissionStatus.PENDING
+                submission.graded_at = None
+                self.db.commit()
+                logger.info(f"Submission {submission_id} has no test cases; awaiting manual grade")
+                return {
+                    "submission_id": submission_id,
+                    "status": "pending",
+                    "test_score": None,
+                    "tests_passed": 0,
+                    "total_tests": 0,
                 }
             else:
                 raw_score = test_score

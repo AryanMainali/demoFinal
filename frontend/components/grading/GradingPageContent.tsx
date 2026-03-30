@@ -866,6 +866,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             });
 
             await queryClient.invalidateQueries({ queryKey: ['assignment-submissions', assignmentId] });
+            await queryClient.invalidateQueries({ queryKey: ['submission-detail', selectedSub.id] });
             await queryClient.invalidateQueries({ queryKey: ['assistant-grading-stats', courseId] });
             await queryClient.invalidateQueries({ queryKey: ['assistant-grading-stats'] });
             setGradeSaved(true);
@@ -1045,25 +1046,27 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                     {/* Student navigation */}
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                         <button
                             onClick={() => prevStudent && navigateToStudent(prevStudent.id)}
                             disabled={!prevStudent}
-                            title={prevStudent ? `Previous: ${prevStudent.full_name}` : 'No previous student'}
-                            className="h-6 w-6 flex items-center justify-center rounded text-[#858585] hover:bg-[#505050] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            title={prevStudent ? `← ${prevStudent.full_name}` : 'No previous student'}
+                            className="h-7 px-2 flex items-center gap-1 rounded bg-[#3c3c3c] border border-[#505050] text-[#cccccc] hover:bg-[#505050] hover:text-white hover:border-[#6a6a6a] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-[11px] font-medium"
                         >
-                            <ChevronLeft className="w-3.5 h-3.5" />
+                            <ChevronLeft className="w-4 h-4" />
+                            <span className="hidden sm:inline">Prev</span>
                         </button>
-                        <span className="text-[10px] text-[#858585]">
+                        <span className="text-[11px] font-medium text-[#cccccc] min-w-[40px] text-center">
                             {sortedStudentList.length > 0 ? `${currentStudentIndex + 1} / ${sortedStudentList.length}` : ''}
                         </span>
                         <button
                             onClick={() => nextStudent && navigateToStudent(nextStudent.id)}
                             disabled={!nextStudent}
-                            title={nextStudent ? `Next: ${nextStudent.full_name}` : 'No next student'}
-                            className="h-6 w-6 flex items-center justify-center rounded text-[#858585] hover:bg-[#505050] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            title={nextStudent ? `${nextStudent.full_name} →` : 'No next student'}
+                            className="h-7 px-2 flex items-center gap-1 rounded bg-[#3c3c3c] border border-[#505050] text-[#cccccc] hover:bg-[#505050] hover:text-white hover:border-[#6a6a6a] disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-[11px] font-medium"
                         >
-                            <ChevronRight className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Next</span>
+                            <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
                     <div className="h-3 w-px bg-[#5a5a5a]" />

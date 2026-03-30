@@ -278,6 +278,7 @@ def get_submission(
             joinedload(Submission.plagiarism_matches),
             joinedload(Submission.rubric_scores).joinedload(RubricScore.item),
             joinedload(Submission.assignment).joinedload(Assignment.course),
+            joinedload(Submission.group).joinedload(Group.memberships).joinedload(GroupMembership.user),
         )
         .filter(Submission.id == submission_id)
         .first()
@@ -304,7 +305,27 @@ def get_submission(
         if not _can_grade_for_course(db, current_user, submission.assignment.course_id):
             raise HTTPException(status_code=403, detail="Access denied")
     
-    return submission
+    result = SubmissionDetailWithStudent.model_validate(submission)
+    if submission.group:
+        from app.schemas.submission import GroupInSubmission, GroupMemberInSubmission
+        members = [
+            GroupMemberInSubmission(
+                id=m.id,
+                user_id=m.user_id,
+                full_name=m.user.full_name if m.user else "",
+                email=m.user.email if m.user else "",
+                student_id=m.user.student_id if m.user else None,
+                is_leader=m.is_leader,
+            )
+            for m in submission.group.memberships
+            if m.user is not None
+        ]
+        result.group = GroupInSubmission(
+            id=submission.group.id,
+            name=submission.group.name,
+            members=members,
+        )
+    return result
 
 
 @router.post("", response_model=SubmissionSchema, status_code=status.HTTP_201_CREATED)
@@ -796,7 +817,16 @@ def get_file_content(
     elif current_user.role in (UserRole.FACULTY, UserRole.ASSISTANT):
         can_access = _can_grade_for_course(db, current_user, submission.assignment.course_id)
     elif current_user.role == UserRole.STUDENT:
-        can_access = submission.student_id == current_user.id
+        if submission.student_id == current_user.id:
+            can_access = True
+        elif submission.group_id:
+            group_member = db.query(GroupMembership).filter(
+                and_(
+                    GroupMembership.group_id == submission.group_id,
+                    GroupMembership.user_id == current_user.id
+                )
+            ).first()
+            can_access = group_member is not None
 
     if not can_access:
         raise HTTPException(status_code=403, detail="Access denied")

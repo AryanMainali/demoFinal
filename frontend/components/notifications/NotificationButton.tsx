@@ -44,6 +44,7 @@ function NotificationMenuHeader({
 export function NotificationButton({ role }: NotificationButtonProps) {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    const markAllTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { notifications, unreadCount, isLoading, markAsRead, markAllAsRead } = useNotifications(role);
 
     useEffect(() => {
@@ -57,10 +58,37 @@ export function NotificationButton({ role }: NotificationButtonProps) {
         return () => document.removeEventListener('mousedown', closeOnOutsideClick);
     }, []);
 
+    // Clean up timer on unmount
+    useEffect(() => {
+        return () => {
+            if (markAllTimerRef.current) clearTimeout(markAllTimerRef.current);
+        };
+    }, []);
+
+    // When the dropdown closes, cancel any pending mark-all timer
+    useEffect(() => {
+        if (!isOpen && markAllTimerRef.current) {
+            clearTimeout(markAllTimerRef.current);
+            markAllTimerRef.current = null;
+        }
+    }, [isOpen]);
+
+    const handleToggle = () => {
+        const opening = !isOpen;
+        setIsOpen(opening);
+        if (opening && unreadCount > 0) {
+            // Mark all as read after a short delay so the user can see the unread dots briefly
+            markAllTimerRef.current = setTimeout(() => {
+                markAllAsRead();
+                markAllTimerRef.current = null;
+            }, 1500);
+        }
+    };
+
     return (
         <div className="relative" ref={containerRef}>
             <button
-                onClick={() => setIsOpen((current) => !current)}
+                onClick={handleToggle}
                 className="relative rounded-full p-1.5 sm:p-2 text-gray-500 hover:bg-gray-100 transition-colors"
                 aria-label="Notifications"
                 aria-expanded={isOpen}
