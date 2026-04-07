@@ -31,7 +31,7 @@ export default function AdminDashboard() {
         { id: 1, user: 'John Smith', action: 'Submitted assignment', time: '2 minutes ago', type: 'submission' },
         { id: 2, user: 'Jane Doe', action: 'Created new course', time: '15 minutes ago', type: 'course' },
         { id: 3, user: 'Bob Wilson', action: 'Graded 25 submissions', time: '1 hour ago', type: 'grading' },
-        { id: 4, user: 'Alice Brown', action: 'Updated password', time: '2 hours ago', type: 'security' },
+        { id: 4, user: 'Alice Brown', action: 'Updated profile', time: '2 hours ago', type: 'course' },
         { id: 5, user: 'Charlie Davis', action: 'Enrolled in CS101', time: '3 hours ago', type: 'enrollment' },
     ];
 
@@ -95,12 +95,6 @@ export default function AdminDashboard() {
                                 <CardTitle>Recent Activity</CardTitle>
                                 <CardDescription>Latest actions across the system</CardDescription>
                             </div>
-                            <Link
-                                href="/admin/security/audit"
-                                className="text-sm text-[#862733] hover:underline flex items-center gap-1"
-                            >
-                                View all <ArrowRight className="w-4 h-4" />
-                            </Link>
                         </div>
                     </CardHeader>
                     <CardContent>

@@ -494,15 +494,6 @@ class ApiClient {
         return response.data;
     }
 
-    async getAuditLogs(userId?: number, eventType?: string, days?: number) {
-        const params: any = {};
-        if (userId) params.user_id = userId;
-        if (eventType) params.event_type = eventType;
-        if (days) params.days = days;
-        const response = await this.client.get('/admin/audit-logs', { params });
-        return response.data;
-    }
-
     async getSystemStats() {
         const response = await this.client.get('/admin/system-stats');
         return response.data;
@@ -653,17 +644,6 @@ class ApiClient {
 
     async updateSettings(data: any) {
         const response = await this.client.put('/admin/settings', data);
-        return response.data;
-    }
-
-    // Audit logs
-    async getAuditLogsFiltered(params: { 
-        dateRange?: string; 
-        action?: string; 
-        status?: string;
-        search?: string;
-    }) {
-        const response = await this.client.get('/admin/audit-logs', { params });
         return response.data;
     }
 
