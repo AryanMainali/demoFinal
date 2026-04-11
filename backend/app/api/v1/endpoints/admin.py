@@ -10,7 +10,7 @@ from sqlalchemy import func, and_, text
 from datetime import datetime, timedelta
 
 from app.api.deps import get_db, get_current_user, require_role
-from app.models import User, UserRole, AuditLog, Course, Assignment
+from app.models import User, UserRole, AuditLog, Course, Assignment, AdminSettings
 from app.schemas.user import User as UserSchema, UserUpdate, UserCreate
 from app.schemas.audit_log import AuditLog as AuditLogSchema
 from app.core.security import get_password_hash
@@ -21,6 +21,160 @@ from app.services.s3_storage import s3_service
 from pydantic import BaseModel, EmailStr
 
 router = APIRouter()
+
+
+class AdminSettingsUpdate(BaseModel):
+    passwordMinLength: Optional[int] = None
+    passwordRequireUppercase: Optional[bool] = None
+    passwordRequireLowercase: Optional[bool] = None
+    passwordRequireNumber: Optional[bool] = None
+    passwordRequireSpecial: Optional[bool] = None
+    sessionTimeout: Optional[int] = None
+    maxLoginAttempts: Optional[int] = None
+    lockoutDuration: Optional[int] = None
+
+    smtpHost: Optional[str] = None
+    smtpPort: Optional[int] = None
+    smtpUser: Optional[str] = None
+    smtpPassword: Optional[str] = None
+    emailFrom: Optional[str] = None
+    emailFromName: Optional[str] = None
+
+    emailOnSubmission: Optional[bool] = None
+    emailOnGrading: Optional[bool] = None
+    emailOnNewAssignment: Optional[bool] = None
+    emailOnDueReminder: Optional[bool] = None
+    reminderDays: Optional[int] = None
+
+    defaultTimeout: Optional[int] = None
+    defaultMemoryLimit: Optional[int] = None
+    maxConcurrentJobs: Optional[int] = None
+    sandboxEnabled: Optional[bool] = None
+
+
+class AdminSettingsResponse(BaseModel):
+    passwordMinLength: int
+    passwordRequireUppercase: bool
+    passwordRequireLowercase: bool
+    passwordRequireNumber: bool
+    passwordRequireSpecial: bool
+    sessionTimeout: int
+    maxLoginAttempts: int
+    lockoutDuration: int
+
+    smtpHost: str
+    smtpPort: int
+    smtpUser: str
+    smtpPassword: str
+    emailFrom: str
+    emailFromName: str
+
+    emailOnSubmission: bool
+    emailOnGrading: bool
+    emailOnNewAssignment: bool
+    emailOnDueReminder: bool
+    reminderDays: int
+
+    defaultTimeout: int
+    defaultMemoryLimit: int
+    maxConcurrentJobs: int
+    sandboxEnabled: bool
+
+
+def _get_or_create_admin_settings(db: Session) -> AdminSettings:
+    settings_row = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+    if settings_row:
+        return settings_row
+
+    settings_row = AdminSettings(id=1)
+    db.add(settings_row)
+    db.commit()
+    db.refresh(settings_row)
+    return settings_row
+
+
+def _admin_settings_to_response(settings_row: AdminSettings) -> AdminSettingsResponse:
+    return AdminSettingsResponse(
+        passwordMinLength=settings_row.password_min_length,
+        passwordRequireUppercase=settings_row.password_require_uppercase,
+        passwordRequireLowercase=settings_row.password_require_lowercase,
+        passwordRequireNumber=settings_row.password_require_number,
+        passwordRequireSpecial=settings_row.password_require_special,
+        sessionTimeout=settings_row.session_timeout,
+        maxLoginAttempts=settings_row.max_login_attempts,
+        lockoutDuration=settings_row.lockout_duration,
+        smtpHost=settings_row.smtp_host,
+        smtpPort=settings_row.smtp_port,
+        smtpUser=settings_row.smtp_user,
+        smtpPassword=settings_row.smtp_password,
+        emailFrom=settings_row.email_from,
+        emailFromName=settings_row.email_from_name,
+        emailOnSubmission=settings_row.email_on_submission,
+        emailOnGrading=settings_row.email_on_grading,
+        emailOnNewAssignment=settings_row.email_on_new_assignment,
+        emailOnDueReminder=settings_row.email_on_due_reminder,
+        reminderDays=settings_row.reminder_days,
+        defaultTimeout=settings_row.default_timeout,
+        defaultMemoryLimit=settings_row.default_memory_limit,
+        maxConcurrentJobs=settings_row.max_concurrent_jobs,
+        sandboxEnabled=settings_row.sandbox_enabled,
+    )
+
+
+@router.get("/settings", response_model=AdminSettingsResponse)
+def get_admin_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Get system-wide admin settings."""
+    settings_row = _get_or_create_admin_settings(db)
+    return _admin_settings_to_response(settings_row)
+
+
+@router.put("/settings", response_model=AdminSettingsResponse)
+def update_admin_settings(
+    settings_update: AdminSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Update system-wide admin settings."""
+    settings_row = _get_or_create_admin_settings(db)
+    payload = settings_update.model_dump(exclude_unset=True)
+
+    field_map = {
+        "passwordMinLength": "password_min_length",
+        "passwordRequireUppercase": "password_require_uppercase",
+        "passwordRequireLowercase": "password_require_lowercase",
+        "passwordRequireNumber": "password_require_number",
+        "passwordRequireSpecial": "password_require_special",
+        "sessionTimeout": "session_timeout",
+        "maxLoginAttempts": "max_login_attempts",
+        "lockoutDuration": "lockout_duration",
+        "smtpHost": "smtp_host",
+        "smtpPort": "smtp_port",
+        "smtpUser": "smtp_user",
+        "smtpPassword": "smtp_password",
+        "emailFrom": "email_from",
+        "emailFromName": "email_from_name",
+        "emailOnSubmission": "email_on_submission",
+        "emailOnGrading": "email_on_grading",
+        "emailOnNewAssignment": "email_on_new_assignment",
+        "emailOnDueReminder": "email_on_due_reminder",
+        "reminderDays": "reminder_days",
+        "defaultTimeout": "default_timeout",
+        "defaultMemoryLimit": "default_memory_limit",
+        "maxConcurrentJobs": "max_concurrent_jobs",
+        "sandboxEnabled": "sandbox_enabled",
+    }
+
+    for field_name, value in payload.items():
+        setattr(settings_row, field_map[field_name], value)
+
+    db.commit()
+    db.refresh(settings_row)
+
+    logger.info(f"Admin settings updated by admin {current_user.id}")
+    return _admin_settings_to_response(settings_row)
 
 
 class BulkStudentImportItem(BaseModel):

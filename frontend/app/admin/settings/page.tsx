@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { InnerHeaderDesign } from '@/components/InnerHeaderDesign';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { useMutation } from '@tanstack/react-query';
@@ -42,6 +42,8 @@ interface SettingsSection {
 export default function SettingsPage() {
     const [activeSection, setActiveSection] = useState('security');
     const [hasChanges, setHasChanges] = useState(false);
+    const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [resetModal, setResetModal] = useState(false);
     const [backupModal, setBackupModal] = useState(false);
 
@@ -55,7 +57,6 @@ export default function SettingsPage() {
         sessionTimeout: 30,
         maxLoginAttempts: 5,
         lockoutDuration: 15,
-        enable2FA: false,
 
         // Email
         smtpHost: 'smtp.gmail.com',
@@ -78,6 +79,32 @@ export default function SettingsPage() {
         maxConcurrentJobs: 10,
         sandboxEnabled: true,
     });
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadSettings = async () => {
+            try {
+                const data = await apiClient.getSettings();
+                if (!isMounted) return;
+                setSettings((previous) => ({ ...previous, ...data }));
+                setLoadError('');
+            } catch {
+                if (!isMounted) return;
+                setLoadError('Unable to load admin settings.');
+            } finally {
+                if (isMounted) {
+                    setIsLoadingSettings(false);
+                }
+            }
+        };
+
+        loadSettings();
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const updateSetting = (key: string, value: any) => {
         setSettings(prev => ({ ...prev, [key]: value }));
@@ -116,10 +143,11 @@ export default function SettingsPage() {
                                 </Button>
                                 <Button
                                     onClick={() => saveMutation.mutate(settings)}
+                                    disabled={saveMutation.isPending || isLoadingSettings}
                                     className="bg-white/20 hover:bg-white/30 text-white border border-white/30"
                                 >
                                     <Save className="w-4 h-4 mr-2" />
-                                    Save Changes
+                                    {isLoadingSettings ? 'Loading Settings...' : 'Save Changes'}
                                 </Button>
                             </div>
                         ) : undefined
@@ -129,6 +157,18 @@ export default function SettingsPage() {
                 {hasChanges && (
                     <Alert type="warning" title="Unsaved Changes">
                         You have unsaved changes. Don't forget to save before leaving.
+                    </Alert>
+                )}
+
+                {loadError && (
+                    <Alert type="error" title="Settings Load Failed">
+                        {loadError}
+                    </Alert>
+                )}
+
+                {isLoadingSettings && !loadError && (
+                    <Alert type="info" title="Loading Settings">
+                        Fetching the current admin settings from the server.
                     </Alert>
                 )}
 
@@ -181,7 +221,7 @@ export default function SettingsPage() {
                                                 label="Minimum Password Length"
                                                 type="number"
                                                 value={settings.passwordMinLength.toString()}
-                                                onChange={(e) => updateSetting('passwordMinLength', parseInt(e.target.value))}
+                                                    onChange={(e) => updateSetting('passwordMinLength', Number.parseInt(e.target.value, 10) || 0)}
                                             />
                                             <div className="grid grid-cols-2 gap-4">
                                                 <Switch
@@ -214,29 +254,21 @@ export default function SettingsPage() {
                                                 label="Session Timeout (minutes)"
                                                 type="number"
                                                 value={settings.sessionTimeout.toString()}
-                                                onChange={(e) => updateSetting('sessionTimeout', parseInt(e.target.value))}
+                                                onChange={(e) => updateSetting('sessionTimeout', Number.parseInt(e.target.value, 10) || 0)}
                                             />
                                             <Input
                                                 label="Max Login Attempts"
                                                 type="number"
                                                 value={settings.maxLoginAttempts.toString()}
-                                                onChange={(e) => updateSetting('maxLoginAttempts', parseInt(e.target.value))}
+                                                onChange={(e) => updateSetting('maxLoginAttempts', Number.parseInt(e.target.value, 10) || 0)}
                                             />
                                             <Input
                                                 label="Lockout Duration (minutes)"
                                                 type="number"
                                                 value={settings.lockoutDuration.toString()}
-                                                onChange={(e) => updateSetting('lockoutDuration', parseInt(e.target.value))}
+                                                onChange={(e) => updateSetting('lockoutDuration', Number.parseInt(e.target.value, 10) || 0)}
                                             />
                                         </div>
-                                    </div>
-                                    <div className="pt-4 border-t">
-                                        <Switch
-                                            checked={settings.enable2FA}
-                                            onChange={(checked) => updateSetting('enable2FA', checked)}
-                                            label="Enable Two-Factor Authentication"
-                                            description="Require 2FA for admin accounts"
-                                        />
                                     </div>
                                 </CardContent>
                             </Card>

@@ -49,6 +49,7 @@ from app.models.gamification import (
 from app.models.settings import (
     NotificationSettings,
     UserPreferences,
+    AdminSettings,
 )
 
 # Audit & Security Models
@@ -99,6 +100,7 @@ __all__ = [
     # Settings
     "NotificationSettings",
     "UserPreferences",
+    "AdminSettings",
     
     # Audit
     "AuditLog",

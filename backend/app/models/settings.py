@@ -67,3 +67,49 @@ class UserPreferences(Base):
     
     def __repr__(self):
         return f"<UserPreferences user={self.user_id}>"
+
+
+class AdminSettings(Base):
+    """
+    AdminSettings - System-wide admin settings.
+    """
+    __tablename__ = "admin_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Security settings
+    password_min_length = Column(Integer, default=8)
+    password_require_uppercase = Column(Boolean, default=True)
+    password_require_lowercase = Column(Boolean, default=True)
+    password_require_number = Column(Boolean, default=True)
+    password_require_special = Column(Boolean, default=True)
+    session_timeout = Column(Integer, default=30)
+    max_login_attempts = Column(Integer, default=5)
+    lockout_duration = Column(Integer, default=15)
+
+    # Email settings
+    smtp_host = Column(String(255), default="smtp.gmail.com")
+    smtp_port = Column(Integer, default=587)
+    smtp_user = Column(String(255), default="")
+    smtp_password = Column(String(255), default="")
+    email_from = Column(String(255), default="noreply@kriterion.edu")
+    email_from_name = Column(String(255), default="Kriterion System")
+
+    # Notification settings
+    email_on_submission = Column(Boolean, default=True)
+    email_on_grading = Column(Boolean, default=True)
+    email_on_new_assignment = Column(Boolean, default=True)
+    email_on_due_reminder = Column(Boolean, default=True)
+    reminder_days = Column(Integer, default=2)
+
+    # Code execution settings
+    default_timeout = Column(Integer, default=10)
+    default_memory_limit = Column(Integer, default=256)
+    max_concurrent_jobs = Column(Integer, default=10)
+    sandbox_enabled = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<AdminSettings id={self.id}>"
