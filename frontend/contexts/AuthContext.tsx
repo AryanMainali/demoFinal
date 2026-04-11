@@ -31,7 +31,7 @@ const ROLE_HOME: Record<UserRole, string> = {
     STUDENT: '/student/dashboard',
     FACULTY: '/faculty/dashboard',
     ASSISTANT: '/assistant/dashboard',
-    ADMIN: '/admin/dashboard',
+    ADMIN: '/admin/users',
 };
 
 function setRoleCookie(role: string) {

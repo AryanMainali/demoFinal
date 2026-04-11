@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { InnerHeaderDesign } from '@/components/InnerHeaderDesign';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -130,7 +130,26 @@ export default function SettingsPage() {
         },
     });
 
+    const { data: systemHealthData } = useQuery({
+        queryKey: ['system-health'],
+        queryFn: () => apiClient.getSystemHealth(),
+        refetchInterval: 30000,
+    });
+
+    const defaultSystemHealth = [
+        { name: 'API Server', status: 'offline' },
+        { name: 'Database', status: 'offline' },
+        { name: 'File Storage', status: 'offline' },
+        { name: 'Grading Engine', status: 'offline' },
+    ];
+    const systemHealth = systemHealthData?.services || defaultSystemHealth;
+    const allSystemsOnline = systemHealth.every((service: { status: string }) => service.status === 'online');
+    const lastCheckedLabel = systemHealthData?.checked_at
+        ? new Date(systemHealthData.checked_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : 'just now';
+
     const sections: SettingsSection[] = [
+        { id: 'system-health', title: 'System Health', description: 'Service status', icon: <Server className="w-5 h-5" /> },
         { id: 'security', title: 'Security', description: 'Password and authentication', icon: <Shield className="w-5 h-5" /> },
         { id: 'email', title: 'Email', description: 'SMTP configuration', icon: <Mail className="w-5 h-5" /> },
         { id: 'notifications', title: 'Notifications', description: 'Email notifications', icon: <Bell className="w-5 h-5" /> },
@@ -229,6 +248,57 @@ export default function SettingsPage() {
 
                     {/* Settings Content */}
                     <div className="flex-1">
+                        {/* System Health */}
+                        {activeSection === 'system-health' && (
+                            <div className="w-full">
+                                <Card className="w-full">
+                                    <CardHeader>
+                                        <CardTitle className="flex items-center gap-2">
+                                            <Server className="w-5 h-5 text-[#862733]" />
+                                            System Health
+                                        </CardTitle>
+                                        <CardDescription>Live service status for the admin system</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4">
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                            <Badge variant={allSystemsOnline ? 'success' : 'warning'} className="w-fit">
+                                                {allSystemsOnline ? 'All Systems Online' : 'System Degraded'}
+                                            </Badge>
+                                            <span className="text-xs text-gray-500">Last checked at {lastCheckedLabel}</span>
+                                        </div>
+                                        <div className="space-y-2.5">
+                                            {systemHealth.map((service: { name: string; status: string }) => (
+                                                <div key={service.name} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2.5">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className={`w-2 h-2 rounded-full ${service.status === 'online' ? 'bg-green-500' :
+                                                            service.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                                                            }`} />
+                                                        <span className="text-sm font-medium text-gray-700 truncate">{service.name}</span>
+                                                    </div>
+                                                    <span className={`text-xs font-medium whitespace-nowrap ${service.status === 'online' ? 'text-green-700' : 'text-red-700'}`}>
+                                                        {service.status === 'online' ? 'Online' : 'Offline'}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className={`rounded-lg border px-3 py-2.5 ${allSystemsOnline ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                                            <div className="flex items-start gap-2.5">
+                                                <CheckCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${allSystemsOnline ? 'text-green-600' : 'text-amber-600'}`} />
+                                                <div>
+                                                    <p className={`text-sm font-medium ${allSystemsOnline ? 'text-green-800' : 'text-amber-800'}`}>
+                                                        {allSystemsOnline ? 'Everything is running smoothly' : 'Some services are currently unavailable'}
+                                                    </p>
+                                                    <p className={`text-xs mt-0.5 ${allSystemsOnline ? 'text-green-600' : 'text-amber-700'}`}>
+                                                        System checks refresh automatically every 30 seconds.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        )}
+
                         {/* Security Settings */}
                         {activeSection === 'security' && (
                             <Card>

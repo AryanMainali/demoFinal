@@ -20,7 +20,7 @@ const getDashboardPath = (role: UserRole): string => {
         case 'ASSISTANT':
             return '/assistant/dashboard';
         case 'ADMIN':
-            return '/admin/dashboard';
+            return '/admin/users';
         default:
             return '/login';
     }

@@ -118,10 +118,8 @@ const getNavItems = (role: UserRole): NavItem[] => {
 
     // ADMIN
     return [
-        { label: 'Dashboard', href: `${baseUrl}/dashboard`, icon: <DashboardIcon /> },
         { label: 'Users', href: `${baseUrl}/users`, icon: <UsersIcon /> },
         { label: 'Courses', href: `${baseUrl}/courses`, icon: <BookIcon /> },
-        { label: 'Languages', href: `${baseUrl}/languages`, icon: <SettingsIcon /> },
         { label: 'Settings', href: `${baseUrl}/settings`, icon: <SettingsIcon /> },
     ];
 };
@@ -168,10 +166,8 @@ const getTopNavItems = (role: UserRole) => {
 
     // ADMIN
     return [
-        { label: 'Dashboard', href: '/admin/dashboard' },
         { label: 'Users', href: '/admin/users' },
         { label: 'Courses', href: '/admin/courses' },
-        { label: 'Languages', href: '/admin/languages' },
         { label: 'Settings', href: '/admin/settings' },
     ];
 };
@@ -278,7 +274,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     >
                         {/* Logo Section */}
                         <div className="flex h-16 items-center justify-between border-b border-gray-200 px-4">
-                            <Link href={`/${currentUser.role.toLowerCase()}/dashboard`} className="flex items-center gap-3">
+                            <Link href={currentUser.role === 'ADMIN' ? '/admin/users' : `/${currentUser.role.toLowerCase()}/dashboard`} className="flex items-center gap-3">
                                 <div className="h-10 w-10 overflow-hidden rounded-lg bg-[#862733] flex items-center justify-center">
                                     <Image
                                         src="/logo.png"
@@ -374,7 +370,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                                 <MenuIcon />
                             </button>
                         ) : (
-                            <Link href={`/${user.role.toLowerCase()}/dashboard`} className="flex items-center gap-2 sm:gap-3 min-w-0 flex-shrink-0">
+                            <Link href={user.role === 'ADMIN' ? '/admin/users' : `/${user.role.toLowerCase()}/dashboard`} className="flex items-center gap-2 sm:gap-3 min-w-0 flex-shrink-0">
                                 <div className="h-9 w-9 sm:h-10 sm:w-10 overflow-hidden rounded-lg bg-[#862733] flex items-center justify-center flex-shrink-0">
                                     <Image
                                         src="/logo.png"

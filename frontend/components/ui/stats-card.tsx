@@ -77,14 +77,14 @@ export function StatsCard({
 
     return (
         <div className={cn(
-            "rounded-xl border border-gray-200 p-6 shadow-sm",
+            "rounded-xl border border-gray-200 p-4 shadow-sm",
             styles.container,
             className
         )}>
             <div className="flex items-start justify-between">
                 <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-500">{title}</p>
-                    <p className={cn("text-3xl font-bold mt-2", styles.value)}>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{title}</p>
+                    <p className={cn("text-2xl font-bold mt-1.5", styles.value)}>
                         {value}
                     </p>
                     {subtitle && (
@@ -101,8 +101,8 @@ export function StatsCard({
                     )}
                 </div>
                 {Icon && (
-                    <div className={cn("p-3 rounded-xl", styles.icon)}>
-                        <Icon className="w-6 h-6" />
+                    <div className={cn("p-2.5 rounded-xl", styles.icon)}>
+                        <Icon className="w-5 h-5" />
                     </div>
                 )}
             </div>
