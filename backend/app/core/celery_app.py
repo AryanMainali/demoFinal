@@ -2,6 +2,7 @@
 Celery Application Configuration
 """
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 
 # Create Celery app
@@ -12,6 +13,7 @@ celery_app = Celery(
     include=[
         "app.tasks.code_execution",
         "app.tasks.grading",
+        "app.tasks.reminders",
     ]
 )
 
@@ -34,6 +36,13 @@ celery_app.conf.update(
     task_routes={
         "app.tasks.code_execution.*": {"queue": "code_execution"},
         "app.tasks.grading.*": {"queue": "grading"},
+        "app.tasks.reminders.*": {"queue": "default"},
+    },
+    beat_schedule={
+        "send-due-reminder-emails-daily": {
+            "task": "app.tasks.reminders.send_due_reminder_emails_task",
+            "schedule": crontab(hour=8, minute=0),
+        },
     },
 )
 

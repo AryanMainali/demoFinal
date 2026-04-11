@@ -18,6 +18,7 @@ from app.core.logging import logger
 from app.core.config import settings
 from app.core.celery_app import celery_app
 from app.services.s3_storage import s3_service
+from app.services.email import send_email
 from pydantic import BaseModel, EmailStr
 
 router = APIRouter()
@@ -79,6 +80,10 @@ class AdminSettingsResponse(BaseModel):
     defaultMemoryLimit: int
     maxConcurrentJobs: int
     sandboxEnabled: bool
+
+
+class TestEmailRequest(BaseModel):
+    recipientEmail: Optional[EmailStr] = None
 
 
 def _get_or_create_admin_settings(db: Session) -> AdminSettings:
@@ -175,6 +180,34 @@ def update_admin_settings(
 
     logger.info(f"Admin settings updated by admin {current_user.id}")
     return _admin_settings_to_response(settings_row)
+
+
+@router.post("/settings/test-email")
+def send_test_email(
+    request: TestEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Send a test email using the configured admin SMTP settings."""
+    recipient_email = request.recipientEmail or current_user.email
+    subject = "[Kriterion] Test Email"
+    body_text = (
+        "This is a test email from the Kriterion admin settings page.\n\n"
+        "If you received this, the SMTP configuration is working."
+    )
+    body_html = (
+        "<p>This is a test email from the Kriterion admin settings page.</p>"
+        "<p>If you received this, the SMTP configuration is working.</p>"
+    )
+
+    if not send_email(recipient_email, subject, body_html, body_text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Test email could not be sent. Check SMTP settings and credentials."
+        )
+
+    logger.info(f"Test email sent to {recipient_email} by admin {current_user.id}")
+    return {"message": f"Test email sent to {recipient_email}"}
 
 
 class BulkStudentImportItem(BaseModel):

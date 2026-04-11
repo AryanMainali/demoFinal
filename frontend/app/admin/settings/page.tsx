@@ -44,6 +44,8 @@ export default function SettingsPage() {
     const [hasChanges, setHasChanges] = useState(false);
     const [isLoadingSettings, setIsLoadingSettings] = useState(true);
     const [loadError, setLoadError] = useState('');
+    const [testEmailMessage, setTestEmailMessage] = useState('');
+    const [testEmailError, setTestEmailError] = useState('');
     const [resetModal, setResetModal] = useState(false);
     const [backupModal, setBackupModal] = useState(false);
 
@@ -116,6 +118,18 @@ export default function SettingsPage() {
         onSuccess: () => setHasChanges(false),
     });
 
+    const testEmailMutation = useMutation({
+        mutationFn: () => apiClient.sendAdminTestEmail(),
+        onSuccess: (data: any) => {
+            setTestEmailError('');
+            setTestEmailMessage(data?.message || 'Test email sent successfully.');
+        },
+        onError: () => {
+            setTestEmailMessage('');
+            setTestEmailError('Unable to send a test email. Verify SMTP settings and credentials.');
+        },
+    });
+
     const sections: SettingsSection[] = [
         { id: 'security', title: 'Security', description: 'Password and authentication', icon: <Shield className="w-5 h-5" /> },
         { id: 'email', title: 'Email', description: 'SMTP configuration', icon: <Mail className="w-5 h-5" /> },
@@ -163,6 +177,18 @@ export default function SettingsPage() {
                 {loadError && (
                     <Alert type="error" title="Settings Load Failed">
                         {loadError}
+                    </Alert>
+                )}
+
+                {testEmailMessage && (
+                    <Alert type="success" title="Test Email Sent">
+                        {testEmailMessage}
+                    </Alert>
+                )}
+
+                {testEmailError && (
+                    <Alert type="error" title="Test Email Failed">
+                        {testEmailError}
                     </Alert>
                 )}
 
@@ -296,7 +322,7 @@ export default function SettingsPage() {
                                             label="SMTP Port"
                                             type="number"
                                             value={settings.smtpPort.toString()}
-                                            onChange={(e) => updateSetting('smtpPort', parseInt(e.target.value))}
+                                            onChange={(e) => updateSetting('smtpPort', Number.parseInt(e.target.value, 10) || 0)}
                                         />
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
@@ -325,9 +351,13 @@ export default function SettingsPage() {
                                         />
                                     </div>
                                     <div className="pt-4">
-                                        <Button variant="outline">
+                                        <Button
+                                            variant="outline"
+                                            onClick={() => testEmailMutation.mutate()}
+                                            disabled={testEmailMutation.isPending || isLoadingSettings}
+                                        >
                                             <Mail className="w-4 h-4 mr-2" />
-                                            Send Test Email
+                                            {testEmailMutation.isPending ? 'Sending...' : 'Send Test Email'}
                                         </Button>
                                     </div>
                                 </CardContent>
@@ -375,7 +405,7 @@ export default function SettingsPage() {
                                                 label="Reminder Days Before Due"
                                                 type="number"
                                                 value={settings.reminderDays.toString()}
-                                                onChange={(e) => updateSetting('reminderDays', parseInt(e.target.value))}
+                                                onChange={(e) => updateSetting('reminderDays', Number.parseInt(e.target.value, 10) || 0)}
                                                 className="ml-6"
                                             />
                                         )}

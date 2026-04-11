@@ -3,27 +3,67 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+from app.core.database import SessionLocal
 from app.core.config import settings
+from app.models import AdminSettings
 from app.core.logging import logger
+
+
+def _resolve_email_settings() -> dict[str, str | int]:
+    db = SessionLocal()
+    try:
+        admin_settings = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+        if not admin_settings:
+            return {
+                "smtp_host": settings.SMTP_HOST,
+                "smtp_port": settings.SMTP_PORT,
+                "smtp_user": settings.SMTP_USER,
+                "smtp_password": settings.SMTP_PASSWORD,
+                "email_from": settings.EMAIL_FROM,
+                "email_from_name": "Kriterion System",
+            }
+
+        return {
+            "smtp_host": admin_settings.smtp_host or settings.SMTP_HOST,
+            "smtp_port": admin_settings.smtp_port or settings.SMTP_PORT,
+            "smtp_user": admin_settings.smtp_user or settings.SMTP_USER,
+            "smtp_password": admin_settings.smtp_password or settings.SMTP_PASSWORD,
+            "email_from": admin_settings.email_from or settings.EMAIL_FROM,
+            "email_from_name": admin_settings.email_from_name or "Kriterion System",
+        }
+    except Exception as exc:
+        logger.warning(f"Falling back to environment email settings: {exc}")
+        return {
+            "smtp_host": settings.SMTP_HOST,
+            "smtp_port": settings.SMTP_PORT,
+            "smtp_user": settings.SMTP_USER,
+            "smtp_password": settings.SMTP_PASSWORD,
+            "email_from": settings.EMAIL_FROM,
+            "email_from_name": "Kriterion System",
+        }
+    finally:
+        db.close()
 
 
 def send_email(to: str, subject: str, body_html: str, body_text: str | None = None) -> bool:
     """Send an email. Returns True if sent, False otherwise."""
-    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
+    email_settings = _resolve_email_settings()
+
+    if not email_settings["smtp_user"] or not email_settings["smtp_password"]:
         logger.warning("SMTP not configured. Email not sent.")
         return False
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = settings.EMAIL_FROM
+        msg["From"] = f'{email_settings["email_from_name"]} <{email_settings["email_from"]}>'
         msg["To"] = to
         if body_text:
             msg.attach(MIMEText(body_text, "plain"))
         msg.attach(MIMEText(body_html, "html"))
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+        with smtplib.SMTP(str(email_settings["smtp_host"]), int(email_settings["smtp_port"])) as server:
             server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.EMAIL_FROM, to, msg.as_string())
+            server.login(str(email_settings["smtp_user"]), str(email_settings["smtp_password"]))
+            server.sendmail(str(email_settings["email_from"]), to, msg.as_string())
         logger.info(f"Email sent to {to}: {subject}")
         return True
     except Exception as e:

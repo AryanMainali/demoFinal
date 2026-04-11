@@ -647,6 +647,11 @@ class ApiClient {
         return response.data;
     }
 
+    async sendAdminTestEmail() {
+        const response = await this.client.post('/admin/settings/test-email', {});
+        return response.data;
+    }
+
     // Plagiarism endpoints
     async checkPlagiarism(submissionId: number) {
         const response = await this.client.post(`/submissions/${submissionId}/check-plagiarism`);
