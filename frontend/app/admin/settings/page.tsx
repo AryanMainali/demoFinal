@@ -13,10 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Select } from '@/components/ui/select';
-import { Tabs, TabPanel } from '@/components/ui/tabs';
 import { Alert } from '@/components/ui/alert';
 import {
-    Settings,
     Server,
     Shield,
     Mail,
@@ -24,14 +22,12 @@ import {
     Database,
     Clock,
     Globe,
-    Palette,
     Lock,
     Key,
     Save,
     RefreshCw,
     AlertTriangle,
     CheckCircle,
-    Upload,
     Download,
     Trash2
 } from 'lucide-react';
@@ -44,19 +40,12 @@ interface SettingsSection {
 }
 
 export default function SettingsPage() {
-    const [activeSection, setActiveSection] = useState('general');
+    const [activeSection, setActiveSection] = useState('security');
     const [hasChanges, setHasChanges] = useState(false);
     const [resetModal, setResetModal] = useState(false);
     const [backupModal, setBackupModal] = useState(false);
 
     const [settings, setSettings] = useState({
-        // General
-        siteName: 'Kriterion',
-        siteDescription: 'Automated Programming Assignment Grading System',
-        timezone: 'America/New_York',
-        dateFormat: 'MM/DD/YYYY',
-        maintenanceMode: false,
-
         // Security
         passwordMinLength: 8,
         passwordRequireUppercase: true,
@@ -88,11 +77,6 @@ export default function SettingsPage() {
         defaultMemoryLimit: 256,
         maxConcurrentJobs: 10,
         sandboxEnabled: true,
-
-        // Appearance
-        primaryColor: '#862733',
-        logoUrl: '',
-        faviconUrl: '',
     });
 
     const updateSetting = (key: string, value: any) => {
@@ -106,12 +90,10 @@ export default function SettingsPage() {
     });
 
     const sections: SettingsSection[] = [
-        { id: 'general', title: 'General', description: 'Basic system settings', icon: <Settings className="w-5 h-5" /> },
         { id: 'security', title: 'Security', description: 'Password and authentication', icon: <Shield className="w-5 h-5" /> },
         { id: 'email', title: 'Email', description: 'SMTP configuration', icon: <Mail className="w-5 h-5" /> },
         { id: 'notifications', title: 'Notifications', description: 'Email notifications', icon: <Bell className="w-5 h-5" /> },
         { id: 'execution', title: 'Code Execution', description: 'Sandbox settings', icon: <Server className="w-5 h-5" /> },
-        { id: 'appearance', title: 'Appearance', description: 'Branding and theme', icon: <Palette className="w-5 h-5" /> },
         { id: 'backup', title: 'Backup & Reset', description: 'Data management', icon: <Database className="w-5 h-5" /> },
     ];
 
@@ -181,63 +163,6 @@ export default function SettingsPage() {
 
                     {/* Settings Content */}
                     <div className="flex-1">
-                        {/* General Settings */}
-                        {activeSection === 'general' && (
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Settings className="w-5 h-5 text-[#862733]" />
-                                        General Settings
-                                    </CardTitle>
-                                    <CardDescription>Configure basic system settings</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-6">
-                                    <Input
-                                        label="Site Name"
-                                        value={settings.siteName}
-                                        onChange={(e) => updateSetting('siteName', e.target.value)}
-                                    />
-                                    <Textarea
-                                        label="Site Description"
-                                        value={settings.siteDescription}
-                                        onChange={(e) => updateSetting('siteDescription', e.target.value)}
-                                    />
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Select
-                                            label="Timezone"
-                                            value={settings.timezone}
-                                            onChange={(e) => updateSetting('timezone', e.target.value)}
-                                            options={[
-                                                { value: 'America/New_York', label: 'Eastern (ET)' },
-                                                { value: 'America/Chicago', label: 'Central (CT)' },
-                                                { value: 'America/Denver', label: 'Mountain (MT)' },
-                                                { value: 'America/Los_Angeles', label: 'Pacific (PT)' },
-                                                { value: 'UTC', label: 'UTC' },
-                                            ]}
-                                        />
-                                        <Select
-                                            label="Date Format"
-                                            value={settings.dateFormat}
-                                            onChange={(e) => updateSetting('dateFormat', e.target.value)}
-                                            options={[
-                                                { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
-                                                { value: 'DD/MM/YYYY', label: 'DD/MM/YYYY' },
-                                                { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
-                                            ]}
-                                        />
-                                    </div>
-                                    <div className="pt-4 border-t">
-                                        <Switch
-                                            checked={settings.maintenanceMode}
-                                            onChange={(checked) => updateSetting('maintenanceMode', checked)}
-                                            label="Maintenance Mode"
-                                            description="When enabled, only admins can access the system"
-                                        />
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
-
                         {/* Security Settings */}
                         {activeSection === 'security' && (
                             <Card>
@@ -469,59 +394,6 @@ export default function SettingsPage() {
                                     <Alert type="info" title="Execution Environment">
                                         Code is executed in Docker containers with restricted network access and resource limits.
                                     </Alert>
-                                </CardContent>
-                            </Card>
-                        )}
-
-                        {/* Appearance Settings */}
-                        {activeSection === 'appearance' && (
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Palette className="w-5 h-5 text-[#862733]" />
-                                        Appearance Settings
-                                    </CardTitle>
-                                    <CardDescription>Customize branding and theme</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-6">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Primary Color</label>
-                                        <div className="flex items-center gap-4">
-                                            <input
-                                                type="color"
-                                                value={settings.primaryColor}
-                                                onChange={(e) => updateSetting('primaryColor', e.target.value)}
-                                                className="w-12 h-12 rounded-lg border cursor-pointer"
-                                            />
-                                            <Input
-                                                value={settings.primaryColor}
-                                                onChange={(e) => updateSetting('primaryColor', e.target.value)}
-                                                className="w-32"
-                                            />
-                                            <div
-                                                className="px-4 py-2 rounded-lg text-white font-medium"
-                                                style={{ backgroundColor: settings.primaryColor }}
-                                            >
-                                                Preview
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Logo</label>
-                                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                                            <Upload className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-                                            <p className="text-sm text-gray-600">Click to upload or drag and drop</p>
-                                            <p className="text-xs text-gray-500 mt-1">PNG, JPG or SVG (max 2MB)</p>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Favicon</label>
-                                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                                            <Upload className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-                                            <p className="text-sm text-gray-600">Click to upload or drag and drop</p>
-                                            <p className="text-xs text-gray-500 mt-1">ICO, PNG (32x32 recommended)</p>
-                                        </div>
-                                    </div>
                                 </CardContent>
                             </Card>
                         )}
