@@ -29,6 +29,7 @@ import {
     AlertTriangle,
     CheckCircle,
     Download,
+    Upload,
     Trash2
 } from 'lucide-react';
 
