@@ -326,6 +326,16 @@ class ApiClient {
         return response.data;
     }
 
+    async publishGrades(assignmentId: number) {
+        const response = await this.client.post(`/faculty/assignments/${assignmentId}/publish-grades`);
+        return response.data;
+    }
+
+    async hideGrades(assignmentId: number) {
+        const response = await this.client.post(`/faculty/assignments/${assignmentId}/hide-grades`);
+        return response.data;
+    }
+
     // Submission endpoints
     async getSubmissions(assignmentId?: number, studentId?: number) {
         const params: any = {};
@@ -499,6 +509,11 @@ class ApiClient {
         return response.data;
     }
 
+    async getFacultyStudents() {
+        const response = await this.client.get('/faculty/students');
+        return response.data;
+    }
+
     async getRubricItems() {
         const response = await this.client.get('/faculty/rubric-items');
         return response.data;
@@ -615,8 +630,8 @@ class ApiClient {
     }
 
     // Language endpoints
-    async getLanguages() {
-        const response = await this.client.get('/languages');
+    async getLanguages(activeOnly = true) {
+        const response = await this.client.get('/languages/', { params: { active_only: activeOnly } });
         return response.data;
     }
 
@@ -626,7 +641,7 @@ class ApiClient {
     }
 
     async createLanguage(data: any) {
-        const response = await this.client.post('/languages', data);
+        const response = await this.client.post('/languages/', data);
         return response.data;
     }
 

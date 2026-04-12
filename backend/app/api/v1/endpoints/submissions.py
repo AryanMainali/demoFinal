@@ -32,7 +32,7 @@ from app.core.logging import logger
 from app.services.grading import GradingService
 from app.services.notifications import create_notification, notify_users, get_assistant_ids_for_course
 from app.services.s3_storage import s3_service
-from app.services.notification import notify_faculty_submission_received, notify_student_grade_posted
+from app.services.notification import notify_student_grade_posted
 
 router = APIRouter()
 
@@ -124,6 +124,25 @@ def list_submissions(
         query = query.filter(Submission.student_id == student_id)
     
     submissions = query.order_by(desc(Submission.submitted_at)).all()
+
+    # Mask scores for students when grades are not published
+    if current_user.role == UserRole.STUDENT and submissions:
+        assignment_ids = {s.assignment_id for s in submissions}
+        published_set = {
+            row[0] for row in db.query(Assignment.id).filter(
+                Assignment.id.in_(assignment_ids),
+                Assignment.grades_published == True,
+            ).all()
+        }
+        _score_fields = {"test_score", "rubric_score", "raw_score", "final_score", "override_score", "feedback"}
+        masked = []
+        for sub in submissions:
+            schema = SubmissionSchema.model_validate(sub)
+            if sub.assignment_id not in published_set:
+                schema = schema.model_copy(update={f: None for f in _score_fields})
+            masked.append(schema)
+        return masked
+
     return submissions
 
 
@@ -306,6 +325,20 @@ def get_submission(
             raise HTTPException(status_code=403, detail="Access denied")
     
     result = SubmissionDetailWithStudent.model_validate(submission)
+
+    # Students cannot see scores until faculty publishes grades
+    if current_user.role == UserRole.STUDENT:
+        grades_visible = getattr(submission.assignment, "grades_published", False)
+        if not grades_visible:
+            result = result.model_copy(update={
+                "final_score": None,
+                "raw_score": None,
+                "test_score": None,
+                "rubric_score": None,
+                "override_score": None,
+                "feedback": None,
+            })
+
     if submission.group:
         from app.schemas.submission import GroupInSubmission, GroupMemberInSubmission
         members = [
@@ -579,48 +612,25 @@ async def create_submission(
     )
     db.add(audit_log)
 
-    grader_user_ids = set([assignment.course.instructor_id] + get_assistant_ids_for_course(db, assignment.course_id))
-    notify_users(
-        db,
-        user_ids=grader_user_ids,
-        notification_type=NotificationType.SUBMISSION_RECEIVED,
-        title=f"New submission: {assignment.title}",
-        message=f"{current_user.full_name or current_user.email} submitted attempt {attempt_number}.",
-        course_id=assignment.course_id,
-        assignment_id=assignment.id,
-    )
-    
-    db.commit()
-    db.refresh(submission)
-    
-    # Send submission received notification to faculty/assistants
-    try:
-        notify_faculty_submission_received(
-            db=db,
+    # Only notify faculty/assistants on the student's FIRST submission for this assignment
+    if new_attempt_number == 1:
+        student_name = current_user.full_name or current_user.email
+        grader_user_ids = set(
+            [assignment.course.instructor_id] + get_assistant_ids_for_course(db, assignment.course_id)
+        )
+        notify_users(
+            db,
+            user_ids=grader_user_ids,
+            notification_type=NotificationType.SUBMISSION_RECEIVED,
+            title="New Submission",
+            message=f"{student_name} submitted to {assignment.title} for {assignment.course.name}.",
+            link=f"/faculty/courses/{assignment.course_id}/assignments/{assignment.id}",
             course_id=assignment.course_id,
             assignment_id=assignment.id,
-            student_name=current_user.full_name or "A student",
-            course_code=assignment.course.code,
-            faculty_id=assignment.course.instructor_id,
         )
-        
-        # Also notify assigned assistants
-        assistants = db.query(CourseAssistant).filter(
-            CourseAssistant.course_id == assignment.course_id
-        ).all()
-        for assistant in assistants:
-            notify_faculty_submission_received(
-                db=db,
-                course_id=assignment.course_id,
-                assignment_id=assignment.id,
-                student_name=current_user.full_name or "A student",
-                course_code=assignment.course.code,
-                faculty_id=assistant.assistant_id,
-            )
-        
-        db.commit()
-    except Exception as notif_err:
-        logger.warning(f"Failed to send submission notifications: {str(notif_err)}")
+
+    db.commit()
+    db.refresh(submission)
     
     logger.info(f"Submission {submission.id} created by user {current_user.id} for assignment {assignment_id}")
 
@@ -674,19 +684,9 @@ async def grade_submission(
         db.add(audit)
 
         db.refresh(submission)
-        create_notification(
-            db,
-            user_id=submission.student_id,
-            notification_type=NotificationType.ASSIGNMENT_GRADED,
-            title=f"Assignment graded: {submission.assignment.title}",
-            message=f"Your submission has been graded. Latest score: {submission.final_score if submission.final_score is not None else 'available in gradebook'}.",
-            course_id=submission.assignment.course_id,
-            assignment_id=submission.assignment_id,
-            submission_id=submission.id,
-        )
-
+        # Grade notifications are sent only when faculty publishes grades
         db.commit()
-        
+
         return result
     except Exception as e:
         logger.error(f"Error grading submission {submission_id}: {str(e)}")
@@ -957,40 +957,7 @@ def save_manual_grade(
     )
     db.add(audit)
 
-    score_display = f"{submission.final_score:.1f}" if submission.final_score is not None else "available in gradebook"
-    grade_title = f"Assignment graded: {submission.assignment.title}"
-    grade_message = f"Your submission has been graded. Score: {score_display}."
-
-    # Notify the submitter
-    create_notification(
-        db,
-        user_id=submission.student_id,
-        notification_type=NotificationType.ASSIGNMENT_GRADED,
-        title=grade_title,
-        message=grade_message,
-        course_id=submission.assignment.course_id,
-        assignment_id=submission.assignment_id,
-        submission_id=submission.id,
-    )
-
-    # If group submission, notify all other group members
-    if submission.group_id:
-        group_members = db.query(GroupMembership).filter(
-            GroupMembership.group_id == submission.group_id,
-            GroupMembership.user_id != submission.student_id,
-        ).all()
-        for gm in group_members:
-            create_notification(
-                db,
-                user_id=gm.user_id,
-                notification_type=NotificationType.ASSIGNMENT_GRADED,
-                title=grade_title,
-                message=f"Your group submission has been graded. Score: {score_display}.",
-                course_id=submission.assignment.course_id,
-                assignment_id=submission.assignment_id,
-                submission_id=submission.id,
-            )
-
+    # Grade notifications are sent only when faculty publishes grades, not on manual grading
     db.commit()
 
     return {"message": "Grade saved successfully", "submission_id": submission_id}

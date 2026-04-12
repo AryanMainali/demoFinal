@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.schemas.rubric import RubricItem as RubricItemSchema
 from app.core.logging import logger
+from app.services.notification import notify_student_grade_posted
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -119,7 +120,6 @@ class TestCaseCreate(BaseModel):
     description: Optional[str] = None
     input_data: Optional[str] = None
     expected_output: str
-    points: float = 10.0
     is_hidden: bool = False
     ignore_whitespace: bool = False
     use_regex: bool = False
@@ -575,7 +575,6 @@ def get_test_cases(
             "description": tc.description,
             "input_data": tc.input_data,
             "expected_output": tc.expected_output,
-            "points": tc.points,
             "is_hidden": tc.is_hidden,
             "order": tc.order
         } for tc in test_cases
@@ -712,6 +711,75 @@ def grade_submission(
     return {"message": "Submission graded successfully", "score": grade_request.final_score}
 
 
+@router.post("/assignments/{assignment_id}/publish-grades")
+def publish_grades(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY])),
+):
+    """Publish grades for an assignment — students will be able to see their scores after this."""
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    if assignment.grades_published:
+        return {"message": "Grades already published"}
+
+    assignment.grades_published = True
+    db.commit()
+
+    # Notify every student who has a graded submission
+    graded_submissions = (
+        db.query(Submission)
+        .filter(
+            Submission.assignment_id == assignment_id,
+            Submission.final_score.isnot(None),
+        )
+        .all()
+    )
+    # One notification per student (take latest)
+    notified: set = set()
+    for sub in graded_submissions:
+        if sub.student_id in notified:
+            continue
+        notified.add(sub.student_id)
+        try:
+            notify_student_grade_posted(
+                db=db,
+                student_id=sub.student_id,
+                course_code=assignment.course.code,
+                assignment_title=assignment.title,
+                score=sub.final_score,
+                max_score=assignment.max_score or 100,
+                course_id=assignment.course_id,
+                assignment_id=assignment_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify student {sub.student_id} on grade publish: {e}")
+
+    db.commit()
+    return {"message": "Grades published", "students_notified": len(notified)}
+
+
+@router.post("/assignments/{assignment_id}/hide-grades")
+def hide_grades(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY])),
+):
+    """Hide grades for an assignment — students will no longer see their scores."""
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if assignment.course.instructor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    assignment.grades_published = False
+    db.commit()
+    return {"message": "Grades hidden"}
+
+
 @router.post("/submissions/{submission_id}/regrade")
 async def regrade_submission(
     submission_id: int,
@@ -790,6 +858,31 @@ def get_announcements(
             "is_pinned": a.is_pinned,
             "created_at": a.created_at
         } for a in announcements
+    ]
+
+
+# ============== System Students (for enrollment picker) ==============
+
+@router.get("/students")
+def list_system_students(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN])),
+):
+    """Return all active students in the system so faculty can enroll or add them to groups."""
+    students = (
+        db.query(User)
+        .filter(User.role == UserRole.STUDENT, User.is_active == True)
+        .order_by(User.full_name)
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "email": s.email,
+            "full_name": s.full_name,
+            "student_id": getattr(s, "student_id", None),
+        }
+        for s in students
     ]
 
 

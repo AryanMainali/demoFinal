@@ -69,28 +69,7 @@ def grade_submission_task(self, submission_id: int):
         
         logger.info(f"Graded submission {submission_id}: {result.get('status')}")
         
-        # Send grade posted notification if grading was successful
-        if result.get('status') == 'graded':
-            try:
-                submission = self.db.query(Submission).filter(
-                    Submission.id == submission_id
-                ).first()
-                
-                if submission and submission.final_score is not None:
-                    notify_student_grade_posted(
-                        db=self.db,
-                        student_id=submission.student_id,
-                        course_code=submission.assignment.course.code,
-                        assignment_title=submission.assignment.title,
-                        score=submission.final_score,
-                        max_score=submission.assignment.max_score,
-                        course_id=submission.assignment.course_id,
-                        assignment_id=submission.assignment_id,
-                    )
-                    self.db.commit()
-                    logger.info(f"Grade notification sent for submission {submission_id}")
-            except Exception as notif_err:
-                logger.warning(f"Failed to send grade notification: {str(notif_err)}")
+        # Grade notifications are sent only when faculty publishes grades, not on auto-grade
         
         return result
         

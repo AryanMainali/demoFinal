@@ -656,6 +656,13 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             toast({ title: 'Cannot compare', description: 'No matched submission to compare.', variant: 'destructive' });
             return;
         }
+        // Ensure per-line match data is loaded before rendering highlights
+        if (plagiarismMatches.length === 0 && selectedSub) {
+            try {
+                const matches = await apiClient.getPlagiarismMatches(selectedSub.id);
+                setPlagiarismMatches(matches || []);
+            } catch { /* ignore */ }
+        }
 
         // Resolve matched student name from allSubs
         const matchedSub = allSubs.find(s => s.id === match.matched_submission_id);
@@ -907,6 +914,37 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
 
     const currentFile = selectedFileId ? fileContents[selectedFileId] : null;
     const editorLines = (currentFile?.content || '').split('\n');
+
+    // Client-side line matching for compare mode.
+    // Normalises each line (strip comments, collapse strings/whitespace) then marks
+    // lines that appear in both files.  Works even when the backend stored no line-range
+    // data (e.g. short files where no 4-line consecutive window exists).
+    const { clientSourceLines, clientMatchedLines } = useMemo(() => {
+        if (!compareMode || !currentFile || !currentCompareFile) {
+            return { clientSourceLines: new Set<number>(), clientMatchedLines: new Set<number>() };
+        }
+        const normalizeLine = (line: string): string =>
+            line
+                .replace(/#.*$/, '')
+                .replace(/\/\/.*$/, '')
+                .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '"S"')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+
+        const normA = editorLines.map(normalizeLine);
+        const normB = compareEditorLines.map(normalizeLine);
+
+        const bIndex = new Set(normB.filter(l => l.length >= 3));
+        const aIndex = new Set(normA.filter(l => l.length >= 3));
+
+        const src = new Set<number>();
+        const mch = new Set<number>();
+        normA.forEach((l, i) => { if (l.length >= 3 && bIndex.has(l)) src.add(i + 1); });
+        normB.forEach((l, i) => { if (l.length >= 3 && aIndex.has(l)) mch.add(i + 1); });
+        return { clientSourceLines: src, clientMatchedLines: mch };
+    }, [compareMode, currentFile, currentCompareFile, editorLines, compareEditorLines]);
+
     const subFiles = selectedSub?.files || [];
     const subTestResults = selectedSub?.test_results || [];
     const testCaseResultsById = useMemo(() => {
@@ -920,8 +958,12 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
         return list;
     }, [assignment?.test_cases]);
 
-    // Plagiarism-highlighted line numbers for the current student's code
+    // Plagiarism-highlighted line numbers for the current student's code.
+    // In compare mode: prefer client-side computed lines (always accurate, works for
+    // short files where backend stores no 4-line window data).  Fall back to DB line
+    // ranges for non-compare contexts (e.g. the normal editor highlight).
     const sourceFlaggedLines = useMemo(() => {
+        if (compareMode) return clientSourceLines;
         const lines = new Set<number>();
         for (const m of plagiarismMatches) {
             if (m.source_line_start != null && m.source_line_end != null) {
@@ -929,11 +971,13 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             }
         }
         return lines;
-    }, [plagiarismMatches]);
+    }, [plagiarismMatches, compareMode, clientSourceLines]);
 
     // Plagiarism-highlighted line numbers for the matched student's code (compare mode)
     const matchedFlaggedLines = useMemo(() => {
         if (!compareMode) return new Set<number>();
+        if (clientMatchedLines.size > 0) return clientMatchedLines;
+        // Fall back to DB-stored line ranges
         const lines = new Set<number>();
         for (const m of plagiarismMatches) {
             if (m.matched_submission_id === compareMode.matchedSubId &&
@@ -942,7 +986,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             }
         }
         return lines;
-    }, [plagiarismMatches, compareMode]);
+    }, [plagiarismMatches, compareMode, clientMatchedLines]);
 
     // Unified plagiarism match list: merge DB records + report JSON into one clickable list
     const unifiedPlagiarismMatches = useMemo(() => {
@@ -1406,8 +1450,8 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 {editorLines.map((_, i) => {
                                                     const isFlagged = sourceFlaggedLines.has(i + 1);
                                                     return (
-                                                        <div key={i} className="h-[19px]" style={isFlagged ? { background: 'rgba(244,71,71,0.18)' } : undefined}>
-                                                            <span className={isFlagged ? 'text-[#f44747]' : ''}>{i + 1}</span>
+                                                        <div key={i} className="h-[19px]" style={isFlagged ? { background: 'rgba(244,71,71,0.28)' } : undefined}>
+                                                            <span className={isFlagged ? 'text-[#ff6060] font-bold' : ''}>{i + 1}</span>
                                                         </div>
                                                     );
                                                 })}
@@ -1421,8 +1465,8 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 {editorLines.map((line, i) => {
                                                     const isFlagged = sourceFlaggedLines.has(i + 1);
                                                     return (
-                                                        <div key={i} className="h-[19px] whitespace-pre" style={isFlagged ? { background: 'rgba(244,71,71,0.10)', borderLeft: '2px solid rgba(244,71,71,0.5)', paddingLeft: '6px', marginLeft: '-8px' } : undefined}>
-                                                            <span className={isFlagged ? 'text-[#f4a0a0]' : 'text-[#d4d4d4]'}>{line}</span>
+                                                        <div key={i} className="h-[19px] whitespace-pre" style={isFlagged ? { background: 'rgba(244,71,71,0.28)', borderLeft: '3px solid #f44747', paddingLeft: '5px', marginLeft: '-8px' } : undefined}>
+                                                            <span className={isFlagged ? 'text-[#ff8080]' : 'text-[#d4d4d4]'}>{line}</span>
                                                         </div>
                                                     );
                                                 })}
@@ -1450,8 +1494,8 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 {compareEditorLines.map((_, i) => {
                                                     const isFlagged = matchedFlaggedLines.has(i + 1);
                                                     return (
-                                                        <div key={i} className="h-[19px]" style={isFlagged ? { background: 'rgba(192,120,255,0.18)' } : undefined}>
-                                                            <span className={isFlagged ? 'text-purple-400' : ''}>{i + 1}</span>
+                                                        <div key={i} className="h-[19px]" style={isFlagged ? { background: 'rgba(192,120,255,0.28)' } : undefined}>
+                                                            <span className={isFlagged ? 'text-purple-300 font-bold' : ''}>{i + 1}</span>
                                                         </div>
                                                     );
                                                 })}
@@ -1465,8 +1509,8 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 {compareEditorLines.map((line, i) => {
                                                     const isFlagged = matchedFlaggedLines.has(i + 1);
                                                     return (
-                                                        <div key={i} className="h-[19px] whitespace-pre" style={isFlagged ? { background: 'rgba(192,120,255,0.10)', borderLeft: '2px solid rgba(192,120,255,0.5)', paddingLeft: '6px', marginLeft: '-8px' } : undefined}>
-                                                            <span className={isFlagged ? 'text-purple-300' : 'text-[#d4d4d4]'}>{line}</span>
+                                                        <div key={i} className="h-[19px] whitespace-pre" style={isFlagged ? { background: 'rgba(192,120,255,0.28)', borderLeft: '3px solid #c078ff', paddingLeft: '5px', marginLeft: '-8px' } : undefined}>
+                                                            <span className={isFlagged ? 'text-purple-200' : 'text-[#d4d4d4]'}>{line}</span>
                                                         </div>
                                                     );
                                                 })}

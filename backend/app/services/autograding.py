@@ -20,6 +20,21 @@ def _get_test_case_input_file_list(test_case: TestCase) -> List[Tuple[str, str]]
     return []
 
 
+def _get_test_case_expected_output_file_list(test_case: TestCase) -> List[Tuple[str, str]]:
+    """Return list of (filename, s3_key) for test case expected output files."""
+    files_json = getattr(test_case, "expected_output_files_json", None)
+    if files_json and isinstance(files_json, list) and len(files_json) > 0:
+        return [
+            (item.get("filename") or "output.txt", item.get("s3_key"))
+            for item in files_json if item.get("s3_key")
+        ]
+    key = getattr(test_case, "expected_output_file_s3_key", None)
+    if key:
+        fn = key.split("/")[-1] if "/" in key else "output.txt"
+        return [(fn, key)]
+    return []
+
+
 class AutoGradingService:
     """Autograding service for submissions"""
     
@@ -128,26 +143,75 @@ class AutoGradingService:
             result["error"] = execution_result["stderr"]
             result["runtime"] = execution_result["runtime"]
 
-            expected_output_type = getattr(test_case, "expected_output_type", "text") or "text"
-            if expected_output_type == "file" and getattr(test_case, "expected_output_file_s3_key", None):
-                try:
-                    expected = s3_service.get_object_content(test_case.expected_output_file_s3_key).strip()
-                except Exception as e:
-                    logger.warning(f"Autograding: failed to load expected output file from S3: {e}")
-                    expected = test_case.expected_output or ""
-            else:
-                expected = test_case.expected_output or ""
-            result["expected"] = expected
-            
             if execution_result["success"]:
-                actual = execution_result["stdout"]
-                if test_case.ignore_whitespace:
-                    actual = " ".join(actual.split())
-                    expected = " ".join(expected.split())
-                if test_case.ignore_case:
-                    actual = actual.lower()
-                    expected = expected.lower()
-                result["passed"] = actual.strip() == expected.strip()
+                expected_output_type = getattr(test_case, "expected_output_type", "text") or "text"
+
+                if expected_output_type == "file":
+                    # Student's program must have written output file(s) to code_path
+                    expected_files = _get_test_case_expected_output_file_list(test_case)
+                    if not expected_files:
+                        result["passed"] = True
+                        result["expected"] = "[file output — no expected files configured]"
+                    else:
+                        all_passed = True
+                        file_errors: List[str] = []
+                        for filename, s3_key in expected_files:
+                            student_file = os.path.join(code_path, filename)
+                            if not os.path.exists(student_file):
+                                all_passed = False
+                                file_errors.append(
+                                    f"Expected output file '{filename}' was not created by the program"
+                                )
+                                continue
+                            try:
+                                with open(student_file, "r", encoding="utf-8", errors="replace") as fh:
+                                    student_content = fh.read()
+                            except Exception as e:
+                                all_passed = False
+                                file_errors.append(f"Could not read output file '{filename}': {e}")
+                                continue
+                            try:
+                                expected_content = s3_service.get_object_content(s3_key)
+                            except Exception as e:
+                                logger.warning(
+                                    f"Autograding: could not load expected output from S3 "
+                                    f"for '{filename}': {e}"
+                                )
+                                all_passed = False
+                                file_errors.append(
+                                    f"Server error loading expected output for '{filename}'"
+                                )
+                                continue
+                            actual = student_content
+                            expected = expected_content
+                            if test_case.ignore_whitespace:
+                                actual = " ".join(actual.split())
+                                expected = " ".join(expected.split())
+                            if test_case.ignore_case:
+                                actual = actual.lower()
+                                expected = expected.lower()
+                            if actual.strip() != expected.strip():
+                                all_passed = False
+                                file_errors.append(
+                                    f"Output file '{filename}' does not match expected"
+                                )
+                        result["passed"] = all_passed
+                        result["expected"] = "[file comparison]"
+                        if file_errors:
+                            result["error"] = (result.get("error") or "").rstrip() + \
+                                              (" " if result.get("error") else "") + \
+                                              "; ".join(file_errors)
+                else:
+                    expected = test_case.expected_output or ""
+                    result["expected"] = expected
+                    actual = execution_result["stdout"]
+                    if test_case.ignore_whitespace:
+                        actual = " ".join(actual.split())
+                        expected = " ".join(expected.split())
+                    if test_case.ignore_case:
+                        actual = actual.lower()
+                        expected = expected.lower()
+                    result["passed"] = actual.strip() == expected.strip()
             
         except Exception as e:
             logger.error(f"Test case execution error: {str(e)}")

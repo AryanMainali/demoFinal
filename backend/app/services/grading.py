@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
@@ -51,6 +51,36 @@ def _read_submission_file_content(file_record: SubmissionFile) -> str:
             logger.error(f"Error reading local file {path}: {e}")
             return ""
     return ""
+
+
+def _get_test_case_input_file_list(test_case) -> List[Tuple[str, str]]:
+    """Return list of (filename, s3_key) for test case input files."""
+    files_json = getattr(test_case, "input_files_json", None)
+    if files_json and isinstance(files_json, list) and len(files_json) > 0:
+        return [
+            (item.get("filename") or "input.txt", item.get("s3_key"))
+            for item in files_json if item.get("s3_key")
+        ]
+    key = getattr(test_case, "input_file_s3_key", None)
+    if key:
+        fn = (getattr(test_case, "input_filename", None) or "input.txt").strip() or "input.txt"
+        return [(fn, key)]
+    return []
+
+
+def _get_test_case_expected_output_file_list(test_case) -> List[Tuple[str, str]]:
+    """Return list of (filename, s3_key) for test case expected output files."""
+    files_json = getattr(test_case, "expected_output_files_json", None)
+    if files_json and isinstance(files_json, list) and len(files_json) > 0:
+        return [
+            (item.get("filename") or "output.txt", item.get("s3_key"))
+            for item in files_json if item.get("s3_key")
+        ]
+    key = getattr(test_case, "expected_output_file_s3_key", None)
+    if key:
+        fn = key.split("/")[-1] if "/" in key else "output.txt"
+        return [(fn, key)]
+    return []
 
 
 class GradingService:
@@ -269,9 +299,31 @@ class GradingService:
 
             assignment = submission.assignment
             language_name = (assignment.language.name if assignment.language else "python").lower()
-            raw_input = test_case.input_data or ""
-            stdin_input = raw_input.replace("\r\n", "\n").replace("\r", "\n") if raw_input else ""
 
+            # ── Input preparation ─────────────────────────────────
+            input_type = getattr(test_case, "input_type", "stdin") or "stdin"
+            stdin_input = ""
+
+            if input_type == "file":
+                # Download input files into the working directory so the program can read them
+                file_list = _get_test_case_input_file_list(test_case)
+                for input_filename, s3_key in file_list:
+                    try:
+                        from app.services.s3_storage import s3_service
+                        file_content = s3_service.get_object_content(s3_key)
+                        (Path(code_path) / input_filename).write_text(
+                            file_content, encoding="utf-8"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Grading: failed to load input file '{input_filename}' for "
+                            f"test case {test_case.id}: {e}"
+                        )
+            else:
+                raw_input = test_case.input_data or ""
+                stdin_input = raw_input.replace("\r\n", "\n").replace("\r", "\n")
+
+            # ── Execute ──────────────────────────────────────────
             execution_result = await asyncio.to_thread(
                 sandbox_executor.execute_code,
                 code_path=code_path,
@@ -302,23 +354,40 @@ class GradingService:
                     execution_time=execution_result.get("runtime", 0),
                 )
 
-            passed = self._check_test_output(
-                actual=stdout,
-                expected=test_case.expected_output or "",
-                ignore_whitespace=test_case.ignore_whitespace,
-                ignore_case=test_case.ignore_case,
-                use_regex=test_case.use_regex,
-            )
-            score = test_case.points if passed else 0
-            return self._create_test_result(
-                submission, test_case,
-                passed=passed,
-                score=score,
-                output=stdout,
-                error=stderr,
-                execution_time=execution_result.get("runtime", 0),
-                memory_used=execution_result.get("memory_used", 0),
-            )
+            # ── Output comparison ────────────────────────────────
+            expected_output_type = getattr(test_case, "expected_output_type", "text") or "text"
+
+            if expected_output_type == "file":
+                # Student's program must have written output file(s); compare them
+                passed, file_error = self._check_file_output(test_case, code_path)
+                score = test_case.points if passed else 0
+                return self._create_test_result(
+                    submission, test_case,
+                    passed=passed,
+                    score=score,
+                    output=stdout,
+                    error=file_error if not passed else stderr,
+                    execution_time=execution_result.get("runtime", 0),
+                    memory_used=execution_result.get("memory_used", 0),
+                )
+            else:
+                passed = self._check_test_output(
+                    actual=stdout,
+                    expected=test_case.expected_output or "",
+                    ignore_whitespace=test_case.ignore_whitespace,
+                    ignore_case=test_case.ignore_case,
+                    use_regex=test_case.use_regex,
+                )
+                score = test_case.points if passed else 0
+                return self._create_test_result(
+                    submission, test_case,
+                    passed=passed,
+                    score=score,
+                    output=stdout,
+                    error=stderr,
+                    execution_time=execution_result.get("runtime", 0),
+                    memory_used=execution_result.get("memory_used", 0),
+                )
 
         except Exception as e:
             logger.error(f"Error running test case {test_case.id}: {str(e)}")
@@ -358,6 +427,62 @@ class GradingService:
             "is_hidden": test_case.is_hidden
         }
     
+    def _check_file_output(
+        self, test_case: TestCase, code_path: str
+    ) -> Tuple[bool, str]:
+        """Compare files written by the student's program against expected output files.
+
+        For each expected output file:
+          1. Look for a file with the same name in code_path (the sandbox working dir).
+          2. Download the expected content from S3.
+          3. Compare using the test case's whitespace/case settings.
+
+        Returns (passed, error_message).
+        """
+        from app.services.s3_storage import s3_service
+
+        expected_files = _get_test_case_expected_output_file_list(test_case)
+        if not expected_files:
+            # No expected output files configured — treat as pass
+            return True, ""
+
+        errors: List[str] = []
+
+        for filename, s3_key in expected_files:
+            student_file = Path(code_path) / filename
+
+            if not student_file.exists():
+                errors.append(
+                    f"Expected output file '{filename}' was not created by the program"
+                )
+                continue
+
+            try:
+                student_content = student_file.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                errors.append(f"Could not read output file '{filename}': {e}")
+                continue
+
+            try:
+                expected_content = s3_service.get_object_content(s3_key)
+            except Exception as e:
+                logger.warning(
+                    f"Grading: could not load expected output from S3 for '{filename}': {e}"
+                )
+                errors.append(f"Server error loading expected output for '{filename}'")
+                continue
+
+            if not self._check_test_output(
+                actual=student_content,
+                expected=expected_content,
+                ignore_whitespace=test_case.ignore_whitespace,
+                ignore_case=test_case.ignore_case,
+                use_regex=test_case.use_regex,
+            ):
+                errors.append(f"Output file '{filename}' does not match expected")
+
+        return len(errors) == 0, "; ".join(errors)
+
     def _check_test_output(
         self, actual: str, expected: str,
         ignore_whitespace: bool = False,

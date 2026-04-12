@@ -220,16 +220,6 @@ export default function AssignmentsPage() {
         <>
             <div className="space-y-6 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Button
-                        onClick={() => refetch()}
-                        disabled={isFetching}
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                    >
-                        <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
                     <Link href={`/faculty/courses/${courseId}/assignments/new`}>
                         <Button className="gap-2 h-9 text-white" style={{ backgroundColor: accentColor }}>
                             <Plus className="w-4 h-4" /> New Assignment

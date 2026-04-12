@@ -116,6 +116,7 @@ class AssignmentBase(BaseModel):
     ai_detection_threshold: float = 50.0
     
     is_published: bool = False
+    grades_published: bool = False
 
     @model_validator(mode='after')
     def validate_date_range(self):

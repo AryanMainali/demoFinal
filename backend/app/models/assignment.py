@@ -62,6 +62,7 @@ class Assignment(Base):
     
     # Status and publishing
     is_published = Column(Boolean, default=False)
+    grades_published = Column(Boolean, default=False)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

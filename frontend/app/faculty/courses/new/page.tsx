@@ -16,8 +16,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
+import { Modal } from '@/components/ui/modal';
 import { CourseLoadingPage, CourseLoadingSpinner } from '@/components/course/CourseLoading';
-import { ArrowLeft, AlertCircle } from 'lucide-react';
+import { ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const SEMESTERS = ['Fall', 'Spring', 'Summer', 'Winter'];
 const currentYear = new Date().getFullYear();
@@ -84,6 +85,7 @@ export default function NewCoursePage() {
     const [form, setForm] = useState<FormData>(initialForm);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formLoaded, setFormLoaded] = useState(!isEdit);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
 
     const todayDate = fromDateInput(today()) || new Date();
     const minStartDate = isEdit ? undefined : todayDate;
@@ -137,7 +139,7 @@ export default function NewCoursePage() {
         },
         invalidateGroups: ['allCourses', 'allDashboards'],
         onSuccess: () => {
-            router.push('/faculty/courses');
+            setShowSuccessModal(true);
         },
         onError: (err: any) => {
             const detail = err?.response?.data?.detail;
@@ -179,7 +181,7 @@ export default function NewCoursePage() {
         },
         invalidateGroups: ['allCourses', 'allDashboards'],
         onSuccess: () => {
-            router.push('/faculty/courses');
+            setShowSuccessModal(true);
         },
         onError: (err: any) => {
             const detail = err?.response?.data?.detail;
@@ -282,6 +284,40 @@ export default function NewCoursePage() {
             {isEdit && !formLoaded && (
                 <CourseLoadingPage message="Loading course..." />
             )}
+
+            <Modal
+                isOpen={showSuccessModal}
+                onClose={() => {
+                    setShowSuccessModal(false);
+                    router.push('/faculty/courses');
+                }}
+                size="sm"
+            >
+                <div className="flex flex-col items-center text-center gap-4 py-2">
+                    <div className="w-14 h-14 rounded-full bg-green-50 flex items-center justify-center">
+                        <CheckCircle2 className="w-8 h-8 text-green-600" />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-900">
+                            {isEdit ? 'Changes Saved' : 'Course Created'}
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                            {isEdit
+                                ? `"${form.name}" has been updated successfully.`
+                                : `"${form.name}" has been created successfully.`}
+                        </p>
+                    </div>
+                    <Button
+                        onClick={() => {
+                            setShowSuccessModal(false);
+                            router.push('/faculty/courses');
+                        }}
+                        className="w-full bg-[#862733] hover:bg-[#a03040]"
+                    >
+                        Go to Courses
+                    </Button>
+                </div>
+            </Modal>
 
             {formLoaded && (
                 <form onSubmit={handleSubmit} className="space-y-6 animate-slide-up">

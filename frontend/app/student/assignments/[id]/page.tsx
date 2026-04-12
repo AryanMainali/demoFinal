@@ -97,6 +97,7 @@ interface Assignment {
     max_late_days: number
     allow_groups: boolean
     max_group_size: number
+    grades_published: boolean
     language: {
         id: number
         name: string
@@ -263,12 +264,14 @@ export default function StudentAssignmentPage() {
     const attemptsUsed = latestSubmission?.attempt_number ?? 0
     const attemptsLeft = maxAttempts > 0 ? Math.max(maxAttempts - attemptsUsed, 0) : Infinity
 
+    const gradesPublished = !!assignment?.grades_published
+
     const isGraded = useMemo(() => {
-        if (!latestSubmission) return false
+        if (!latestSubmission || !gradesPublished) return false
         if (latestSubmission.final_score !== null) return true
         const s = String(latestSubmission.status || '').toLowerCase()
         return s === 'completed' || s === 'graded'
-    }, [latestSubmission])
+    }, [latestSubmission, gradesPublished])
 
     const isSubmitted = !!latestSubmission
     const isAwaitingGrade = isSubmitted && !isGraded
@@ -292,11 +295,12 @@ export default function StudentAssignmentPage() {
 
     // No auto-loaded starter code; students start with their own files.
 
-    const [hasLoadedFromLastSubmission, setHasLoadedFromLastSubmission] = useState(false)
+    const hasLoadedFromLastSubmission = useRef(false)
 
     useEffect(() => {
+        if (!latestSubmissionDetail || hasLoadedFromLastSubmission.current) return
+        hasLoadedFromLastSubmission.current = true
         const loadLastSubmissionFiles = async () => {
-            if (!latestSubmissionDetail || files.length > 0 || hasLoadedFromLastSubmission) return
             try {
                 const loadedFiles: UploadedFile[] = []
                 for (const f of latestSubmissionDetail.files ?? []) {
@@ -315,12 +319,10 @@ export default function StudentAssignmentPage() {
                 }
             } catch (e) {
                 // Silently ignore load failures; student can still upload new files.
-            } finally {
-                setHasLoadedFromLastSubmission(true)
             }
         }
         loadLastSubmissionFiles()
-    }, [latestSubmissionDetail, files.length, hasLoadedFromLastSubmission])
+    }, [latestSubmissionDetail])
 
     /* ===== File Handling ===== */
 
@@ -759,11 +761,11 @@ export default function StudentAssignmentPage() {
                         {isGraded
                             ? <span className="text-[10px] px-2 py-0.5 rounded bg-[#4ec9b0]/20 text-[#4ec9b0] font-semibold border border-[#4ec9b0]/30 shrink-0">
                                 ✓ Graded {latestSubmission?.final_score != null ? `${Number(latestSubmission.final_score).toFixed(1)}/${assignment.max_score}` : ''}
-                              </span>
+                            </span>
                             : isAwaitingGrade
-                                ? <span className="text-[10px] px-2 py-0.5 rounded bg-[#dcdcaa]/20 text-[#dcdcaa] font-medium border border-[#dcdcaa]/30 shrink-0 flex items-center gap-1 shrink-0">
-                                    <Loader2 className="w-2.5 h-2.5 animate-spin" /> Awaiting Grade
-                                  </span>
+                                ? <span className="text-[10px] px-2 py-0.5 rounded bg-[#dcdcaa]/20 text-[#dcdcaa] font-medium border border-[#dcdcaa]/30 shrink-0">
+                                    Awaiting Grade
+                                </span>
                                 : isOverdue
                                     ? <Badge variant="danger" className="text-[10px] px-1.5 py-0 shrink-0"><Clock className="w-2.5 h-2.5 mr-0.5" /> Overdue</Badge>
                                     : <Badge variant="success" className="text-[10px] px-1.5 py-0 shrink-0">Active</Badge>
@@ -1509,7 +1511,7 @@ export default function StudentAssignmentPage() {
                                         {!isGraded ? (
                                             <div className="text-center py-10 space-y-4">
                                                 <div className="w-16 h-16 mx-auto rounded-full bg-[#dcdcaa]/10 border border-[#dcdcaa]/20 flex items-center justify-center">
-                                                    <Loader2 className="w-7 h-7 text-[#dcdcaa] animate-spin" />
+                                                    <Clock className="w-7 h-7 text-[#dcdcaa]" />
                                                 </div>
                                                 <div>
                                                     <p className="text-[#cfcfcf] font-semibold text-[14px]">Awaiting Grade</p>
@@ -1533,9 +1535,7 @@ export default function StudentAssignmentPage() {
                                                     const maxScore = assignment.max_score
                                                     const pct = maxScore > 0 ? Math.round((Number(finalScore) / maxScore) * 100) : 0
                                                     const scoreColor = pct >= 90 ? '#4ec9b0' : pct >= 70 ? '#dcdcaa' : pct >= 50 ? '#ce9178' : '#f44747'
-                                                    const testScore = latestSubmissionDetail?.test_score ?? 0
                                                     const rubricScore = latestSubmissionDetail?.rubric_score ?? 0
-                                                    const overrideScore = latestSubmissionDetail?.override_score
                                                     const latePenalty = latestSubmissionDetail?.late_penalty_applied ?? latestSubmission?.late_penalty_applied ?? 0
                                                     return (
                                                         <>
@@ -1561,42 +1561,25 @@ export default function StudentAssignmentPage() {
                                                                     <span className="text-[10px] font-semibold text-[#bdbdbd] uppercase tracking-wider">Score Breakdown</span>
                                                                 </div>
                                                                 <div className="divide-y divide-[#3c3c3c]">
-                                                                    {testScore > 0 && (
-                                                                        <div className="px-3 py-2.5">
-                                                                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                                                <span className="text-[12px] text-[#4fc1ff]">🧪 Automated Tests</span>
-                                                                                <span className="text-[12px] text-white font-semibold">{Number(testScore).toFixed(1)} pts</span>
-                                                                            </div>
-                                                                            <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
-                                                                                <div className="h-full bg-[#4fc1ff] rounded-full"
-                                                                                    style={{ width: `${maxScore > 0 ? (testScore / maxScore) * 100 : 0}%` }} />
-                                                                            </div>
+                                                                    <div className="px-3 py-2.5">
+                                                                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                                            <span className="text-[12px] text-[#4fc1ff]">Possible Points</span>
+                                                                            <span className="text-[12px] text-white font-semibold">{Number(maxScore).toFixed(1)} pts</span>
                                                                         </div>
-                                                                    )}
-                                                                    {rubricScore > 0 && (
-                                                                        <div className="px-3 py-2.5">
-                                                                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                                                <span className="text-[12px] text-[#c586c0]">📋 Rubric</span>
-                                                                                <span className="text-[12px] text-white font-semibold">{Number(rubricScore).toFixed(1)} pts</span>
-                                                                            </div>
-                                                                            <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
-                                                                                <div className="h-full bg-[#c586c0] rounded-full"
-                                                                                    style={{ width: `${maxScore > 0 ? (rubricScore / maxScore) * 100 : 0}%` }} />
-                                                                            </div>
+                                                                        <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                                            <div className="h-full bg-[#4fc1ff] rounded-full" style={{ width: '100%' }} />
                                                                         </div>
-                                                                    )}
-                                                                    {overrideScore != null && (
-                                                                        <div className="px-3 py-2 flex items-center justify-between">
-                                                                            <span className="text-[11px] text-[#dcdcaa]">⚡ Manual Override</span>
-                                                                            <span className="text-[12px] text-[#dcdcaa] font-semibold">{Number(overrideScore).toFixed(1)} pts</span>
+                                                                    </div>
+                                                                    <div className="px-3 py-2.5">
+                                                                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                                            <span className="text-[12px] text-[#c586c0]">Rubric</span>
+                                                                            <span className="text-[12px] text-white font-semibold">{Number(rubricScore).toFixed(1)} pts</span>
                                                                         </div>
-                                                                    )}
-                                                                    {Number(latePenalty) > 0 && (
-                                                                        <div className="px-3 py-2 flex items-center justify-between">
-                                                                            <span className="text-[11px] text-[#f44747]">⏰ Late Penalty</span>
-                                                                            <span className="text-[12px] text-[#f44747] font-semibold">-{Number(latePenalty).toFixed(0)}%</span>
+                                                                        <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                                            <div className="h-full bg-[#c586c0] rounded-full"
+                                                                                style={{ width: `${maxScore > 0 ? Math.min(100, (Number(rubricScore) / maxScore) * 100) : 0}%` }} />
                                                                         </div>
-                                                                    )}
+                                                                    </div>
                                                                 </div>
                                                             </div>
 
@@ -1608,9 +1591,14 @@ export default function StudentAssignmentPage() {
                                                                     </div>
                                                                     <div className="divide-y divide-[#3c3c3c]">
                                                                         {latestSubmissionDetail.rubric_scores.map((rs, idx) => {
-                                                                            const itemMax = Number(rs.max_score ?? 0)
+                                                                            const rubricItem = assignment?.rubric?.items?.find((item: any) => item?.id === rs.rubric_item_id)
+                                                                            const rubricScaleMax = Number(rubricItem?.max_points ?? rs?.item?.max_points ?? 0)
+                                                                            const criterionMaxPoints = Number(rubricItem?.points ?? rs.max_score ?? 0)
                                                                             const itemScore = Number(rs.score ?? 0)
-                                                                            const itemPct = itemMax > 0 ? (itemScore / itemMax) * 100 : 0
+                                                                            const weightedCriterionScore = rubricScaleMax > 0
+                                                                                ? (itemScore / rubricScaleMax) * criterionMaxPoints
+                                                                                : itemScore
+                                                                            const itemPct = criterionMaxPoints > 0 ? (weightedCriterionScore / criterionMaxPoints) * 100 : 0
                                                                             const itemColor = itemPct >= 90 ? '#4ec9b0' : itemPct >= 70 ? '#dcdcaa' : itemPct >= 50 ? '#ce9178' : '#f44747'
                                                                             return (
                                                                                 <div key={`${rs.rubric_item_id}-${idx}`} className="px-3 py-3 hover:bg-[#2a2d2e]">
@@ -1619,16 +1607,21 @@ export default function StudentAssignmentPage() {
                                                                                             {rs?.item?.name || `Criterion ${idx + 1}`}
                                                                                         </span>
                                                                                         <span className="text-[11px] font-semibold shrink-0" style={{ color: itemColor }}>
-                                                                                            {itemScore.toFixed(1)}/{itemMax.toFixed(1)}
+                                                                                            {weightedCriterionScore.toFixed(1)}/{criterionMaxPoints.toFixed(1)}
                                                                                         </span>
                                                                                     </div>
+                                                                                    {rubricScaleMax > 0 && criterionMaxPoints > 0 && (
+                                                                                        <p className="text-[10px] text-[#9a9a9a] mb-1.5">
+                                                                                            {itemScore.toFixed(1)}/{rubricScaleMax.toFixed(1)} × {criterionMaxPoints.toFixed(1)} = {weightedCriterionScore.toFixed(1)} pts
+                                                                                        </p>
+                                                                                    )}
                                                                                     <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
                                                                                         <div className="h-full rounded-full transition-all duration-500"
                                                                                             style={{ width: `${itemPct}%`, backgroundColor: itemColor }} />
                                                                                     </div>
                                                                                     {rs.comment && (
                                                                                         <p className="mt-2 text-[11px] text-[#a0a0a0] whitespace-pre-wrap leading-relaxed bg-[#1e1e1e] rounded p-2 border border-[#3c3c3c]">
-                                                                                            💬 {rs.comment}
+                                                                                            {rs.comment}
                                                                                         </p>
                                                                                     )}
                                                                                 </div>
@@ -1875,7 +1868,7 @@ export default function StudentAssignmentPage() {
                                                                     <div className="flex items-center gap-1.5">
                                                                         <span className="text-[12px] font-medium text-white truncate">{member.full_name}</span>
                                                                         {member.is_leader && (
-                                                                            <Crown className="w-3 h-3 text-[#dcdcaa] shrink-0" title="Group Leader" />
+                                                                            <Crown className="w-3 h-3 text-[#dcdcaa] shrink-0" />
                                                                         )}
                                                                     </div>
                                                                     {member.student_id && (

@@ -17,7 +17,6 @@ import { BackLink } from '@/components/ui/BackLink';
 import {
     UserCog,
     UserPlus,
-    RefreshCw,
     Search,
     Trash2,
     Mail,
@@ -64,7 +63,7 @@ export default function CourseAssistantsPage() {
         });
     };
 
-    const { data: assistants = [], isLoading, isFetching, refetch } = useQuery({
+    const { data: assistants = [], isLoading } = useQuery({
         queryKey: ['course-assistants', courseId],
         queryFn: () => apiClient.getCourseAssistants(courseId) as Promise<AssistantInCourse[]>,
         enabled: !!courseId,
@@ -172,16 +171,6 @@ export default function CourseAssistantsPage() {
         <>
             <div className="space-y-6 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => refetch()}
-                        disabled={isFetching}
-                        className="gap-2"
-                    >
-                        <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
                     <Button
                         size="sm"
                         onClick={() => setAddModal(true)}

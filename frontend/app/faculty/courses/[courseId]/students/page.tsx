@@ -22,7 +22,6 @@ import {
     UserPlus,
     Upload,
     Search,
-    RefreshCw,
     GraduationCap,
     UserMinus,
     AlertCircle,
@@ -76,7 +75,7 @@ export default function CourseStudentsPage() {
         });
     };
 
-    const { data: students = [], isLoading, isFetching, refetch } = useQuery({
+    const { data: students = [], isLoading } = useQuery({
         queryKey: ['course-students', courseId],
         queryFn: () => apiClient.getCourseStudents(courseId) as Promise<StudentInCourse[]>,
         enabled: !!courseId,
@@ -216,16 +215,6 @@ export default function CourseStudentsPage() {
         <>
             <div className="space-y-6 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => refetch()}
-                            disabled={isFetching}
-                            className="gap-2"
-                        >
-                            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-                            Refresh
-                        </Button>
                         <Button variant="outline" size="sm" onClick={() => setEnrollModal(true)} className="gap-2">
                             <UserPlus className="w-4 h-4" /> Enroll
                         </Button>
@@ -335,6 +324,7 @@ export default function CourseStudentsPage() {
                 onClose={() => setEnrollModal(false)}
                 courseInfo={course ? { code: course.code, name: course.name } : undefined}
                 invalidateKeys={[['course-students', courseId], ['course', courseId]]}
+                enrolledStudentIds={students.map(s => s.id)}
                 onSuccess={(data) => {
                     if (data.student_not_found) {
                         showNotification('warning', data.message || 'Student is not in the system. Request sent to admin.');

@@ -51,12 +51,7 @@ interface TestCaseItem {
     description?: string;
     input_data?: string;
     expected_output?: string;
-    test_code?: string;
-    setup_code?: string;
-    teardown_code?: string;
-    points: number;
     is_hidden: boolean;
-    is_sample: boolean;
     ignore_whitespace: boolean;
     ignore_case: boolean;
     use_regex: boolean;
@@ -67,15 +62,25 @@ interface TestCaseItem {
     updated_at?: string;
 }
 
+interface RubricItem {
+    id: number;
+    name: string;
+    description?: string | null;
+    weight?: number;
+    points: number;
+    min_points: number;
+    max_points: number;
+}
+
 interface Assignment {
     id: number;
     course_id: number;
     title: string;
     description?: string;
     instructions?: string;
-    difficulty: string;
     due_date?: string;
     is_published: boolean;
+    grades_published: boolean;
     max_score: number;
     passing_score: number;
     max_attempts: number;
@@ -83,8 +88,6 @@ interface Assignment {
     late_penalty_per_day?: number;
     max_late_days?: number;
     language_id?: number;
-    test_weight: number;
-    rubric_weight: number;
     enable_plagiarism_check: boolean;
     enable_ai_detection: boolean;
     plagiarism_threshold?: number;
@@ -94,6 +97,7 @@ interface Assignment {
     max_file_size_mb?: number;
     submission_count?: number;
     test_cases?: TestCaseItem[];
+    rubric?: { items: RubricItem[]; total_points: number } | null;
     created_at: string;
     updated_at?: string;
 }
@@ -199,14 +203,6 @@ const formatDate = (dateString: string) =>
 const formatDateTime = (dateString: string) =>
     format(new Date(dateString), 'MMM dd, yyyy · hh:mm a');
 
-const getDifficultyStyle = (d?: string) => {
-    switch (d) {
-        case 'easy': return 'bg-green-100 text-green-800';
-        case 'medium': return 'bg-amber-100 text-amber-800';
-        case 'hard': return 'bg-red-100 text-red-800';
-        default: return 'bg-gray-100 text-gray-800';
-    }
-};
 
 const getStatusBadge = (status: string) => {
     switch (status) {
@@ -307,6 +303,26 @@ export default function AssignmentDetailPageContent() {
     const publishMutation = useMutation({
         mutationFn: () => apiClient.publishAssignment(assignmentId),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assignment', assignmentId] }),
+    });
+
+    const [publishGradesConfirm, setPublishGradesConfirm] = useState(false);
+    const [publishGradesSuccess, setPublishGradesSuccess] = useState(false);
+    const publishGradesMutation = useMutation({
+        mutationFn: () => apiClient.publishGrades(assignmentId),
+        onSuccess: () => {
+            setPublishGradesConfirm(false);
+            setPublishGradesSuccess(true);
+            queryClient.invalidateQueries({ queryKey: ['assignment', assignmentId] });
+        },
+    });
+
+    const [hideGradesConfirm, setHideGradesConfirm] = useState(false);
+    const hideGradesMutation = useMutation({
+        mutationFn: () => apiClient.hideGrades(assignmentId),
+        onSuccess: () => {
+            setHideGradesConfirm(false);
+            queryClient.invalidateQueries({ queryKey: ['assignment', assignmentId] });
+        },
     });
 
     const deleteMutation = useMutation({
@@ -473,7 +489,7 @@ export default function AssignmentDetailPageContent() {
     const resetTCForm = () => {
         setTCForm({
             name: '', description: '', input_data: '', expected_output: '',
-            points: 10, is_hidden: false, is_sample: false,
+            is_hidden: false,
             ignore_whitespace: true, ignore_case: false, use_regex: false,
             time_limit_seconds: undefined, memory_limit_mb: undefined, order: testCases.length,
         });
@@ -499,9 +515,7 @@ export default function AssignmentDetailPageContent() {
                 description: tcForm.description?.trim() || null,
                 input_data: tcForm.input_data?.trim() || null,
                 expected_output: tcForm.expected_output?.trim() || null,
-                points: tcForm.points ?? 10,
                 is_hidden: tcForm.is_hidden ?? false,
-                is_sample: tcForm.is_sample ?? false,
                 ignore_whitespace: tcForm.ignore_whitespace ?? true,
                 ignore_case: tcForm.ignore_case ?? false,
                 use_regex: tcForm.use_regex ?? false,
@@ -725,6 +739,7 @@ export default function AssignmentDetailPageContent() {
     const isOverdue = dueDate && dueDate < new Date();
 
     return (
+        <>
         <div className="space-y-6 pb-8">
                     {/* ─── Header Banner ─── */}
                     <div className="rounded-2xl text-white relative overflow-hidden" style={headerGradient}>
@@ -756,9 +771,6 @@ export default function AssignmentDetailPageContent() {
                                         }`}>
                                             {assignment.is_published ? <><Eye className="w-3 h-3" /> Published</> : <><EyeOff className="w-3 h-3" /> Draft</>}
                                         </span>
-                                        <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-white/20 capitalize">
-                                            {assignment.difficulty}
-                                        </span>
                                         {isOverdue && (
                                             <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold bg-white/30">
                                                 Past Due
@@ -780,6 +792,23 @@ export default function AssignmentDetailPageContent() {
                                         >
                                             {publishMutation.isPending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
                                             Publish
+                                        </Button>
+                                    )}
+                                    {assignment.is_published && !assignment.grades_published && (
+                                        <Button
+                                            onClick={() => setPublishGradesConfirm(true)}
+                                            className="bg-white/20 hover:bg-white/30 text-white border-0 gap-2"
+                                        >
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            Publish Grades
+                                        </Button>
+                                    )}
+                                    {assignment.grades_published && (
+                                        <Button
+                                            onClick={() => setHideGradesConfirm(true)}
+                                            className="bg-green-500/30 hover:bg-red-500/40 text-white border-0 gap-2"
+                                        >
+                                            <CheckCircle2 className="w-4 h-4" /> Grades Published · Hide
                                         </Button>
                                     )}
                                     <Link href={`/${basePath}/courses/${courseId}/assignments/${assignmentId}/edit`}>
@@ -895,8 +924,8 @@ export default function AssignmentDetailPageContent() {
                                                 <FlaskConical className="w-5 h-5" style={{ color: accentColor }} />
                                             </div>
                                             <div>
-                                                <p className="text-2xl font-bold text-gray-900">{assignment.test_weight}%</p>
-                                                <p className="text-xs text-gray-500">Test Weight</p>
+                                                <p className="text-2xl font-bold text-gray-900">{testCases.length}</p>
+                                                <p className="text-xs text-gray-500">Test Cases</p>
                                             </div>
                                         </div>
                                     </CardContent>
@@ -994,7 +1023,7 @@ export default function AssignmentDetailPageContent() {
                                                             }`}>
                                                             <div className="flex items-center gap-3 px-4 py-3">
                                                                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                                                                    tc.is_hidden ? 'bg-gray-100 text-gray-500' : tc.is_sample ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'
+                                                                    tc.is_hidden ? 'bg-gray-100 text-gray-500' : 'bg-purple-100 text-purple-600'
                                                                 }`}>
                                                                     {idx + 1}
                                                                 </div>
@@ -1002,12 +1031,10 @@ export default function AssignmentDetailPageContent() {
                                                                     <div className="flex items-center gap-2">
                                                                         <p className="text-sm font-semibold text-gray-900 truncate">{tc.name}</p>
                                                                         {tc.is_hidden && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">Hidden</span>}
-                                                                        {tc.is_sample && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 font-medium">Sample</span>}
                                                                     </div>
                                                                     {tc.description && <p className="text-xs text-gray-500 truncate mt-0.5">{tc.description}</p>}
                                                                 </div>
                                                                 <div className="flex items-center gap-2 shrink-0">
-                                                                    <span className="text-sm font-bold text-purple-600">{tc.points} pts</span>
                                                                     {tc.time_limit_seconds && (
                                                                         <span className="text-xs text-gray-400">{tc.time_limit_seconds}s</span>
                                                                     )}
@@ -1047,7 +1074,6 @@ export default function AssignmentDetailPageContent() {
                                                     {testCases.length > 0 && (
                                                         <div className="flex items-center justify-between pt-2 px-1 border-t border-gray-100 mt-2">
                                                             <span className="text-xs text-gray-500">{testCases.length} test case{testCases.length !== 1 ? 's' : ''}</span>
-                                                            <span className="text-sm font-bold text-gray-900">{testCases.reduce((s, t) => s + t.points, 0)} total pts</span>
                                                         </div>
                                                     )}
                                                 </div>
@@ -1074,20 +1100,12 @@ export default function AssignmentDetailPageContent() {
                                                         </div>
                                                     )}
 
-                                                    {/* Name & Points */}
-                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                        <div className="sm:col-span-2">
-                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
-                                                            <input value={tcForm.name || ''} onChange={e => setTCForm(p => ({ ...p, name: e.target.value }))}
-                                                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733]/30 focus:border-[#862733]"
-                                                                placeholder="e.g. Basic Addition" />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Points</label>
-                                                            <input type="number" min={0} step={0.5} value={tcForm.points ?? 10}
-                                                                onChange={e => setTCForm(p => ({ ...p, points: parseFloat(e.target.value) || 0 }))}
-                                                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733]/30 focus:border-[#862733]" />
-                                                        </div>
+                                                    {/* Name */}
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+                                                        <input value={tcForm.name || ''} onChange={e => setTCForm(p => ({ ...p, name: e.target.value }))}
+                                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733]/30 focus:border-[#862733]"
+                                                            placeholder="e.g. Basic Addition" />
                                                     </div>
 
                                                     {/* Description */}
@@ -1120,7 +1138,6 @@ export default function AssignmentDetailPageContent() {
                                                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                                             {([
                                                                 { key: 'is_hidden', label: 'Hidden', desc: 'Not shown to students' },
-                                                                { key: 'is_sample', label: 'Sample', desc: 'Visible as example' },
                                                                 { key: 'ignore_whitespace', label: 'Ignore Whitespace', desc: 'Trim whitespace when comparing' },
                                                                 { key: 'ignore_case', label: 'Ignore Case', desc: 'Case-insensitive comparison' },
                                                                 { key: 'use_regex', label: 'Use Regex', desc: 'Match via regex pattern' },
@@ -1251,23 +1268,34 @@ export default function AssignmentDetailPageContent() {
                                             </div>
                                         </CardContent>
                                     </Card>
-                                    <Card>
-                                        <CardHeader><CardTitle className="text-base">Grading Weights</CardTitle></CardHeader>
-                                        <CardContent>
-                                            <div className="flex rounded-full overflow-hidden h-3 bg-gray-200">
-                                                <div className="bg-blue-500 transition-all" style={{ width: `${assignment.test_weight}%` }} />
-                                                <div className="bg-purple-500 transition-all" style={{ width: `${assignment.rubric_weight}%` }} />
-                                            </div>
-                                            <div className="flex justify-between mt-2 text-xs text-gray-600">
-                                                <span className="flex items-center gap-1">
-                                                    <span className="w-2 h-2 rounded-full bg-blue-500" /> Tests {assignment.test_weight}%
-                                                </span>
-                                                <span className="flex items-center gap-1">
-                                                    <span className="w-2 h-2 rounded-full bg-purple-500" /> Rubric {assignment.rubric_weight}%
-                                                </span>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
+                                    {assignment.rubric && assignment.rubric.items.length > 0 && (
+                                        <Card>
+                                            <CardHeader>
+                                                <CardTitle className="text-base flex items-center gap-2">
+                                                    <Target className="w-4 h-4" style={{ color: accentColor }} />
+                                                    Rubric
+                                                    <span className="text-sm font-normal text-gray-400">
+                                                        ({assignment.rubric.total_points} pts)
+                                                    </span>
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="space-y-2">
+                                                {assignment.rubric.items.map((item) => (
+                                                    <div key={item.id} className="flex items-start justify-between gap-3 py-1.5 border-b border-gray-100 last:border-0">
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium text-gray-800 truncate">{item.name}</p>
+                                                            {item.description && (
+                                                                <p className="text-xs text-gray-500 truncate">{item.description}</p>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-sm font-semibold flex-shrink-0" style={{ color: accentColor }}>
+                                                            {item.max_points} pts
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </CardContent>
+                                        </Card>
+                                    )}
                                     <Card>
                                         <CardContent className="p-4 text-sm text-gray-500 space-y-1">
                                             <p>Created {formatDate(assignment.created_at)}</p>
@@ -1756,7 +1784,7 @@ export default function AssignmentDetailPageContent() {
                                                         <div>
                                                             <h3 className="text-lg font-bold text-gray-900">Plagiarism Report</h3>
                                                             <p className="text-sm text-gray-500">
-                                                                N-gram fingerprinting with Jaccard similarity · Threshold: {assignment.plagiarism_threshold ?? 30}%
+                                                                Threshold: {assignment.plagiarism_threshold ?? 30}%
                                                             </p>
                                                         </div>
                                                     </div>
@@ -2063,11 +2091,7 @@ export default function AssignmentDetailPageContent() {
                                                                             </div>
                                                                         </div>
                                                                     ) : sub.plagiarism_checked ? (
-                                                                        <div className="text-center py-8 bg-white rounded-xl border border-gray-200">
-                                                                            <CheckCircle2 className="w-10 h-10 mx-auto text-green-500 mb-3" />
-                                                                            <p className="text-sm font-medium text-gray-700">No suspicious matches</p>
-                                                                            <p className="text-xs text-gray-500 mt-1">This submission appears to be original work.</p>
-                                                                        </div>
+                                                                        null
                                                                     ) : (
                                                                         <div className="text-center py-8 bg-white rounded-xl border border-dashed border-gray-300">
                                                                             <Shield className="w-10 h-10 mx-auto text-gray-300 mb-3" />
@@ -2099,5 +2123,114 @@ export default function AssignmentDetailPageContent() {
                         </div>
                     )}
                 </div>
+
+            {/* Publish Grades confirmation modal */}
+            <Modal
+                isOpen={publishGradesConfirm}
+                onClose={() => !publishGradesMutation.isPending && setPublishGradesConfirm(false)}
+                title="Publish Grades"
+                description="Students will be able to see their scores and feedback after publishing."
+                size="sm"
+            >
+                <div className="space-y-4">
+                    <div className="flex items-start gap-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-amber-800">
+                            Are you sure you want to publish the grades? Students will be notified and will be able to see their scores immediately.
+                        </p>
+                    </div>
+                    {publishGradesMutation.isError && (
+                        <p className="text-sm text-red-600">Failed to publish grades. Please try again.</p>
+                    )}
+                </div>
+                <ModalFooter>
+                    <Button
+                        variant="outline"
+                        onClick={() => setPublishGradesConfirm(false)}
+                        disabled={publishGradesMutation.isPending}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={() => publishGradesMutation.mutate()}
+                        disabled={publishGradesMutation.isPending}
+                        className="bg-green-600 hover:bg-green-700 text-white gap-2"
+                    >
+                        {publishGradesMutation.isPending
+                            ? <><RefreshCw className="w-4 h-4 animate-spin" /> Publishing…</>
+                            : <><CheckCircle2 className="w-4 h-4" /> Yes, Publish Grades</>
+                        }
+                    </Button>
+                </ModalFooter>
+            </Modal>
+
+            {/* Publish Grades success modal */}
+            <Modal
+                isOpen={publishGradesSuccess}
+                onClose={() => setPublishGradesSuccess(false)}
+                title=""
+                size="sm"
+            >
+                <div className="flex flex-col items-center text-center py-4 gap-4">
+                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
+                        <CheckCircle2 className="w-9 h-9 text-green-600" />
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-900">Grades Published!</h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                            Students can now see their scores for <span className="font-medium text-gray-700">{assignment?.title}</span>.
+                        </p>
+                    </div>
+                </div>
+                <ModalFooter>
+                    <Button
+                        className="w-full bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => setPublishGradesSuccess(false)}
+                    >
+                        Done
+                    </Button>
+                </ModalFooter>
+            </Modal>
+
+            {/* Hide Grades confirmation modal */}
+            <Modal
+                isOpen={hideGradesConfirm}
+                onClose={() => !hideGradesMutation.isPending && setHideGradesConfirm(false)}
+                title="Hide Grades"
+                description="Students will no longer be able to see their scores."
+                size="sm"
+            >
+                <div className="space-y-4">
+                    <div className="flex items-start gap-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-amber-800">
+                            Are you sure you want to hide the grades? Students will lose access to their scores until you publish them again.
+                        </p>
+                    </div>
+                    {hideGradesMutation.isError && (
+                        <p className="text-sm text-red-600">Failed to hide grades. Please try again.</p>
+                    )}
+                </div>
+                <ModalFooter>
+                    <Button
+                        variant="outline"
+                        onClick={() => setHideGradesConfirm(false)}
+                        disabled={hideGradesMutation.isPending}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={() => hideGradesMutation.mutate()}
+                        disabled={hideGradesMutation.isPending}
+                        className="bg-red-600 hover:bg-red-700 text-white gap-2"
+                    >
+                        {hideGradesMutation.isPending
+                            ? <><RefreshCw className="w-4 h-4 animate-spin" /> Hiding…</>
+                            : <><EyeOff className="w-4 h-4" /> Yes, Hide Grades</>
+                        }
+                    </Button>
+                </ModalFooter>
+            </Modal>
+        </>
     );
 }

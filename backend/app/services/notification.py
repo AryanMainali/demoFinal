@@ -143,13 +143,12 @@ def notify_student_grade_posted(
 ) -> Optional[Notification]:
     """Create grade posted notification for student"""
     try:
-        percentage = (score / max_score * 100) if max_score > 0 else 0
         notification = create_notification(
             db=db,
             user_id=student_id,
             notification_type=NotificationType.GRADE_POSTED,
-            title="Grade Posted",
-            message=f"Your grade for {assignment_title} in {course_code} has been posted: {score}/{max_score} ({percentage:.1f}%)",
+            title="Assignment Graded",
+            message=f"{assignment_title} in {course_code} has been graded.",
             link=f"/student/grades",
             course_id=course_id,
             assignment_id=assignment_id,
