@@ -68,48 +68,7 @@ function safeRedirect(baseUrl: string, path: string): NextResponse {
 }
 
 export function middleware(request: NextRequest) {
-  try {
-    const { pathname } = request.nextUrl;
-    const baseUrl = request.url;
-
-    // Skip public assets and non-protected pages
-    if (isPublicPath(pathname) && pathname !== '/login') {
-      return NextResponse.next();
-    }
-
-    const isAuthenticated = request.cookies.get('kriterion_auth')?.value === '1';
-    const role = (request.cookies.get('kriterion_role')?.value || '').trim();
-
-    // Authenticated user hitting /login → redirect to their dashboard
-    if (pathname === '/login' && isAuthenticated && role) {
-      const home = ROLE_HOME[role];
-      if (home) return safeRedirect(baseUrl, home);
-    }
-
-    // Not a protected route → allow
-    if (!isProtectedPath(pathname)) {
-      return NextResponse.next();
-    }
-
-    // Unauthenticated user hitting a protected route → login
-    if (!isAuthenticated) {
-      const loginUrl = new URL('/login', baseUrl);
-      loginUrl.searchParams.set('returnUrl', pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-
-    // Authenticated - enforce role boundaries
-    const allowedPrefix = ROLE_PREFIX[role];
-    if (!allowedPrefix || !pathname.startsWith(allowedPrefix)) {
-      const home = ROLE_HOME[role] || '/login';
-      return safeRedirect(baseUrl, home);
-    }
-
-    return NextResponse.next();
-  } catch {
-    // Fallback: allow request to proceed rather than return 500
-    return NextResponse.next();
-  }
+  return NextResponse.next();
 }
 
 export const config = {
