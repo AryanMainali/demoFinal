@@ -1,0 +1,30 @@
+{
+  "model_type": "XGBClassifier",
+  "embedding_model": "all-MiniLM-L6-v2",
+  "embedding_dim": 384,
+  "structural_features": [
+    "lines",
+    "code_lines",
+    "comments",
+    "functions",
+    "blank_lines",
+    "comment_ratio",
+    "blank_ratio",
+    "code_ratio",
+    "avg_line_len",
+    "max_line_len",
+    "func_density"
+  ],
+  "threshold": 0.5,
+  "val_roc_auc": 0.8556386142593038,
+  "val_f1": 0.730186999109528,
+  "val_accuracy": 0.8002636783124588,
+  "cv_roc_auc_mean": 0.8556386142593038,
+  "n_train": 15166,
+  "n_human": 9510,
+  "n_ai": 5656,
+  "labels": {
+    "0": "human",
+    "1": "ai"
+  }
+}

@@ -789,6 +789,17 @@ class ApiClient {
         return response.data;
     }
 
+    // AI Detection endpoints
+    async checkAI(submissionId: number) {
+        const response = await this.client.post(`/submissions/${submissionId}/check-ai`);
+        return response.data;
+    }
+
+    async checkAIAll(assignmentId: number) {
+        const response = await this.client.post(`/submissions/assignment/${assignmentId}/check-ai-all`);
+        return response.data;
+    }
+
     async reviewPlagiarismMatch(matchId: number, isConfirmed: boolean, reviewerNotes: string) {
         const formData = new FormData();
         formData.append('is_confirmed', String(isConfirmed));

@@ -516,7 +516,7 @@ def seed_database():
                     for cat in cats
                     for item in cat.get("items", [])
                 )
-                rubric = Rubric(assignment_id=asgn.id, total_points=rubric_total)
+                rubric = Rubric(assignment_id=asgn.id, min_points=0.0, max_points=float(rubric_total))
                 db.add(rubric)
                 db.commit()
                 db.refresh(rubric)

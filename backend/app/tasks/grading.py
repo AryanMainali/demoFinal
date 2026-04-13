@@ -141,3 +141,22 @@ def check_plagiarism_task(self, submission_id: int):
     except Exception as e:
         logger.error(f"Plagiarism check failed for submission {submission_id}: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.grading.check_ai_detection_task",
+    max_retries=2,
+    default_retry_delay=60,
+)
+def check_ai_detection_task(self, submission_id: int):
+    """Run AI-generated code detection on a submission after grading completes."""
+    try:
+        from ai_detection.service import check_submission
+        result = check_submission(self.db, submission_id, force=False)
+        logger.info(f"AI detection for submission {submission_id}: verdict={result.get('verdict')} score={result.get('ai_score')}")
+        return result
+    except Exception as e:
+        logger.error(f"AI detection failed for submission {submission_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))

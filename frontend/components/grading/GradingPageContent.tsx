@@ -261,8 +261,9 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
     const [fileContents, setFileContents] = useState<Record<number, FileContent>>({});
     const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
     const [loadingFile, setLoadingFile] = useState(false);
-    const [rightPanel, setRightPanel] = useState<'grading' | 'feedback' | 'tests' | 'description' | 'rubric' | 'plagiarism' | 'custom'>('grading');
+    const [rightPanel, setRightPanel] = useState<'grading' | 'feedback' | 'tests' | 'description' | 'rubric' | 'plagiarism' | 'ai' | 'custom'>('grading');
     const [checkingPlagiarism, setCheckingPlagiarism] = useState(false);
+    const [checkingAI, setCheckingAI] = useState(false);
     const [plagiarismMatches, setPlagiarismMatches] = useState<any[]>([]);
     const [panelOpen, setPanelOpen] = useState(true);
     const [activePanel, setActivePanel] = useState<'output' | 'tests'>('output');
@@ -742,6 +743,28 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
         }
     };
 
+    const runAICheck = async () => {
+        if (!selectedSub) return;
+        setCheckingAI(true);
+        try {
+            const result = await apiClient.checkAI(selectedSub.id);
+            await queryClient.invalidateQueries({ queryKey: ['assignment-submissions', assignmentId] });
+            await queryClient.invalidateQueries({ queryKey: ['submission-detail', selectedSub.id] });
+            if (result?.error) {
+                toast({ title: 'AI Detection Error', description: result.error, variant: 'destructive' });
+            } else {
+                const verdict = result?.verdict ?? 'Done';
+                const score = result?.ai_score !== undefined ? ` (${result.ai_score.toFixed(1)}%)` : '';
+                toast({ title: 'AI Detection Complete', description: `Verdict: ${verdict}${score}` });
+            }
+        } catch (err: any) {
+            const detail = err?.response?.data?.detail || 'AI detection failed';
+            toast({ title: 'AI Detection Failed', description: detail, variant: 'destructive' });
+        } finally {
+            setCheckingAI(false);
+        }
+    };
+
     const runCode = async () => {
         if (!selectedSub || !assignment) return;
 
@@ -1174,6 +1197,13 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                             className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'plagiarism' ? 'bg-purple-500/30 text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
                             <Shield className="w-3 h-3" /> Plagiarism
                             {selectedSub?.plagiarism_flagged && <span className="w-1.5 h-1.5 rounded-full bg-[#f44747]" />}
+                        </button>
+                    )}
+                    {!isAssistant && (
+                        <button onClick={() => setRightPanel('ai')}
+                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'ai' ? 'bg-orange-500/30 text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
+                            <Eye className="w-3 h-3" /> AI Detection
+                            {selectedSub?.ai_flagged && <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />}
                         </button>
                     )}
                     <div className="w-px h-4 bg-[#5a5a5a] mx-1" />
@@ -1736,6 +1766,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                             {rightPanel === 'description' && <><BookOpen className="w-4 h-4 text-[#862733]" /> Assignment Info</>}
                             {rightPanel === 'rubric' && <><FileText className="w-4 h-4 text-[#862733]" /> Rubric</>}
                             {rightPanel === 'plagiarism' && <><Shield className="w-4 h-4 text-purple-500" /> Plagiarism</>}
+                            {rightPanel === 'ai' && <><Eye className="w-4 h-4 text-orange-400" /> AI Detection</>}
                             {rightPanel === 'custom' && <><UploadIcon className="w-4 h-4 text-[#862733]" /> Custom Input</>}
                         </div>
                     </div>
@@ -2344,6 +2375,99 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 </div>
                                             ))}
                                         </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {rightPanel === 'ai' && selectedSub && (
+                            <div className="space-y-4">
+                                {/* Score card */}
+                                <div className={`rounded-lg p-3 border ${selectedSub.ai_flagged ? 'bg-orange-900/20 border-orange-500/30' : 'bg-[#1e1e1e] border-[#3c3c3c]'}`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-[11px] text-[#858585] uppercase tracking-wider">AI Probability Score</p>
+                                        {selectedSub.ai_flagged && (
+                                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 font-semibold">FLAGGED</span>
+                                        )}
+                                    </div>
+                                    <p className={`text-2xl font-bold ${selectedSub.ai_flagged ? 'text-orange-400' : selectedSub.ai_score !== null && selectedSub.ai_score > 40 ? 'text-[#dcdcaa]' : 'text-[#4ec9b0]'}`}>
+                                        {selectedSub.ai_checked && selectedSub.ai_score !== null
+                                            ? `${selectedSub.ai_score.toFixed(1)}%`
+                                            : 'Not checked'}
+                                    </p>
+                                    {selectedSub.ai_checked && (
+                                        <p className="text-[10px] text-[#858585] mt-1">
+                                            {selectedSub.ai_flagged
+                                                ? 'High likelihood of AI-generated code detected'
+                                                : selectedSub.ai_score !== null && selectedSub.ai_score > 40
+                                                    ? 'Some AI characteristics detected — review manually'
+                                                    : 'Code appears to be human-written'}
+                                        </p>
+                                    )}
+                                    {!selectedSub.ai_checked && (
+                                        <p className="text-[10px] text-[#858585] mt-1">Run a check to detect AI-generated code patterns</p>
+                                    )}
+                                </div>
+
+                                {/* Run button */}
+                                <button
+                                    onClick={runAICheck}
+                                    disabled={checkingAI}
+                                    className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-orange-600/20 border border-orange-500/30 text-orange-400 hover:bg-orange-600/30 transition-colors text-[11px] font-medium disabled:opacity-50"
+                                >
+                                    {checkingAI
+                                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing...</>
+                                        : <><Eye className="w-3.5 h-3.5" /> {selectedSub.ai_checked ? 'Re-run AI Detection' : 'Run AI Detection'}</>}
+                                </button>
+
+                                {/* Verdict details */}
+                                {selectedSub.ai_checked && (
+                                    <div className="space-y-2">
+                                        {/* Confidence bar */}
+                                        <div className="rounded-lg p-3 bg-[#252526] border border-[#3c3c3c]">
+                                            <div className="flex items-center justify-between mb-1.5">
+                                                <span className="text-[10px] text-[#858585]">Confidence</span>
+                                                <span className="text-[10px] text-[#cccccc] font-medium">
+                                                    {selectedSub.ai_score !== null ? `${selectedSub.ai_score.toFixed(1)}%` : '—'}
+                                                </span>
+                                            </div>
+                                            <div className="h-2 rounded-full bg-[#333] overflow-hidden">
+                                                <div
+                                                    className={`h-full rounded-full transition-all ${
+                                                        selectedSub.ai_flagged ? 'bg-orange-500'
+                                                            : selectedSub.ai_score !== null && selectedSub.ai_score > 40 ? 'bg-[#dcdcaa]'
+                                                                : 'bg-[#4ec9b0]'
+                                                    }`}
+                                                    style={{ width: `${Math.min(selectedSub.ai_score ?? 0, 100)}%` }}
+                                                />
+                                            </div>
+                                            {/* threshold marker at 50% */}
+                                            <div className="relative h-0">
+                                                <div className="absolute top-[-10px] border-l-2 border-dashed border-[#858585] h-[10px]" style={{ left: '50%' }} />
+                                            </div>
+                                            <p className="text-[9px] text-[#858585] mt-2">Threshold marker at 50%</p>
+                                        </div>
+
+                                        {/* What this means */}
+                                        <div className="rounded-lg p-3 bg-[#252526] border border-[#3c3c3c] space-y-2">
+                                            <p className="text-[10px] text-[#858585] uppercase tracking-wider">How to interpret</p>
+                                            <div className="flex items-start gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-[#4ec9b0] mt-0.5 shrink-0" />
+                                                <p className="text-[10px] text-[#858585]">&lt; 35% — Likely human-written</p>
+                                            </div>
+                                            <div className="flex items-start gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-[#dcdcaa] mt-0.5 shrink-0" />
+                                                <p className="text-[10px] text-[#858585]">35–65% — Uncertain, review manually</p>
+                                            </div>
+                                            <div className="flex items-start gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full bg-orange-500 mt-0.5 shrink-0" />
+                                                <p className="text-[10px] text-[#858585]">&gt; 65% — High AI likelihood, flagged</p>
+                                            </div>
+                                        </div>
+
+                                        <p className="text-[9px] text-[#858585] text-center">
+                                            This is a probabilistic estimate. Use alongside manual review.
+                                        </p>
                                     </div>
                                 )}
                             </div>

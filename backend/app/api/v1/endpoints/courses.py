@@ -72,7 +72,7 @@ class StudentInCourse(BaseModel):
     current_grade: Optional[float] = None
 
 
-@router.post("/", response_model=CourseSchema, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=CourseSchema, status_code=status.HTTP_201_CREATED)
 def create_course(
     course_in: CourseCreate,
     current_user: User = Depends(require_roles(UserRole.FACULTY, UserRole.ADMIN)),
@@ -141,7 +141,7 @@ def create_course(
     return course
 
 
-@router.get("/", response_model=List[CourseWithStats])
+@router.get("", response_model=List[CourseWithStats])
 def list_courses(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

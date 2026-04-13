@@ -638,16 +638,24 @@ async def create_submission(
     # (avoids blocking on slow/unreachable Redis connection)
     sub_id = submission.id
 
+    ai_detection_enabled = getattr(assignment, "enable_ai_detection", False)
+
     def _trigger_grading():
         try:
-            from app.tasks.grading import grade_submission_task, check_plagiarism_task
+            from app.tasks.grading import grade_submission_task, check_plagiarism_task, check_ai_detection_task
             from celery import chain as celery_chain
-            chain = celery_chain(
+            tasks = [
                 grade_submission_task.si(sub_id),
                 check_plagiarism_task.si(sub_id),
-            )
+            ]
+            if ai_detection_enabled:
+                tasks.append(check_ai_detection_task.si(sub_id))
+            chain = celery_chain(*tasks)
             chain.apply_async(queue="grading")
-            logger.info(f"Triggered Celery grading + plagiarism for submission {sub_id}")
+            logger.info(
+                f"Triggered Celery grading + plagiarism"
+                f"{' + AI detection' if ai_detection_enabled else ''} for submission {sub_id}"
+            )
         except Exception as e:
             logger.warning(f"Could not trigger Celery for submission {sub_id}: {e}")
 
@@ -1002,6 +1010,101 @@ def check_plagiarism(
     except Exception as e:
         logger.error(f"Plagiarism check failed for submission {submission_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Plagiarism check failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# AI Detection endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/{submission_id}/check-ai")
+def check_ai_detection(
+    submission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN, UserRole.ASSISTANT]))
+):
+    """Manually trigger AI-generated code detection for a single submission."""
+    submission = (
+        db.query(Submission)
+        .options(joinedload(Submission.assignment).joinedload(Assignment.course))
+        .filter(Submission.id == submission_id)
+        .first()
+    )
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if not _can_grade_for_course(db, current_user, submission.assignment.course_id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    from ai_detection.service import check_submission, model_available
+    if not model_available():
+        raise HTTPException(
+            status_code=503,
+            detail="AI detection model is not available. Run `python ai_detection/train.py` first.",
+        )
+    try:
+        result = check_submission(db, submission_id, force=True)
+        audit = AuditLog(
+            user_id=current_user.id,
+            event_type="ai_detection_check",
+            description=f"AI detection on submission {submission_id}: verdict={result.get('verdict')} score={result.get('ai_score')}",
+            status="success",
+        )
+        db.add(audit)
+        db.commit()
+        return result
+    except Exception as e:
+        logger.error(f"AI detection failed for submission {submission_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"AI detection failed: {str(e)}")
+
+
+@router.post("/assignment/{assignment_id}/check-ai-all")
+def check_ai_all(
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.FACULTY, UserRole.ADMIN]))
+):
+    """Run AI-generated code detection on ALL latest submissions for an assignment."""
+    assignment = (
+        db.query(Assignment)
+        .options(joinedload(Assignment.course))
+        .filter(Assignment.id == assignment_id)
+        .first()
+    )
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if not _can_grade_for_course(db, current_user, assignment.course_id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    from ai_detection.service import check_submission, model_available
+    if not model_available():
+        raise HTTPException(
+            status_code=503,
+            detail="AI detection model is not available. Run `python ai_detection/train.py` first.",
+        )
+
+    submissions = db.query(Submission).filter(Submission.assignment_id == assignment_id).all()
+    checked = 0
+    flagged = 0
+    errors = 0
+    for sub in submissions:
+        try:
+            result = check_submission(db, sub.id, force=True)
+            if result.get("ai_checked"):
+                checked += 1
+            if result.get("ai_flagged"):
+                flagged += 1
+        except Exception as e:
+            logger.error(f"AI detection failed for submission {sub.id}: {e}")
+            errors += 1
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        event_type="ai_detection_batch_check",
+        description=f"Batch AI detection for assignment {assignment_id}: {checked} checked, {flagged} flagged",
+        status="success",
+    )
+    db.add(audit)
+    db.commit()
+    return {"total_checked": checked, "total_flagged": flagged, "errors": errors}
 
 
 @router.post("/assignment/{assignment_id}/check-plagiarism-all")

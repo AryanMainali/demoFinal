@@ -258,7 +258,7 @@ export default function AssignmentDetailPageContent() {
     const courseId = useMemo(() => parseInt(courseIdStr, 10), [courseIdStr]);
     const assignmentId = useMemo(() => parseInt(assignmentIdStr, 10), [assignmentIdStr]);
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism' | 'ai_detection'>('overview');
     const [searchQuery, setSearchQuery] = useState('');
 
     // Test case management state
@@ -297,7 +297,7 @@ export default function AssignmentDetailPageContent() {
     const { data: submissions = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
         queryKey: ['assignment-submissions', assignmentId],
         queryFn: () => apiClient.getAssignmentSubmissions(assignmentId),
-        enabled: !!assignmentId && (activeTab === 'submissions' || activeTab === 'plagiarism'),
+        enabled: !!assignmentId && (activeTab === 'submissions' || activeTab === 'plagiarism' || activeTab === 'ai_detection'),
     });
 
     const publishMutation = useMutation({
@@ -332,6 +332,22 @@ export default function AssignmentDetailPageContent() {
 
     const [plagiarismRunning, setPlagiarismRunning] = useState(false);
     const [plagiarismResult, setPlagiarismResult] = useState<any>(null);
+    const [aiRunning, setAiRunning] = useState(false);
+    const [aiResult, setAiResult] = useState<any>(null);
+
+    const runAICheckAll = async () => {
+        setAiRunning(true);
+        setAiResult(null);
+        try {
+            const result = await apiClient.checkAIAll(assignmentId);
+            setAiResult(result);
+            queryClient.invalidateQueries({ queryKey: ['assignment-submissions', assignmentId] });
+        } catch (err: any) {
+            setAiResult({ error: err?.response?.data?.detail || 'AI detection failed' });
+        } finally {
+            setAiRunning(false);
+        }
+    };
 
     const runPlagiarismCheckAll = async () => {
         setPlagiarismRunning(true);
@@ -870,6 +886,20 @@ export default function AssignmentDetailPageContent() {
                                     >
                                         <span className="relative z-10 flex items-center gap-2">
                                             <Shield className="w-4 h-4" /> Plagiarism
+                                        </span>
+                                    </button>
+                                )}
+                                {assignment.enable_ai_detection && (
+                                    <button
+                                        onClick={() => setActiveTab('ai_detection')}
+                                        className={`relative block rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                                            activeTab === 'ai_detection'
+                                                ? 'bg-white/25 text-white'
+                                                : 'text-white/80 hover:text-white hover:bg-white/10'
+                                        }`}
+                                    >
+                                        <span className="relative z-10 flex items-center gap-2">
+                                            <Eye className="w-4 h-4" /> AI Detection
                                         </span>
                                     </button>
                                 )}
@@ -2116,6 +2146,216 @@ export default function AssignmentDetailPageContent() {
                                                     );
                                                 })}
                                             </div>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    )}
+
+                    {activeTab === 'ai_detection' && (
+                        <div className="space-y-6">
+                            {(() => {
+                                const checkedSubs = submissions.filter(s => s.ai_checked);
+                                const flaggedSubs = submissions.filter(s => s.ai_flagged);
+                                const avgScore = checkedSubs.length > 0
+                                    ? checkedSubs.reduce((sum, s) => sum + (s.ai_score ?? 0), 0) / checkedSubs.length
+                                    : 0;
+
+                                // Latest submission per student
+                                const studentMap = new Map<number, SubmissionItem>();
+                                for (const sub of submissions) {
+                                    const existing = studentMap.get(sub.student_id);
+                                    if (!existing || new Date(sub.submitted_at) > new Date(existing.submitted_at)) {
+                                        studentMap.set(sub.student_id, sub);
+                                    }
+                                }
+                                const studentSubs = Array.from(studentMap.values())
+                                    .sort((a, b) => (b.ai_score ?? 0) - (a.ai_score ?? 0));
+
+                                return (
+                                    <>
+                                        {/* Header Card */}
+                                        <Card className="border-orange-200 bg-gradient-to-r from-orange-50 to-white">
+                                            <CardContent className="p-6">
+                                                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-14 h-14 rounded-2xl bg-orange-100 flex items-center justify-center">
+                                                            <Eye className="w-7 h-7 text-orange-600" />
+                                                        </div>
+                                                        <div>
+                                                            <h3 className="text-lg font-bold text-gray-900">AI Detection Report</h3>
+                                                            <p className="text-sm text-gray-500">
+                                                                Detects code likely generated by AI tools (ChatGPT, Copilot, etc.)
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        onClick={runAICheckAll}
+                                                        disabled={aiRunning || submissions.length === 0}
+                                                        className="bg-orange-600 hover:bg-orange-700 text-white shrink-0"
+                                                    >
+                                                        {aiRunning
+                                                            ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analyzing...</>)
+                                                            : (<><Eye className="w-4 h-4 mr-2" /> {checkedSubs.length > 0 ? 'Re-run All' : 'Run AI Detection'}</>)
+                                                        }
+                                                    </Button>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Stats Row */}
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <Card>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className="text-3xl font-bold text-gray-900">{studentSubs.length}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Students</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className="text-3xl font-bold text-orange-600">{checkedSubs.length}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Checked</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card className={flaggedSubs.length > 0 ? 'border-red-200 bg-red-50/30' : ''}>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className={`text-3xl font-bold ${flaggedSubs.length > 0 ? 'text-red-600' : 'text-gray-900'}`}>{flaggedSubs.length}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Flagged</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardContent className="p-4 text-center">
+                                                    <p className={`text-3xl font-bold ${avgScore >= 65 ? 'text-red-600' : avgScore >= 35 ? 'text-amber-600' : 'text-green-600'}`}>
+                                                        {checkedSubs.length > 0 ? `${avgScore.toFixed(1)}%` : '—'}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mt-1">Avg AI Score</p>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+
+                                        {/* Result banner */}
+                                        {aiResult && !aiResult.error && (
+                                            <div className="rounded-xl bg-green-50 border border-green-200 p-4 flex items-center gap-3">
+                                                <CheckCircle2 className="w-5 h-5 text-green-600 shrink-0" />
+                                                <p className="text-sm text-green-800">
+                                                    AI detection complete — <strong>{aiResult.total_checked}</strong> submissions analyzed.
+                                                    {flaggedSubs.length > 0
+                                                        ? <span className="text-red-600 font-semibold ml-1">{flaggedSubs.length} flagged for review.</span>
+                                                        : <span className="text-green-700 ml-1">No AI-generated submissions detected.</span>
+                                                    }
+                                                </p>
+                                            </div>
+                                        )}
+                                        {aiResult?.error && (
+                                            <div className="rounded-xl bg-red-50 border border-red-200 p-4 flex items-center gap-3">
+                                                <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+                                                <p className="text-sm text-red-700">{aiResult.error}</p>
+                                            </div>
+                                        )}
+
+                                        {/* No submissions */}
+                                        {studentSubs.length === 0 && (
+                                            <Card>
+                                                <CardContent className="py-16 text-center">
+                                                    <Eye className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+                                                    <h3 className="text-lg font-semibold text-gray-900 mb-1">No submissions to check</h3>
+                                                    <p className="text-sm text-gray-500">AI detection results will appear here once students submit their work.</p>
+                                                </CardContent>
+                                            </Card>
+                                        )}
+
+                                        {/* Per-student results */}
+                                        {studentSubs.length > 0 && (
+                                            <div className="space-y-3">
+                                                {studentSubs.map((sub) => {
+                                                    const score = sub.ai_score ?? 0;
+                                                    const scoreColor = sub.ai_flagged ? 'text-red-600' : score >= 35 ? 'text-amber-600' : 'text-green-600';
+                                                    const barColor = sub.ai_flagged ? 'bg-red-500' : score >= 35 ? 'bg-amber-500' : 'bg-green-500';
+                                                    const verdict = !sub.ai_checked ? 'Not checked'
+                                                        : sub.ai_flagged ? 'AI-Generated'
+                                                            : score >= 35 ? 'Uncertain'
+                                                                : 'Human-Written';
+
+                                                    return (
+                                                        <Card key={sub.id} className={`overflow-hidden transition-all ${sub.ai_flagged ? 'border-l-4 border-l-orange-500 shadow-md' : ''}`}>
+                                                            <div className="flex items-center gap-4 p-4">
+                                                                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+                                                                    style={{ background: sub.ai_flagged ? '#fff7ed' : '#f0fdf4' }}>
+                                                                    <User className={`w-5 h-5 ${sub.ai_flagged ? 'text-orange-500' : 'text-green-600'}`} />
+                                                                </div>
+
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                        <p className="font-semibold text-gray-900 truncate">{sub.student?.full_name || `Student #${sub.student_id}`}</p>
+                                                                        {sub.ai_flagged && (
+                                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                                                                                <AlertTriangle className="w-3 h-3" /> AI FLAGGED
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className="text-xs text-gray-500 truncate">
+                                                                        {sub.student?.email}
+                                                                        {sub.student?.student_id && <> · ID: {sub.student.student_id}</>}
+                                                                        {' · Attempt #'}{sub.attempt_number}
+                                                                    </p>
+                                                                </div>
+
+                                                                {/* Score bar */}
+                                                                <div className="hidden sm:flex items-center gap-3 shrink-0 min-w-[220px]">
+                                                                    {sub.ai_checked ? (
+                                                                        <div className="flex-1">
+                                                                            <div className="flex items-center justify-between mb-1">
+                                                                                <span className="text-[10px] text-gray-500">AI Score</span>
+                                                                                <span className={`text-sm font-bold ${scoreColor}`}>{score.toFixed(1)}%</span>
+                                                                            </div>
+                                                                            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                                                <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(score, 100)}%` }} />
+                                                                            </div>
+                                                                            <p className={`text-[10px] mt-1 ${scoreColor} font-medium`}>{verdict}</p>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-xs text-gray-400 italic">Not checked</span>
+                                                                    )}
+                                                                </div>
+
+                                                                <Button
+                                                                    size="sm"
+                                                                    onClick={() => navigateToGrading(sub.student_id)}
+                                                                    variant="outline"
+                                                                    className="h-8 px-3 text-xs gap-1.5 shrink-0"
+                                                                >
+                                                                    <Eye className="w-3.5 h-3.5" /> Review
+                                                                </Button>
+                                                            </div>
+                                                        </Card>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+
+                                        {/* Legend */}
+                                        {checkedSubs.length > 0 && (
+                                            <Card className="bg-gray-50">
+                                                <CardContent className="p-4">
+                                                    <p className="text-xs font-semibold text-gray-600 mb-3">Score Legend</p>
+                                                    <div className="flex flex-wrap gap-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-3 h-3 rounded-full bg-green-500" />
+                                                            <span className="text-xs text-gray-600">&lt; 35% — Human-written</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-3 h-3 rounded-full bg-amber-500" />
+                                                            <span className="text-xs text-gray-600">35–65% — Uncertain</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-3 h-3 rounded-full bg-red-500" />
+                                                            <span className="text-xs text-gray-600">&gt; 65% — AI-generated (flagged)</span>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-[11px] text-gray-400 mt-2">Results are probabilistic estimates. Use alongside manual review.</p>
+                                                </CardContent>
+                                            </Card>
                                         )}
                                     </>
                                 );

@@ -8,10 +8,15 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements.txt .
+COPY requirements.txt requirements-ml.txt ./
 
-# Install Python dependencies
+# Install core dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install ML dependencies with CPU-only torch (avoids ~1.5GB GPU wheel download)
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements-ml.txt
 
 # Copy application
 COPY . .
