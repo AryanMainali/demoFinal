@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal, ModalFooter } from '@/components/ui/modal';
+import { AcknowledgementPopup } from '@/components/ui/acknowledgement-popup';
 import { SearchInput } from '@/components/ui/search-input';
 import { Select } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -27,9 +28,12 @@ import {
     BookOpen,
     Calendar,
     Eye,
-    Copy,
     Archive,
-    UserPlus
+    UserPlus,
+    Loader2,
+    GraduationCap,
+    UserCog,
+    Mail
 } from 'lucide-react';
 
 interface Course {
@@ -48,11 +52,43 @@ interface Course {
     created_at: string;
 }
 
+interface StudentInCourse {
+    id: number;
+    email: string;
+    full_name: string;
+    student_id?: string | null;
+}
+
+interface AssistantInCourse {
+    id: number;
+    email: string;
+    full_name?: string | null;
+}
+
 export default function CoursesPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('all');
     const [createModal, setCreateModal] = useState(false);
     const [enrollModal, setEnrollModal] = useState<{ open: boolean; course?: Course }>({ open: false });
+    const [studentSearchQuery, setStudentSearchQuery] = useState('');
+    const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
+    const [enrolledStudentIds, setEnrolledStudentIds] = useState<number[]>([]);
+    const [enrollListLoading, setEnrollListLoading] = useState(false);
+    const [membersModal, setMembersModal] = useState<{ open: boolean; course?: Course }>({ open: false });
+    const [courseStudents, setCourseStudents] = useState<StudentInCourse[]>([]);
+    const [courseAssistants, setCourseAssistants] = useState<AssistantInCourse[]>([]);
+    const [membersLoading, setMembersLoading] = useState(false);
+    const [notification, setNotification] = useState<{
+        open: boolean;
+        type: 'success' | 'error' | 'warning';
+        title: string;
+        message: string;
+    }>({
+        open: false,
+        type: 'success',
+        title: 'Success',
+        message: '',
+    });
     const [editCourseId, setEditCourseId] = useState<number | null>(null);
     const [editFormData, setEditFormData] = useState<any>(null);
 
@@ -125,7 +161,131 @@ export default function CoursesPage() {
     const deleteMutation = useMutationWithInvalidation({
         mutationFn: (courseId: number) => apiClient.deleteCourse(courseId),
         invalidateGroups: ['allCourses', 'allDashboards'],
+        onSuccess: () => {
+            setNotification({
+                open: true,
+                type: 'success',
+                title: 'Success',
+                message: 'Course deleted successfully.',
+            });
+        },
+        onError: (err: unknown) => {
+            const message = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to delete course.';
+            setNotification({
+                open: true,
+                type: 'error',
+                title: 'Error',
+                message: typeof message === 'string' ? message : 'Failed to delete course.',
+            });
+        },
     });
+
+    const archiveMutation = useMutationWithInvalidation({
+        mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
+            apiClient.updateCourse(id, {
+                status: isActive ? 'archived' : 'active',
+                is_active: !isActive,
+            }),
+        invalidateGroups: ['allCourses', 'allDashboards'],
+        onSuccess: (_data, variables) => {
+            setNotification({
+                open: true,
+                type: 'success',
+                title: 'Success',
+                message: variables.isActive ? 'Course archived successfully.' : 'Course unarchived successfully.',
+            });
+        },
+        onError: (err: unknown) => {
+            const message = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to update course status.';
+            setNotification({
+                open: true,
+                type: 'error',
+                title: 'Error',
+                message: typeof message === 'string' ? message : 'Failed to update course status.',
+            });
+        },
+    });
+
+    const enrollSelectedStudentsMutation = useMutationWithInvalidation({
+        mutationFn: async ({ courseId, studentIds }: { courseId: number; studentIds: number[] }) => {
+            const results = await Promise.allSettled(
+                studentIds.map((studentId) => apiClient.enrollStudent(courseId, studentId))
+            );
+            return {
+                success: results.filter((r) => r.status === 'fulfilled').length,
+                failed: results.filter((r) => r.status === 'rejected').length,
+            };
+        },
+        invalidateGroups: ['allCourses', 'allDashboards'],
+        onSuccess: () => {
+            setEnrollModal({ open: false });
+            setSelectedStudentIds([]);
+            setStudentSearchQuery('');
+            setEnrolledStudentIds([]);
+        },
+    });
+
+    const enrolledStudentIdSet = new Set(enrolledStudentIds);
+
+    const filteredStudentsForEnroll = students.filter((student: any) => {
+        const matchesQuery =
+            student.full_name.toLowerCase().includes(studentSearchQuery.toLowerCase()) ||
+            student.email.toLowerCase().includes(studentSearchQuery.toLowerCase());
+
+        return matchesQuery && !enrolledStudentIdSet.has(student.id);
+    });
+
+    const toggleStudentSelection = (studentId: number) => {
+        setSelectedStudentIds((prev) =>
+            prev.includes(studentId)
+                ? prev.filter((id) => id !== studentId)
+                : [...prev, studentId]
+        );
+    };
+
+    const openEnrollModal = async (course: Course) => {
+        setEnrollModal({ open: true, course });
+        setSelectedStudentIds([]);
+        setStudentSearchQuery('');
+        setEnrollListLoading(true);
+
+        try {
+            const enrolledStudents = await apiClient.getCourseStudents(course.id) as StudentInCourse[];
+            setEnrolledStudentIds(enrolledStudents.map((student) => student.id));
+        } catch {
+            setEnrolledStudentIds([]);
+        } finally {
+            setEnrollListLoading(false);
+        }
+    };
+
+    const openMembersModal = async (course: Course) => {
+        setMembersModal({ open: true, course });
+        setMembersLoading(true);
+
+        try {
+            const [studentsData, assistantsData] = await Promise.all([
+                apiClient.getCourseStudents(course.id) as Promise<StudentInCourse[]>,
+                apiClient.getCourseAssistants(course.id) as Promise<AssistantInCourse[]>,
+            ]);
+
+            setCourseStudents(studentsData);
+            setCourseAssistants(assistantsData);
+        } catch {
+            setCourseStudents([]);
+            setCourseAssistants([]);
+        } finally {
+            setMembersLoading(false);
+        }
+    };
+
+    const handleDeleteCourse = (course: Course) => {
+        const confirmed = window.confirm(
+            `Delete ${course.code} - ${course.name}? This action cannot be undone.`
+        );
+        if (!confirmed) return;
+        deleteMutation.mutate(course.id);
+    };
 
     const filteredCourses = transformedCourses.filter((course: Course) =>
         course.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -213,13 +373,14 @@ export default function CoursesPage() {
                         { label: 'View', value: 'view', icon: <Eye className="w-4 h-4" /> },
                         { label: 'Edit', value: 'edit', icon: <Edit className="w-4 h-4" /> },
                         { label: 'Enroll Students', value: 'enroll', icon: <UserPlus className="w-4 h-4" /> },
-                        { label: 'Duplicate', value: 'duplicate', icon: <Copy className="w-4 h-4" /> },
-                        { label: 'Archive', value: 'archive', icon: <Archive className="w-4 h-4" /> },
+                        { label: course.is_active ? 'Archive' : 'Unarchive', value: 'archive', icon: <Archive className="w-4 h-4" /> },
                         { label: 'Delete', value: 'delete', icon: <Trash2 className="w-4 h-4" />, danger: true },
                     ]}
                     onSelect={(value) => {
-                        if (value === 'enroll') setEnrollModal({ open: true, course });
-                        else if (value === 'delete') deleteMutation.mutate(course.id);
+                        if (value === 'view') openMembersModal(course);
+                        else if (value === 'enroll') openEnrollModal(course);
+                        else if (value === 'archive') archiveMutation.mutate({ id: course.id, isActive: course.is_active });
+                        else if (value === 'delete') handleDeleteCourse(course);
                         else if (value === 'edit') {
                             setEditCourseId(course.id);
                             setEditFormData({
@@ -253,40 +414,6 @@ export default function CoursesPage() {
                             <Plus className="w-4 h-4 mr-2" />
                             Create Course
                         </Button>
-                    </div>
-
-                    {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <Card>
-                            <CardContent className="p-4">
-                                <p className="text-sm text-gray-500">Total Courses</p>
-                                <p className="text-2xl font-bold text-gray-900">{transformedCourses.length}</p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardContent className="p-4">
-                                <p className="text-sm text-gray-500">Active Courses</p>
-                                <p className="text-2xl font-bold text-green-600">
-                                    {transformedCourses.filter((c: any) => c.is_active).length}
-                                </p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardContent className="p-4">
-                                <p className="text-sm text-gray-500">Total Enrollments</p>
-                                <p className="text-2xl font-bold text-blue-600">
-                                    {transformedCourses.reduce((acc: number, c: any) => acc + (c.student_count || 0), 0)}
-                                </p>
-                            </CardContent>
-                        </Card>
-                        <Card>
-                            <CardContent className="p-4">
-                                <p className="text-sm text-gray-500">Total Assignments</p>
-                                <p className="text-2xl font-bold text-purple-600">
-                                    {transformedCourses.reduce((acc: number, c: any) => acc + (c.assignment_count || 0), 0)}
-                                </p>
-                            </CardContent>
-                        </Card>
                     </div>
 
                     {/* Tabs & Search */}
@@ -517,43 +644,194 @@ export default function CoursesPage() {
                 {/* Enroll Students Modal */}
                 <Modal
                     isOpen={enrollModal.open}
-                    onClose={() => setEnrollModal({ open: false })}
+                    onClose={() => {
+                        setEnrollModal({ open: false });
+                        setSelectedStudentIds([]);
+                        setStudentSearchQuery('');
+                        setEnrolledStudentIds([]);
+                    }}
                     title="Enroll Students"
                     description={`Add students to ${enrollModal.course?.name}`}
                     size="lg"
                 >
                     <div className="space-y-4">
                         <SearchInput
-                            value=""
-                            onChange={() => { }}
+                            value={studentSearchQuery}
+                            onChange={setStudentSearchQuery}
                             placeholder="Search students..."
                         />
                         <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
-                            {students.map((student: any) => (
-                                <div key={student.id} className="flex items-center gap-3 p-3 hover:bg-gray-50">
-                                    <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-[#862733] focus:ring-[#862733]" />
-                                    <div className="flex-1">
-                                        <p className="text-sm font-medium">{student.full_name}</p>
-                                        <p className="text-xs text-gray-500">{student.email}</p>
-                                    </div>
-                                    <Badge variant="outline">{student.student_id || 'N/A'}</Badge>
+                            {enrollListLoading ? (
+                                <div className="p-4 text-sm text-gray-500 flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Loading available students...</span>
                                 </div>
-                            ))}
+                            ) : filteredStudentsForEnroll.length > 0 ? (
+                                filteredStudentsForEnroll.map((student: any) => (
+                                    <div
+                                        key={student.id}
+                                        className="flex items-center gap-3 p-3 hover:bg-gray-50"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedStudentIds.includes(student.id)}
+                                            onChange={() => toggleStudentSelection(student.id)}
+                                            className="w-4 h-4 rounded border-gray-300 text-[#862733] focus:ring-[#862733]"
+                                        />
+                                        <div className="flex-1">
+                                            <p className="text-sm font-medium">{student.full_name}</p>
+                                            <p className="text-xs text-gray-500">{student.email}</p>
+                                        </div>
+                                        <Badge variant="outline">{student.student_id || 'N/A'}</Badge>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="p-4 text-sm text-gray-500">
+                                    No available students to enroll.
+                                </div>
+                            )}
                         </div>
                         <div className="flex items-center justify-between text-sm text-gray-500">
-                            <span>0 students selected</span>
-                            <button className="text-[#862733] hover:underline">Import from Canvas</button>
+                            <span>{selectedStudentIds.length} students selected</span>
+                            <span>
+                                {enrollSelectedStudentsMutation.data?.failed
+                                    ? `${enrollSelectedStudentsMutation.data.success} enrolled, ${enrollSelectedStudentsMutation.data.failed} failed`
+                                    : ''}
+                            </span>
                         </div>
                     </div>
                     <ModalFooter>
-                        <Button variant="outline" onClick={() => setEnrollModal({ open: false })}>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setEnrollModal({ open: false });
+                                setSelectedStudentIds([]);
+                                setStudentSearchQuery('');
+                                setEnrolledStudentIds([]);
+                            }}
+                        >
                             Cancel
                         </Button>
-                        <Button onClick={() => setEnrollModal({ open: false })}>
-                            Enroll Students
+                        <Button
+                            onClick={() => {
+                                if (!enrollModal.course || selectedStudentIds.length === 0) return;
+                                enrollSelectedStudentsMutation.mutate({
+                                    courseId: enrollModal.course.id,
+                                    studentIds: selectedStudentIds,
+                                });
+                            }}
+                            disabled={selectedStudentIds.length === 0 || enrollSelectedStudentsMutation.isPending}
+                        >
+                            {enrollSelectedStudentsMutation.isPending ? 'Enrolling...' : 'Enroll Students'}
                         </Button>
                     </ModalFooter>
                 </Modal>
+
+                {/* Course Members Modal */}
+                <Modal
+                    isOpen={membersModal.open}
+                    onClose={() => {
+                        setMembersModal({ open: false });
+                        setCourseStudents([]);
+                        setCourseAssistants([]);
+                    }}
+                    title="Course Members"
+                    description={membersModal.course ? `${membersModal.course.name} (${membersModal.course.code})` : ''}
+                    size="lg"
+                >
+                    {membersLoading ? (
+                        <div className="py-10 flex items-center justify-center text-gray-500 gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Loading course members...</span>
+                        </div>
+                    ) : (
+                        <div className="space-y-5">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="p-3 rounded-lg border bg-gray-50">
+                                    <p className="text-xs text-gray-500">Teacher</p>
+                                    <p className="text-xl font-semibold text-gray-900">{membersModal.course?.instructor_name || 'Unassigned'}</p>
+                                </div>
+                                <div className="p-3 rounded-lg border bg-gray-50">
+                                    <p className="text-xs text-gray-500">Students</p>
+                                    <p className="text-xl font-semibold text-gray-900">{courseStudents.length}</p>
+                                </div>
+                                <div className="p-3 rounded-lg border bg-gray-50">
+                                    <p className="text-xs text-gray-500">Grading Assistants</p>
+                                    <p className="text-xl font-semibold text-gray-900">{courseAssistants.length}</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <GraduationCap className="w-4 h-4 text-gray-500" />
+                                    <h3 className="font-medium text-gray-900">Teacher</h3>
+                                </div>
+                                <div className="rounded-lg border p-3 text-sm text-gray-700">
+                                    {membersModal.course?.instructor_name || 'No teacher assigned'}
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <Users className="w-4 h-4 text-gray-500" />
+                                    <h3 className="font-medium text-gray-900">Students</h3>
+                                </div>
+                                <div className="rounded-lg border divide-y max-h-48 overflow-y-auto">
+                                    {courseStudents.length > 0 ? (
+                                        courseStudents.map((student) => (
+                                            <div key={student.id} className="p-3 flex items-center justify-between gap-3">
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900">{student.full_name}</p>
+                                                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                                                        <Mail className="w-3 h-3" />
+                                                        {student.email}
+                                                    </p>
+                                                </div>
+                                                <Badge variant="outline" className="text-xs">{student.student_id || 'N/A'}</Badge>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="p-3 text-sm text-gray-500">No students enrolled in this course.</div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <UserCog className="w-4 h-4 text-gray-500" />
+                                    <h3 className="font-medium text-gray-900">Grading Assistants</h3>
+                                </div>
+                                <div className="rounded-lg border divide-y max-h-40 overflow-y-auto">
+                                    {courseAssistants.length > 0 ? (
+                                        courseAssistants.map((assistant) => (
+                                            <div key={assistant.id} className="p-3">
+                                                <p className="text-sm font-medium text-gray-900">{assistant.full_name || 'No Name'}</p>
+                                                <p className="text-xs text-gray-500 flex items-center gap-1">
+                                                    <Mail className="w-3 h-3" />
+                                                    {assistant.email}
+                                                </p>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="p-3 text-sm text-gray-500">No grading assistants assigned to this course.</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <ModalFooter>
+                        <Button variant="outline" onClick={() => setMembersModal({ open: false })}>
+                            Close
+                        </Button>
+                    </ModalFooter>
+                </Modal>
+                <AcknowledgementPopup
+                    isOpen={notification.open}
+                    onClose={() => setNotification((prev) => ({ ...prev, open: false }))}
+                    type={notification.type}
+                    title={notification.title}
+                    message={notification.message}
+                />
         </ProtectedRoute>
     );
 }
