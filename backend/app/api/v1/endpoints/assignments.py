@@ -951,7 +951,7 @@ async def run_assignment_code(
                 detail=f"Invalid file name: {file.name}"
             )
     
-    # Get test cases — faculty can see all; students only see visible ones
+    # Get test cases - faculty can see all; students only see visible ones
     tc_query = db.query(TestCase).filter(TestCase.assignment_id == assignment_id)
 
     if current_user.role == UserRole.STUDENT:

@@ -717,7 +717,7 @@ def publish_grades(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.FACULTY])),
 ):
-    """Publish grades for an assignment — students will be able to see their scores after this."""
+    """Publish grades for an assignment - students will be able to see their scores after this."""
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
@@ -768,7 +768,7 @@ def hide_grades(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.FACULTY])),
 ):
-    """Hide grades for an assignment — students will no longer see their scores."""
+    """Hide grades for an assignment - students will no longer see their scores."""
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")

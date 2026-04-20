@@ -73,7 +73,7 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
             <div className="max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-0">
                 <BackLink href="/faculty/courses" label="Back to Courses" />
 
-                {/* Sticky banner — larger, course color background */}
+                {/* Sticky banner - larger, course color background */}
                 <div
                     className="sticky top-10 z-20 rounded-2xl overflow-hidden shadow-lg transition-all duration-300"
                     style={courseGradient(course?.color)}
@@ -105,7 +105,7 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
                             </div>
                         </div>
                     </div>
-                    {/* Tabs — pill on top of banner */}
+                    {/* Tabs - pill on top of banner */}
                     <div className="px-4 sm:px-6 pb-4 pt-0">
                         <nav className="inline-flex items-center gap-1 rounded-xl bg-black/10 backdrop-blur-sm px-1.5 py-1.5">
                             {navItems.map((item) => {
@@ -118,11 +118,10 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
                                         className="relative block active:scale-[0.98] transition-transform duration-200"
                                     >
                                         <span
-                                            className={`relative z-10 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                                                active
+                                            className={`relative z-10 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${active
                                                     ? 'text-white'
                                                     : 'text-white/80 hover:text-white hover:bg-white/10'
-                                            }`}
+                                                }`}
                                         >
                                             <Icon className="w-4 h-4 flex-shrink-0" />
                                             {item.label}

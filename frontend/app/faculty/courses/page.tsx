@@ -18,7 +18,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,7 @@ import {
     Search,
     AlertCircle,
     GraduationCap,
+    Trash2,
 } from 'lucide-react';
 
 // ============================================================================
@@ -117,14 +118,18 @@ const CACHE_CONFIG = {
 // MAIN COMPONENT
 // ============================================================================
 
+const STATUS_ORDER: Record<string, number> = { active: 0, draft: 1, archived: 2 };
+
 export default function FacultyCoursesPage() {
     const router = useRouter();
     const { user } = useAuth();
+    const queryClient = useQueryClient();
 
     // ========== UI State ==========
     const [searchQuery, setSearchQuery] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [statusFilter, setStatusFilter] = useState<CourseStatus | 'all'>('all');
+    const [deleteConfirm, setDeleteConfirm] = useState<Course | null>(null);
     const [enrollModal, setEnrollModal] = useState<{ open: boolean; course?: Course }>({ open: false });
     const [bulkEnrollModal, setBulkEnrollModal] = useState<{ open: boolean; course?: Course }>({ open: false });
     const [notification, setNotification] = useState<{
@@ -178,6 +183,19 @@ export default function FacultyCoursesPage() {
         });
     };
 
+    const deleteMutation = useMutation({
+        mutationFn: (courseId: number) => apiClient.deleteCourse(courseId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: QUERY_KEYS.facultyCourses });
+            setDeleteConfirm(null);
+            showNotification('success', 'Course removed successfully.');
+        },
+        onError: (err: any) => {
+            setDeleteConfirm(null);
+            showNotification('error', err?.response?.data?.detail || 'Failed to delete course.');
+        },
+    });
+
     const navigateToCourse = (courseId: number) => {
         router.push(`/faculty/courses/${courseId}`);
     };
@@ -204,7 +222,11 @@ export default function FacultyCoursesPage() {
             );
         }
 
-        return result;
+        return [...result].sort((a, b) => {
+            const aOrder = STATUS_ORDER[a.status?.toLowerCase() ?? ''] ?? 99;
+            const bOrder = STATUS_ORDER[b.status?.toLowerCase() ?? ''] ?? 99;
+            return aOrder - bOrder;
+        });
     }, [courses, searchQuery, statusFilter]);
 
     // ========== Render ==========
@@ -341,6 +363,7 @@ export default function FacultyCoursesPage() {
                                     onBulkEnroll: () => setBulkEnrollModal({ open: true, course }),
                                     onEdit: () => {},
                                     onView: () => navigateToCourse(course.id),
+                                    onDelete: () => setDeleteConfirm(course),
                                 }}
                             />
                         ))}
@@ -359,7 +382,7 @@ export default function FacultyCoursesPage() {
                     invalidateKeys={[[...QUERY_KEYS.facultyCourses]]}
                     onSuccess={(data) => {
                         if (data.student_not_found) {
-                            showNotification('warning', data.message || 'Student is not in the system. Request has been sent to admin.');
+                            showNotification('warning', (data.message || 'Student not found.') + ' Admin has been notified to add this student.');
                         } else {
                             showNotification('success', 'Student enrolled successfully!');
                         }
@@ -424,14 +447,25 @@ export default function FacultyCoursesPage() {
 
                     {bulkWarningModal.notFound.length > 0 && (
                         <div>
-                            <p className="text-sm font-semibold text-gray-900 mb-2">Not found in system</p>
+                            <div className="flex items-center justify-between mb-2">
+                                <p className="text-sm font-semibold text-gray-900">Not found in system</p>
+                                <span className="text-xs text-blue-600 font-medium bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
+                                    Notification sent to admin
+                                </span>
+                            </div>
                             <div className="max-h-36 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
                                 <ul className="text-sm text-gray-700 space-y-1">
                                     {bulkWarningModal.notFound.map((email) => (
-                                        <li key={email}>{email}</li>
+                                        <li key={email} className="flex items-center gap-2">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                                            {email}
+                                        </li>
                                     ))}
                                 </ul>
                             </div>
+                            <p className="text-xs text-gray-500 mt-1.5">
+                                Admin has been notified to add these students to the system.
+                            </p>
                         </div>
                     )}
 
@@ -466,6 +500,40 @@ export default function FacultyCoursesPage() {
                 title={notification.title}
                 message={notification.message}
             />
+
+            {/* Delete confirmation modal */}
+            <Modal
+                isOpen={!!deleteConfirm}
+                onClose={() => setDeleteConfirm(null)}
+                title="Delete Course"
+                size="sm"
+            >
+                <div className="space-y-4">
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-red-50 border border-red-200">
+                        <Trash2 className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-medium text-red-800">
+                                Remove &ldquo;{deleteConfirm?.name}&rdquo;?
+                            </p>
+                            <p className="text-xs text-red-700 mt-1">
+                                This course will no longer be visible to you or enrolled students. Admins can still access it.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 pt-1 border-t border-gray-100">
+                        <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            disabled={deleteMutation.isPending}
+                            onClick={() => deleteConfirm && deleteMutation.mutate(deleteConfirm.id)}
+                        >
+                            {deleteMutation.isPending ? 'Removing…' : 'Remove Course'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
 
         </>
     );

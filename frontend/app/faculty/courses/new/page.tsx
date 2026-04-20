@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Modal } from '@/components/ui/modal';
 import { CourseLoadingPage, CourseLoadingSpinner } from '@/components/course/CourseLoading';
-import { ArrowLeft, AlertCircle, CheckCircle2, Pipette } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
+import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 
 const SEMESTERS = ['Fall', 'Spring', 'Summer', 'Winter'];
 const currentYear = new Date().getFullYear();
@@ -85,12 +86,13 @@ export default function NewCoursePage() {
     const editId = searchParams.get('edit') ? parseInt(searchParams.get('edit')!, 10) : null;
     const isEdit = Boolean(editId && !isNaN(editId));
 
+    const { toast } = useToast();
     const [form, setForm] = useState<FormData>(initialForm);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formLoaded, setFormLoaded] = useState(!isEdit);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [hexInput, setHexInput] = useState('#862733');
-    const colorPickerRef = useRef<HTMLInputElement>(null);
+
 
     const todayDate = fromDateInput(today()) || new Date();
     const minStartDate = isEdit ? undefined : todayDate;
@@ -147,16 +149,13 @@ export default function NewCoursePage() {
         onError: (err: any) => {
             const detail = err?.response?.data?.detail;
             if (typeof detail === 'string') {
-                setErrors({ submit: detail });
+                toast({ variant: 'destructive', title: 'Could not create course', description: detail });
             } else if (Array.isArray(detail)) {
                 const fieldErrors: Record<string, string> = {};
-                detail.forEach((d: any) => {
-                    const loc = d?.loc?.[1] ?? 'submit';
-                    fieldErrors[loc] = d?.msg ?? 'Invalid';
-                });
+                detail.forEach((d: any) => { fieldErrors[d?.loc?.[1] ?? 'submit'] = d?.msg ?? 'Invalid'; });
                 setErrors(fieldErrors);
             } else {
-                setErrors({ submit: err?.message ?? 'Failed to create course' });
+                toast({ variant: 'destructive', title: 'Could not create course', description: err?.message ?? 'Something went wrong.' });
             }
         },
     });
@@ -177,16 +176,13 @@ export default function NewCoursePage() {
         onError: (err: any) => {
             const detail = err?.response?.data?.detail;
             if (typeof detail === 'string') {
-                setErrors({ submit: detail });
+                toast({ variant: 'destructive', title: 'Could not save changes', description: detail });
             } else if (Array.isArray(detail)) {
                 const fieldErrors: Record<string, string> = {};
-                detail.forEach((d: any) => {
-                    const loc = d?.loc?.[1] ?? 'submit';
-                    fieldErrors[loc] = d?.msg ?? 'Invalid';
-                });
+                detail.forEach((d: any) => { fieldErrors[d?.loc?.[1] ?? 'submit'] = d?.msg ?? 'Invalid'; });
                 setErrors(fieldErrors);
             } else {
-                setErrors({ submit: err?.message ?? 'Failed to update course' });
+                toast({ variant: 'destructive', title: 'Could not save changes', description: err?.message ?? 'Something went wrong.' });
             }
         },
     });
@@ -194,10 +190,13 @@ export default function NewCoursePage() {
     const validate = (): boolean => {
         const e: Record<string, string> = {};
         if (!form.code.trim()) e.code = 'Course ID is required';
+        if (!form.section.trim()) e.section = 'Section is required';
         if (!form.name.trim()) e.name = 'Course name is required';
         if (!form.semester) e.semester = 'Semester is required';
         if (!form.year || form.year < 2000 || form.year > 2100) e.year = 'Valid year is required';
-        if (!isValidHex(form.color)) e.color = 'Enter a valid hex color (e.g. #862733)';
+        if (!form.start_date) e.start_date = 'Start date is required';
+        if (!form.end_date) e.end_date = 'End date is required';
+        if (form.color && !isValidHex(form.color)) e.color = 'Enter a valid hex color (e.g. #862733)';
 
         const todayStr = today();
         if (form.start_date && form.start_date < todayStr && !isEdit) {
@@ -273,13 +272,6 @@ export default function NewCoursePage() {
                 </p>
             </div>
 
-            {errors.submit && (
-                <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-red-800">{errors.submit}</p>
-                </div>
-            )}
-
             {isEdit && !formLoaded && (
                 <CourseLoadingPage message="Loading course..." />
             )}
@@ -344,10 +336,6 @@ export default function NewCoursePage() {
                                     error={errors.section}
                                 />
                             </div>
-
-                            <p className="text-xs text-gray-400 -mt-1">
-                                Course ID + Section must be unique (e.g. CSCI 2003 – A and CSCI 2003 – B are separate offerings).
-                            </p>
 
                             <Input
                                 label="Course Name"
@@ -434,7 +422,10 @@ export default function NewCoursePage() {
                             </p>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-3">Card Color</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-3">
+                                    Card Color
+                                    <span className="ml-1 text-xs font-normal text-gray-400">(optional)</span>
+                                </label>
 
                                 {/* Preview */}
                                 <div
@@ -460,37 +451,19 @@ export default function NewCoursePage() {
                                     ))}
                                 </div>
 
-                                {/* Hex input + native color picker */}
-                                <div className="flex items-center gap-2">
-                                    <div className="relative flex-1 max-w-[160px]">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 select-none">#</span>
-                                        <input
-                                            type="text"
-                                            maxLength={7}
-                                            value={hexInput.replace('#', '')}
-                                            onChange={(e) => handleHexInputChange('#' + e.target.value)}
-                                            onBlur={handleHexInputBlur}
-                                            placeholder="862733"
-                                            className={`w-full h-10 rounded-lg border pl-7 pr-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent transition ${
-                                                errors.color ? 'border-red-400' : 'border-gray-300'
-                                            }`}
-                                        />
-                                    </div>
-                                    <button
-                                        type="button"
-                                        title="Open color picker"
-                                        onClick={() => colorPickerRef.current?.click()}
-                                        className="h-10 w-10 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-50 transition"
-                                    >
-                                        <Pipette className="w-4 h-4 text-gray-500" />
-                                    </button>
+                                {/* Hex input */}
+                                <div className="relative max-w-[160px]">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 select-none">#</span>
                                     <input
-                                        ref={colorPickerRef}
-                                        type="color"
-                                        value={isValidHex(form.color) ? form.color : '#862733'}
-                                        onChange={(e) => applyColor(e.target.value)}
-                                        className="sr-only"
-                                        tabIndex={-1}
+                                        type="text"
+                                        maxLength={7}
+                                        value={hexInput.replace('#', '')}
+                                        onChange={(e) => handleHexInputChange('#' + e.target.value)}
+                                        onBlur={handleHexInputBlur}
+                                        placeholder="862733"
+                                        className={`w-full h-10 rounded-lg border pl-7 pr-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent transition ${
+                                            errors.color ? 'border-red-400' : 'border-gray-300'
+                                        }`}
                                     />
                                 </div>
                                 {errors.color && (
@@ -508,8 +481,8 @@ export default function NewCoursePage() {
                             </p>
 
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                {(['draft', 'active', 'archived'] as const).map((s) => {
-                                    const label = s === 'active' ? 'Published' : s.charAt(0).toUpperCase() + s.slice(1);
+                                {(['draft', 'active', 'archive'] as const).map((s) => {
+                                    const label = s === 'active' ? 'Publish' : s.charAt(0).toUpperCase() + s.slice(1);
                                     const desc =
                                         s === 'draft'
                                             ? 'Only you can see it'

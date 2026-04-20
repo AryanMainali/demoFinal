@@ -192,7 +192,7 @@ export default function AssistantCourseDetailPage() {
                     Assignments
                 </h2>
                 <p className="text-sm text-gray-500 mb-4">
-                    Select an assignment to view and grade student submissions. You can only grade—you cannot edit or create assignments.
+                    Select an assignment to view and grade student submissions. You can only grade-you cannot edit or create assignments.
                 </p>
 
                 {assignmentStats.length === 0 ? (
@@ -235,9 +235,8 @@ export default function AssistantCourseDetailPage() {
                                     <div className="flex items-stretch">
                                         {/* Status bar */}
                                         <div
-                                            className={`w-1.5 flex-shrink-0 ${
-                                                hasPending ? (isOverdue ? 'bg-amber-500' : 'bg-primary') : 'bg-emerald-500'
-                                            }`}
+                                            className={`w-1.5 flex-shrink-0 ${hasPending ? (isOverdue ? 'bg-amber-500' : 'bg-primary') : 'bg-emerald-500'
+                                                }`}
                                         />
 
                                         <Link
@@ -292,9 +291,8 @@ export default function AssistantCourseDetailPage() {
                                                         <div className="text-right hidden sm:block">
                                                             <p className="text-xs text-gray-400">Due</p>
                                                             <p
-                                                                className={`text-sm font-medium ${
-                                                                    isOverdue ? 'text-red-600' : 'text-gray-700'
-                                                                }`}
+                                                                className={`text-sm font-medium ${isOverdue ? 'text-red-600' : 'text-gray-700'
+                                                                    }`}
                                                             >
                                                                 {format(new Date(a.due_date), 'MMM d, yyyy')}
                                                             </p>

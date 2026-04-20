@@ -9,6 +9,7 @@ From the **project root** in your terminal:
 ```
 
 Requirements:
+
 - `DATABASE_URL` in `backend/.env` (or exported).
 - `psql` in PATH (or the script will use Python + psycopg2 from `backend/.venv`).
 
@@ -20,20 +21,20 @@ This does: (1) drop and recreate `public` schema, (2) run migrations, (3) seed.
 
 From the **project root**:
 
-**Step 1 — Reset the schema** (needs `psql` and `DATABASE_URL` from `backend/.env`):
+**Step 1 - Reset the schema** (needs `psql` and `DATABASE_URL` from `backend/.env`):
 
 ```bash
 cd backend && set -a && source .env && set +a && cd ..
 psql "$DATABASE_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO postgres; GRANT ALL ON SCHEMA public TO public;"
 ```
 
-**Step 2 — Run migrations:**
+**Step 2 - Run migrations:**
 
 ```bash
 make migrate-local
 ```
 
-**Step 3 — Seed:**
+**Step 3 - Seed:**
 
 ```bash
 make seed-local

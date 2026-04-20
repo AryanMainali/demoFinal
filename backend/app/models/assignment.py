@@ -60,6 +60,9 @@ class Assignment(Base):
     enable_ai_detection = Column(Boolean, default=True)
     ai_detection_threshold = Column(Float, default=50.0)  # Percentage to flag
     
+    # Rubric weighting
+    is_weighted = Column(Boolean, default=True)
+
     # Status and publishing
     is_published = Column(Boolean, default=False)
     grades_published = Column(Boolean, default=False)

@@ -177,7 +177,7 @@ export default function StudentCourseDetailPage() {
             <div className="max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-0">
                 <BackLink href="/student/courses" label="Back to Courses" />
 
-                {/* Colored banner — matches faculty layout */}
+                {/* Colored banner - matches faculty layout */}
                 <div
                     className="sticky top-10 z-20 rounded-2xl overflow-hidden shadow-lg transition-all duration-300"
                     style={courseGradient(c.color)}
@@ -232,11 +232,10 @@ export default function StudentCourseDetailPage() {
                                         className="relative block active:scale-[0.98] transition-transform duration-200"
                                     >
                                         <span
-                                            className={`relative z-10 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                                                active
+                                            className={`relative z-10 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${active
                                                     ? 'text-white'
                                                     : 'text-white/80 hover:text-white hover:bg-white/10'
-                                            }`}
+                                                }`}
                                         >
                                             <Icon className="w-4 h-4 flex-shrink-0" />
                                             {tab.label}
@@ -299,7 +298,7 @@ export default function StudentCourseDetailPage() {
                                     Course Information
                                 </h2>
                                 <div className="space-y-4">
-                                    <InfoRow label="Course" value={`${c.code} — ${c.name}`} />
+                                    <InfoRow label="Course" value={`${c.code} - ${c.name}`} />
                                     {c.semester && <InfoRow label="Term" value={`${c.semester} ${c.year}`} />}
                                     {c.section && <InfoRow label="Section" value={c.section} />}
                                     {c.description && <InfoRow label="Description" value={c.description} />}
@@ -336,16 +335,14 @@ export default function StudentCourseDetailPage() {
                                 </h2>
                                 <div className="flex flex-col items-center justify-center flex-1 gap-4 py-2">
                                     <div
-                                        className={`w-24 h-24 rounded-3xl flex items-center justify-center ${
-                                            totalGrade != null ? getScoreBgColor(totalGrade) : 'bg-gray-50'
-                                        }`}
+                                        className={`w-24 h-24 rounded-3xl flex items-center justify-center ${totalGrade != null ? getScoreBgColor(totalGrade) : 'bg-gray-50'
+                                            }`}
                                     >
                                         <span
-                                            className={`text-2xl font-bold ${
-                                                totalGrade != null ? getScoreTextColor(totalGrade) : 'text-gray-400'
-                                            }`}
+                                            className={`text-2xl font-bold ${totalGrade != null ? getScoreTextColor(totalGrade) : 'text-gray-400'
+                                                }`}
                                         >
-                                            {totalGrade != null ? `${totalGrade}%` : '—'}
+                                            {totalGrade != null ? `${totalGrade}%` : '-'}
                                         </span>
                                     </div>
                                     <div className="text-center">
@@ -374,11 +371,10 @@ export default function StudentCourseDetailPage() {
                                             <Link
                                                 key={a.id}
                                                 href={`/student/assignments/${a.id}`}
-                                                className={`flex items-center gap-3 p-4 rounded-xl border transition-all group hover:shadow-sm ${
-                                                    isOverdue
+                                                className={`flex items-center gap-3 p-4 rounded-xl border transition-all group hover:shadow-sm ${isOverdue
                                                         ? 'border-red-100 bg-red-50/50 hover:border-red-200'
                                                         : 'border-gray-100 hover:border-[#862733]/20 hover:bg-[#862733]/5'
-                                                }`}
+                                                    }`}
                                             >
                                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isOverdue ? 'bg-red-100' : 'bg-gray-50 group-hover:bg-[#862733]/10'}`}>
                                                     <FileCode className={`w-5 h-5 ${isOverdue ? 'text-red-500' : 'text-gray-400 group-hover:text-[#862733]'}`} />
@@ -387,7 +383,7 @@ export default function StudentCourseDetailPage() {
                                                     <p className="font-medium text-gray-900 text-sm truncate">{a.title}</p>
                                                     <p className={`text-xs mt-0.5 ${isOverdue ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                                                         {isOverdue ? 'Overdue · ' : 'Due '}
-                                                        {a.due_date ? format(new Date(a.due_date), 'MMM d, h:mm a') : '—'}
+                                                        {a.due_date ? format(new Date(a.due_date), 'MMM d, h:mm a') : '-'}
                                                     </p>
                                                 </div>
                                                 <ChevronRight className={`w-4 h-4 flex-shrink-0 ${isOverdue ? 'text-red-400' : 'text-gray-300 group-hover:text-[#862733]'}`} />
@@ -437,11 +433,10 @@ export default function StudentCourseDetailPage() {
                                             href={`/student/assignments/${a.id}`}
                                             className="flex items-center gap-4 px-5 sm:px-6 py-4 hover:bg-gray-50/80 transition-colors group"
                                         >
-                                            <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                                                isGraded ? getScoreBgColor(pct!) :
-                                                isSubmitted ? 'bg-blue-50' :
-                                                isOverdue ? 'bg-red-50' : 'bg-gray-50'
-                                            }`}>
+                                            <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${isGraded ? getScoreBgColor(pct!) :
+                                                    isSubmitted ? 'bg-blue-50' :
+                                                        isOverdue ? 'bg-red-50' : 'bg-gray-50'
+                                                }`}>
                                                 {isGraded ? (
                                                     <CheckCircle2 className="w-5 h-5 text-green-600" />
                                                 ) : isSubmitted ? (
@@ -459,7 +454,7 @@ export default function StudentCourseDetailPage() {
                                                 <div className="flex items-center gap-3 mt-0.5">
                                                     <p className={`text-xs ${isOverdue ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
                                                         {isOverdue ? 'Overdue · ' : ''}
-                                                        Due {a.due_date ? format(new Date(a.due_date), 'MMM d, yyyy') : '—'}
+                                                        Due {a.due_date ? format(new Date(a.due_date), 'MMM d, yyyy') : '-'}
                                                     </p>
                                                     {isSubmitted && (
                                                         <span className="text-xs text-blue-600 font-medium">Submitted</span>
@@ -472,7 +467,7 @@ export default function StudentCourseDetailPage() {
                                                         {Math.round(sub!.final_score!)}/{maxScore}
                                                     </ScoreBadge>
                                                 ) : (
-                                                    <span className="text-sm text-gray-400 tabular-nums">—/{maxScore}</span>
+                                                    <span className="text-sm text-gray-400 tabular-nums">-/{maxScore}</span>
                                                 )}
                                                 <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[#862733]" />
                                             </div>
@@ -492,7 +487,7 @@ export default function StudentCourseDetailPage() {
                             <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                                 <div className={`w-20 h-20 rounded-2xl flex items-center justify-center flex-shrink-0 ${totalGrade != null ? getScoreBgColor(totalGrade) : 'bg-gray-50'}`}>
                                     <span className={`text-xl font-bold ${totalGrade != null ? getScoreTextColor(totalGrade) : 'text-gray-400'}`}>
-                                        {totalGrade != null ? `${totalGrade}%` : '—'}
+                                        {totalGrade != null ? `${totalGrade}%` : '-'}
                                     </span>
                                 </div>
                                 <div>
@@ -553,7 +548,7 @@ export default function StudentCourseDetailPage() {
                                                         </div>
                                                     ) : (
                                                         <Badge variant="outline" className="text-gray-400 border-gray-200 text-xs">
-                                                            —/{maxScore}
+                                                            -/{maxScore}
                                                         </Badge>
                                                     )}
                                                     <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[#862733]" />

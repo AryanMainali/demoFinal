@@ -1219,7 +1219,7 @@ export default function StudentAssignmentPage() {
                                                                 {runResult.results.map((r) => (
                                                                     <div key={r.id} className={`flex items-center gap-2 py-0.5 ${r.passed ? 'text-[#4ec9b0]' : 'text-[#f44747]'}`}>
                                                                         {r.passed ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
-                                                                        <span>{r.name} {r.passed ? 'passed' : 'failed'}{r.error && r.error !== 'Output does not match expected' ? ` — ${r.error}` : ''}</span>
+                                                                        <span>{r.name} {r.passed ? 'passed' : 'failed'}{r.error && r.error !== 'Output does not match expected' ? ` - ${r.error}` : ''}</span>
                                                                     </div>
                                                                 ))}
                                                             </div>
@@ -1635,7 +1635,7 @@ export default function StudentAssignmentPage() {
                                                             <div className="rounded-lg border border-[#3c3c3c] bg-[#1e1e1e] p-3">
                                                                 <p className="text-[10px] font-semibold text-[#bdbdbd] uppercase tracking-wider mb-2">Instructor Feedback</p>
                                                                 <p className="text-[13px] text-[#e6e6e6] whitespace-pre-wrap leading-relaxed">
-                                                                    {latestSubmissionDetail?.feedback?.trim() ? latestSubmissionDetail.feedback : '— No feedback provided.'}
+                                                                    {latestSubmissionDetail?.feedback?.trim() ? latestSubmissionDetail.feedback : '- No feedback provided.'}
                                                                 </p>
                                                             </div>
 
@@ -1951,7 +1951,7 @@ export default function StudentAssignmentPage() {
                                 <div className="mt-2 p-2 rounded-lg bg-blue-50 border border-blue-200 flex items-center gap-2">
                                     <Users className="w-4 h-4 text-blue-600 shrink-0" />
                                     <p className="text-xs text-blue-800">
-                                        Submitting for group <strong>{myGroup.name}</strong> — this grade applies to all {myGroup.members.length} members.
+                                        Submitting for group <strong>{myGroup.name}</strong> - this grade applies to all {myGroup.members.length} members.
                                     </p>
                                 </div>
                             )}

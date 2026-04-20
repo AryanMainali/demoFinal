@@ -3,7 +3,7 @@
 /**
  * Student Assignments Page
  *
- * Simple, clean list of assignments — consistent with courses page design.
+ * Simple, clean list of assignments - consistent with courses page design.
  * - Search and filters
  * - Status badges, due dates, actions
  * - All edge cases handled
@@ -236,7 +236,7 @@ export default function StudentAssignmentsPage() {
                 </div>
             )}
 
-            {/* Empty State — no assignments at all */}
+            {/* Empty State - no assignments at all */}
             {!isLoading && !isError && enrichedAssignments.length === 0 && (
                 <Card className="border-gray-100 shadow-sm">
                     <CardContent className="py-16">
@@ -258,7 +258,7 @@ export default function StudentAssignmentsPage() {
                 </Card>
             )}
 
-            {/* No Results — filters applied but nothing matches */}
+            {/* No Results - filters applied but nothing matches */}
             {!isLoading && !isError && enrichedAssignments.length > 0 && filteredAssignments.length === 0 && (
                 <Card className="border-gray-100 shadow-sm">
                     <CardContent className="py-16">
@@ -301,14 +301,14 @@ export default function StudentAssignmentsPage() {
                                             {/* Icon */}
                                             <div
                                                 className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${assignment.status === 'graded' ? 'bg-green-50' :
-                                                        assignment.status === 'submitted' ? 'bg-blue-50' :
-                                                            assignment.status === 'overdue' ? 'bg-red-50' : 'bg-amber-50'
+                                                    assignment.status === 'submitted' ? 'bg-blue-50' :
+                                                        assignment.status === 'overdue' ? 'bg-red-50' : 'bg-amber-50'
                                                     }`}
                                             >
                                                 <config.icon
                                                     className={`w-6 h-6 ${assignment.status === 'graded' ? 'text-green-600' :
-                                                            assignment.status === 'submitted' ? 'text-blue-600' :
-                                                                assignment.status === 'overdue' ? 'text-red-600' : 'text-amber-600'
+                                                        assignment.status === 'submitted' ? 'text-blue-600' :
+                                                            assignment.status === 'overdue' ? 'text-red-600' : 'text-amber-600'
                                                         }`}
                                                 />
                                             </div>
@@ -327,7 +327,7 @@ export default function StudentAssignmentsPage() {
                                                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
                                                     <span className="flex items-center gap-1">
                                                         <BookOpen className="w-3.5 h-3.5" />
-                                                        {assignment.course?.code ?? '—'} · {assignment.course?.name ?? 'Unknown'}
+                                                        {assignment.course?.code ?? '-'} · {assignment.course?.name ?? 'Unknown'}
                                                     </span>
                                                     <span className={`flex items-center gap-1 ${assignment.status === 'overdue' ? 'text-red-600 font-medium' : ''}`}>
                                                         <Calendar className="w-3.5 h-3.5" />

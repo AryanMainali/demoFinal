@@ -396,7 +396,6 @@ export default function AssignmentsPage() {
                             label="Assignment Title"
                             value={newAssignment.title}
                             onChange={(e) => setNewAssignment(prev => ({ ...prev, title: e.target.value }))}
-                            placeholder="Binary Search Implementation"
                         />
                         <Textarea
                             label="Description"

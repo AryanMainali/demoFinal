@@ -76,15 +76,15 @@ interface ProgrammingLanguage {
 }
 
 const LANG_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
-    python:     { bg: 'bg-sky-100',    text: 'text-sky-700',    ring: 'ring-sky-200' },
-    java:       { bg: 'bg-orange-100', text: 'text-orange-700', ring: 'ring-orange-200' },
+    python: { bg: 'bg-sky-100', text: 'text-sky-700', ring: 'ring-sky-200' },
+    java: { bg: 'bg-orange-100', text: 'text-orange-700', ring: 'ring-orange-200' },
     javascript: { bg: 'bg-yellow-100', text: 'text-yellow-700', ring: 'ring-yellow-200' },
-    typescript: { bg: 'bg-blue-100',   text: 'text-blue-700',   ring: 'ring-blue-200' },
-    cpp:        { bg: 'bg-purple-100', text: 'text-purple-700', ring: 'ring-purple-200' },
-    c:          { bg: 'bg-indigo-100', text: 'text-indigo-700', ring: 'ring-indigo-200' },
-    rust:       { bg: 'bg-red-100',    text: 'text-red-700',    ring: 'ring-red-200' },
-    go:         { bg: 'bg-cyan-100',   text: 'text-cyan-700',   ring: 'ring-cyan-200' },
-    ruby:       { bg: 'bg-rose-100',   text: 'text-rose-700',   ring: 'ring-rose-200' },
+    typescript: { bg: 'bg-blue-100', text: 'text-blue-700', ring: 'ring-blue-200' },
+    cpp: { bg: 'bg-purple-100', text: 'text-purple-700', ring: 'ring-purple-200' },
+    c: { bg: 'bg-indigo-100', text: 'text-indigo-700', ring: 'ring-indigo-200' },
+    rust: { bg: 'bg-red-100', text: 'text-red-700', ring: 'ring-red-200' },
+    go: { bg: 'bg-cyan-100', text: 'text-cyan-700', ring: 'ring-cyan-200' },
+    ruby: { bg: 'bg-rose-100', text: 'text-rose-700', ring: 'ring-rose-200' },
 };
 
 function getLangColor(name: string) {
@@ -129,7 +129,7 @@ function RequestLanguageModal({
                 notes: notes.trim() || undefined,
             });
         } catch {
-            // show success regardless — admin receives via notification
+            // show success regardless - admin receives via notification
         } finally {
             setLoading(false);
             const req = addPendingRequest(langName.trim());
@@ -177,11 +177,10 @@ function RequestLanguageModal({
                                     onChange={(e) => setLangName(e.target.value)}
                                     placeholder="e.g. Python, Java, Rust…"
                                     required
-                                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 placeholder:text-gray-300 transition ${
-                                        alreadyAdded || alreadyRequested
+                                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 placeholder:text-gray-300 transition ${alreadyAdded || alreadyRequested
                                             ? 'border-amber-300 focus:ring-amber-200 focus:border-amber-400 bg-amber-50'
                                             : 'border-gray-200 focus:ring-primary/30 focus:border-primary'
-                                    }`}
+                                        }`}
                                 />
                                 {alreadyAdded && (
                                     <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
@@ -192,7 +191,7 @@ function RequestLanguageModal({
                                 {alreadyRequested && (
                                     <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-700">
                                         <Hourglass className="w-3.5 h-3.5 flex-shrink-0" />
-                                        You've already requested this — waiting for admin approval.
+                                        You've already requested this - waiting for admin approval.
                                     </p>
                                 )}
                             </div>
@@ -306,9 +305,9 @@ export default function FacultyDashboard() {
 
             {/* Stats row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-                <DashboardStatTile label="Active Courses"  value={stats?.total_courses}     icon={BookOpen}    loading={isLoading} color="text-blue-600"   bg="bg-blue-50"   />
-                <DashboardStatTile label="Students"        value={stats?.total_students}     icon={Users}       loading={isLoading} color="text-violet-600" bg="bg-violet-50" sub="enrolled" />
-                <DashboardStatTile label="Assignments"     value={stats?.total_assignments}  icon={FileText}    loading={isLoading} color="text-emerald-600" bg="bg-emerald-50" sub="created" />
+                <DashboardStatTile label="Active Courses" value={stats?.total_courses} icon={BookOpen} loading={isLoading} color="text-blue-600" bg="bg-blue-50" />
+                <DashboardStatTile label="Students" value={stats?.total_students} icon={Users} loading={isLoading} color="text-violet-600" bg="bg-violet-50" sub="enrolled" />
+                <DashboardStatTile label="Assignments" value={stats?.total_assignments} icon={FileText} loading={isLoading} color="text-emerald-600" bg="bg-emerald-50" sub="created" />
                 <DashboardStatTile
                     label="Pending"
                     value={stats?.pending_grading}
@@ -505,7 +504,7 @@ export default function FacultyDashboard() {
                                 {pendingRequests
                                     .filter((r) => !languages.some(
                                         (l) => l.name.toLowerCase() === r.language_name.toLowerCase() ||
-                                               l.display_name.toLowerCase() === r.language_name.toLowerCase()
+                                            l.display_name.toLowerCase() === r.language_name.toLowerCase()
                                     ))
                                     .map((req) => (
                                         <div
@@ -541,10 +540,10 @@ export default function FacultyDashboard() {
             {/* Quick links */}
             <DashboardQuickLinks
                 items={[
-                    { label: 'Courses',     href: '/faculty/courses',     icon: BookOpen,    gradientClass: 'from-blue-500 to-blue-600' },
-                    { label: 'Assignments', href: '/faculty/assignments',  icon: FileText,    gradientClass: 'from-emerald-500 to-emerald-600' },
-                    { label: 'Students',    href: '/faculty/students',     icon: GraduationCap, gradientClass: 'from-violet-500 to-violet-600' },
-                    { label: 'Reports',     href: '/faculty/reports',      icon: TrendingUp,  gradientClass: 'from-amber-500 to-amber-600' },
+                    { label: 'Courses', href: '/faculty/courses', icon: BookOpen, gradientClass: 'from-blue-500 to-blue-600' },
+                    { label: 'Assignments', href: '/faculty/assignments', icon: FileText, gradientClass: 'from-emerald-500 to-emerald-600' },
+                    { label: 'Students', href: '/faculty/students', icon: GraduationCap, gradientClass: 'from-violet-500 to-violet-600' },
+                    { label: 'Reports', href: '/faculty/reports', icon: TrendingUp, gradientClass: 'from-amber-500 to-amber-600' },
                 ]}
             />
         </div>

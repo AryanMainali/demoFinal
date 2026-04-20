@@ -47,11 +47,10 @@ class Course(Base):
     
     # Appearance
     color = Column(String(20), nullable=True)  # For UI card color
-    
-    # Settings
-    allow_late_submissions = Column(Boolean, default=True)
-    default_late_penalty = Column(Float, default=10.0)  # Percentage per day
-    
+
+    # Soft delete
+    is_hidden = Column(Boolean, default=False, nullable=False)
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

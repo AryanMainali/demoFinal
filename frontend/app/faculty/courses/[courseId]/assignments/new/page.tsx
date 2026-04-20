@@ -48,6 +48,7 @@ import {
     Layers,
     PartyPopper,
 } from 'lucide-react';
+import { RichTextEditor } from '@/components/ui/RichTextEditor';
 
 type Language = {
     id: number;
@@ -130,6 +131,7 @@ export function AssignmentUpsertPage({
 
     // Rubric: per-criterion min/max scale + total points (must sum to max_score)
     const [rubricEnabled, setRubricEnabled] = useState(false);
+    const [isWeighted, setIsWeighted] = useState(true);
     const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
     const [rubricLibrary, setRubricLibrary] = useState<RubricLibraryItem[]>([]);
 
@@ -217,7 +219,7 @@ export function AssignmentUpsertPage({
             }
         };
         loadLanguages();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // If editing, load existing assignment and prefill the same form
@@ -288,6 +290,7 @@ export function AssignmentUpsertPage({
                 const rubric = existing.rubric?.items ?? [];
                 if (Array.isArray(rubric) && rubric.length > 0) {
                     setRubricEnabled(true);
+                    setIsWeighted(existing.is_weighted ?? true);
                     setRubricItems(
                         rubric.map((item: any) => ({
                             name: item.name ?? '',
@@ -474,14 +477,16 @@ export function AssignmentUpsertPage({
                     setLoading(false);
                     return;
                 }
-                const invalidItem = rubricItems.find((item) => {
-                    return Number(item.maxPoints) <= Number(item.minPoints);
-                });
-                if (invalidItem) {
-                    setError(`Each criterion's rubric max must be greater than its rubric min.`);
-                    setErrorModalOpen(true);
-                    setLoading(false);
-                    return;
+                if (isWeighted) {
+                    const invalidItem = rubricItems.find((item) => {
+                        return Number(item.maxPoints) <= Number(item.minPoints);
+                    });
+                    if (invalidItem) {
+                        setError(`Each criterion's rubric max must be greater than its rubric min.`);
+                        setErrorModalOpen(true);
+                        setLoading(false);
+                        return;
+                    }
                 }
             }
 
@@ -511,6 +516,7 @@ export function AssignmentUpsertPage({
                 enable_ai_detection: values.enable_ai_detection,
                 ai_detection_threshold: values.ai_detection_threshold,
                 is_published: values.is_published,
+                is_weighted: rubricEnabled ? isWeighted : true,
             };
 
             const fileToBase64 = async (file: File | null | undefined): Promise<string | undefined> => {
@@ -592,8 +598,8 @@ export function AssignmentUpsertPage({
                         return {
                             name: item.name.trim(),
                             description: (item.description || '').trim() || undefined,
-                            min_points: Number(item.minPoints) || 0,
-                            max_points: Number(item.maxPoints) || 5,
+                            min_points: isWeighted ? (Number(item.minPoints) || 0) : 0,
+                            max_points: isWeighted ? (Number(item.maxPoints) || 5) : 1,
                             points: totalPts,
                             weight,
                         };
@@ -856,7 +862,6 @@ export function AssignmentUpsertPage({
                                             label="Assignment Title"
                                             {...register('title')}
                                             error={errors.title?.message}
-                                            placeholder="e.g., Binary Search Tree Implementation"
                                             required
                                         />
                                     </div>
@@ -891,16 +896,20 @@ export function AssignmentUpsertPage({
                                     )}
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                                        Detailed Instructions <span className="text-gray-400 text-xs font-normal">(Markdown supported)</span>
-                                    </label>
-                                    <textarea
-                                        className="w-full min-h-[140px] rounded-lg border border-gray-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all resize-y"
-                                        {...register('instructions')}
-                                        placeholder={"## Requirements\n- Implement the `insert` method\n- Implement the `search` method\n\n## Constraints\n- Time complexity: O(log n) average"}
-                                    />
-                                </div>
+                                <Controller
+                                    name="instructions"
+                                    control={control}
+                                    render={({ field }) => (
+                                        <RichTextEditor
+                                            label="Detailed Instructions"
+                                            hint="(optional)"
+                                            value={field.value ?? ''}
+                                            onChange={field.onChange}
+                                            placeholder="Provide step-by-step instructions, requirements, examples…"
+                                            minHeight="160px"
+                                        />
+                                    )}
+                                />
                             </CardContent>
                         )}
                     </Card>
@@ -1161,7 +1170,6 @@ export function AssignmentUpsertPage({
                                                                 onChange={(e) => updateTestCase(index, 'description', e.target.value)}
                                                                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
                                                                 rows={2}
-                                                                placeholder="Explain what this test case validates..."
                                                             />
                                                         </div>
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1169,7 +1177,7 @@ export function AssignmentUpsertPage({
                                                             <div className="min-w-0">
                                                                 <div className="flex items-center gap-2 mb-2">
                                                                     <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
-                                                                        {testInputMode === 'stdin' ? '📥 Input (Stdin)' : '📁 Input Files'}
+                                                                        {testInputMode === 'stdin' ? ' Input (Stdin)' : '📁 Input Files'}
                                                                     </span>
                                                                     {testInputMode === 'file' && tc.inputFiles.length > 0 && (
                                                                         <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[10px] font-medium">
@@ -1183,7 +1191,7 @@ export function AssignmentUpsertPage({
                                                                         onChange={(e) => updateTestCase(index, 'input_data', e.target.value)}
                                                                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
                                                                         rows={3}
-                                                                        placeholder="Enter stdin input..."
+                                                                        placeholder="Enter stdin input"
                                                                     />
                                                                 ) : (
                                                                     <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
@@ -1230,7 +1238,7 @@ export function AssignmentUpsertPage({
                                                             {/* Expected output side */}
                                                             <div className="min-w-0">
                                                                 <div className="flex items-center justify-between gap-2 mb-2">
-                                                                    <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">✓ Expected Output</span>
+                                                                    <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide"> Expected Output</span>
                                                                     <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 text-[11px]">
                                                                         <button
                                                                             type="button"
@@ -1260,7 +1268,7 @@ export function AssignmentUpsertPage({
                                                                         onChange={(e) => updateTestCase(index, 'expected_output', e.target.value)}
                                                                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-y"
                                                                         rows={3}
-                                                                        placeholder="Expected program output..."
+                                                                        placeholder="Expected program output"
                                                                     />
                                                                 ) : (
                                                                     <div className="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
@@ -1372,9 +1380,44 @@ export function AssignmentUpsertPage({
 
                                 {rubricEnabled && (
                                     <>
+                                        {/* Weighted / Unweighted toggle */}
+                                        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                            <span className="text-sm font-medium text-gray-700 mr-1">Grading type:</span>
+                                            <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 text-sm">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIsWeighted(true)}
+                                                    className={`px-4 py-1.5 rounded-md font-medium transition-all ${isWeighted
+                                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    Weighted
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIsWeighted(false)}
+                                                    className={`px-4 py-1.5 rounded-md font-medium transition-all ${!isWeighted
+                                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                                                    }`}
+                                                >
+                                                    Unweighted
+                                                </button>
+                                            </div>
+                                            <span className="text-xs text-gray-500">
+                                                {isWeighted
+                                                    ? 'Each criterion has a rubric scale (e.g. 0–5) and total points'
+                                                    : 'Each criterion has a name, description, and point value only'}
+                                            </span>
+                                        </div>
+
                                         {/* Summary banner */}
                                         <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 flex items-center justify-between gap-3">
-                                            <span>Each criterion has its own rubric scale (e.g. 0–5) and total assignment points. A score of <strong>max</strong> on the scale earns all total points. Total points must sum to <strong>{watchMaxScore}</strong>.</span>
+                                            {isWeighted
+                                                ? <span>Each criterion has its own rubric scale (e.g. 0–5) and total assignment points. A score of <strong>max</strong> on the scale earns all total points. Total points must sum to <strong>{watchMaxScore}</strong>.</span>
+                                                : <span>Each criterion has a name, description, and point value. Total points must sum to <strong>{watchMaxScore}</strong>.</span>
+                                            }
                                             {(() => {
                                                 const total = rubricItems.reduce((s, i) => s + (Number(i.totalPoints) || 0), 0);
                                                 const ok = Math.abs(total - watchMaxScore) < 0.01;
@@ -1426,35 +1469,35 @@ export function AssignmentUpsertPage({
                                                             </button>
                                                         </div>
 
-                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pl-10">
-                                                            {/* Rubric Scale */}
-                                                            <div>
-                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Min</label>
-                                                                <input
-                                                                    type="number"
-                                                                    min={0}
-                                                                    step={1}
-                                                                    value={item.minPoints}
-                                                                    onChange={(e) => updateRubricItem(index, 'minPoints', parseFloat(e.target.value) || 0)}
-                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                                    placeholder="0"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Max</label>
-                                                                <input
-                                                                    type="number"
-                                                                    min={1}
-                                                                    step={1}
-                                                                    value={item.maxPoints}
-                                                                    onChange={(e) => updateRubricItem(index, 'maxPoints', parseFloat(e.target.value) || 5)}
-                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                                    placeholder="5"
-                                                                />
-                                                            </div>
-                                                            <div>
-                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Total Points</label>
-                                                                <div className="relative">
+                                                        {isWeighted ? (
+                                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pl-10">
+                                                                {/* Rubric Scale */}
+                                                                <div>
+                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Min</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        step={1}
+                                                                        value={item.minPoints}
+                                                                        onChange={(e) => updateRubricItem(index, 'minPoints', parseFloat(e.target.value) || 0)}
+                                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                        placeholder="0"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Max</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min={1}
+                                                                        step={1}
+                                                                        value={item.maxPoints}
+                                                                        onChange={(e) => updateRubricItem(index, 'maxPoints', parseFloat(e.target.value) || 5)}
+                                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                        placeholder="5"
+                                                                    />
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Total Points</label>
                                                                     <input
                                                                         type="number"
                                                                         min={0}
@@ -1464,12 +1507,25 @@ export function AssignmentUpsertPage({
                                                                         className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                                                                         placeholder="e.g. 40"
                                                                     />
+                                                                    <p className="text-[10px] text-indigo-600 mt-0.5 text-center">
+                                                                        {item.minPoints} → 0 pts · {item.maxPoints} → {item.totalPoints} pts
+                                                                    </p>
                                                                 </div>
-                                                                <p className="text-[10px] text-indigo-600 mt-0.5 text-center">
-                                                                    {item.minPoints} → 0 pts · {item.maxPoints} → {item.totalPoints} pts
-                                                                </p>
                                                             </div>
-                                                        </div>
+                                                        ) : (
+                                                            <div className="pl-10">
+                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Points</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min={0}
+                                                                    step={1}
+                                                                    value={item.totalPoints}
+                                                                    onChange={(e) => updateRubricItem(index, 'totalPoints', parseFloat(e.target.value) || 0)}
+                                                                    className="w-40 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                    placeholder="e.g. 20"
+                                                                />
+                                                            </div>
+                                                        )}
 
                                                         <div className="pl-10">
                                                             <textarea

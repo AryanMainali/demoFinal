@@ -16,6 +16,7 @@ import {
     GraduationCap,
     BookOpen,
     FileCode,
+    Trash2,
 } from 'lucide-react';
 
 /** Course status for styling */
@@ -49,6 +50,7 @@ export interface CourseCardActions {
     onBulkEnroll?: (course: CourseCardData) => void;
     onEdit?: (course: CourseCardData) => void;
     onView?: (course: CourseCardData) => void;
+    onDelete?: (course: CourseCardData) => void;
 }
 
 export interface CourseCardProps {
@@ -243,6 +245,16 @@ export function CourseCard({ course, variant, basePath, actions }: CourseCardPro
                             >
                                 <Upload className="w-3.5 h-3.5 mr-1.5" />
                                 Bulk
+                            </Button>
+                        )}
+                        {actions.onDelete && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => actions.onDelete!(course)}
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                         )}
                         <Button

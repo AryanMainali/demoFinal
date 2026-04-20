@@ -95,7 +95,7 @@ STRUCT_COLS = [
 
 def main():
     print("=" * 60)
-    print("AI Code Detection — Training Pipeline")
+    print("AI Code Detection - Training Pipeline")
     print("=" * 60)
 
     # 1. Load dataset ──────────────────────────────────────────────
@@ -175,7 +175,7 @@ def main():
         scale_pos_weight=scale_pos_weight,
         eval_metric="logloss",
         random_state=42,
-        n_jobs=1,       # single-threaded — avoids macOS OpenMP/fork segfault
+        n_jobs=1,       # single-threaded - avoids macOS OpenMP/fork segfault
         nthread=1,
     )
 
@@ -230,9 +230,9 @@ def main():
         json.dump(metadata, f, indent=2)
 
     print(f"\n  Saved to: {MODEL_DIR}")
-    print("  model.joblib    — XGBoost classifier")
-    print("  scaler.joblib   — StandardScaler")
-    print("  metadata.json   — thresholds & feature list")
+    print("  model.joblib    - XGBoost classifier")
+    print("  scaler.joblib   - StandardScaler")
+    print("  metadata.json   - thresholds & feature list")
     print("\nDone.")
 
 

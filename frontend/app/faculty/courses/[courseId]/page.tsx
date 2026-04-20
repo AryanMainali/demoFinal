@@ -136,18 +136,18 @@ export default function CourseOverviewPage() {
         },
         {
             label: 'Class average',
-            value: averageGrade != null ? `${averageGrade.toFixed(1)}%` : '—',
+            value: averageGrade != null ? `${averageGrade.toFixed(1)}%` : '-',
             icon: ClipboardCheck,
         },
         ...(needsGradingTotal > 0
             ? [
-                  {
-                      label: 'Needs grading',
-                      value: needsGradingTotal,
-                      icon: AlertTriangle,
-                      href: `/faculty/courses/${courseId}/assignments?filter=needs-grading`,
-                  },
-              ]
+                {
+                    label: 'Needs grading',
+                    value: needsGradingTotal,
+                    icon: AlertTriangle,
+                    href: `/faculty/courses/${courseId}/assignments?filter=needs-grading`,
+                },
+            ]
             : []),
     ];
 
@@ -158,7 +158,7 @@ export default function CourseOverviewPage() {
             animate="visible"
             variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.1 } } }}
         >
-            {/* Stats row — equal-width cards, evenly distributed */}
+            {/* Stats row - equal-width cards, evenly distributed */}
             <motion.section className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }} variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.05 } } }}>
                 {statCards.map((stat) => {
                     const Icon = stat.icon;

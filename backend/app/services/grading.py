@@ -209,7 +209,7 @@ class GradingService:
                     "total_tests": total_count,
                 }
             elif total_count == 0:
-                # No test cases and no rubric — leave ungraded for faculty to grade manually
+                # No test cases and no rubric - leave ungraded for faculty to grade manually
                 submission.raw_score = None
                 submission.final_score = None
                 submission.status = SubmissionStatus.PENDING
@@ -443,7 +443,7 @@ class GradingService:
 
         expected_files = _get_test_case_expected_output_file_list(test_case)
         if not expected_files:
-            # No expected output files configured — treat as pass
+            # No expected output files configured - treat as pass
             return True, ""
 
         errors: List[str] = []

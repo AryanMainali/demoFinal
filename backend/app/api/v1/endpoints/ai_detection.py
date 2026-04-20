@@ -1,9 +1,9 @@
 """
 AI-Generated Code Detection Endpoints
 =======================================
-POST /ai-detection/analyze          — analyse a raw code snippet
-POST /ai-detection/submission/{id}  — analyse an existing submission's code
-GET  /ai-detection/status           — check whether the model is loaded
+POST /ai-detection/analyze          - analyse a raw code snippet
+POST /ai-detection/submission/{id}  - analyse an existing submission's code
+GET  /ai-detection/status           - check whether the model is loaded
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status

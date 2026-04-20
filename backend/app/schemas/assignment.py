@@ -117,6 +117,7 @@ class AssignmentBase(BaseModel):
     
     is_published: bool = False
     grades_published: bool = False
+    is_weighted: bool = True
 
     @model_validator(mode='after')
     def validate_date_range(self):
@@ -138,26 +139,27 @@ class AssignmentUpdate(BaseModel):
     start_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     language_id: Optional[int] = None
-    
+
     max_score: Optional[float] = None
     passing_score: Optional[float] = None
-    
+
     allow_late: Optional[bool] = None
     late_penalty_per_day: Optional[float] = None
     max_late_days: Optional[int] = None
     max_attempts: Optional[int] = None
     max_file_size_mb: Optional[int] = None
     allowed_file_extensions: Optional[List[str]] = None
-    
+
     allow_groups: Optional[bool] = None
     max_group_size: Optional[int] = None
-    
+
     enable_plagiarism_check: Optional[bool] = None
     plagiarism_threshold: Optional[float] = None
     enable_ai_detection: Optional[bool] = None
     ai_detection_threshold: Optional[float] = None
-    
+
     is_published: Optional[bool] = None
+    is_weighted: Optional[bool] = None
     test_cases: Optional[List[TestCaseCreate]] = None
     rubric: Optional[RubricUpdate] = None
 

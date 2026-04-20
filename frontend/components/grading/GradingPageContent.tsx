@@ -1796,7 +1796,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                 const rounded = Math.round(raw * 2) / 2;
                                                 setGradeState(p => ({ ...p, finalScore: String(rounded) }));
                                             }}
-                                            placeholder="—"
+                                            placeholder="-"
                                             step="0.5"
                                             min="0"
                                             max={assignment.max_score}
@@ -1830,7 +1830,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             <p className="text-white font-semibold">
                                                 {selectedSub.tests_total > 0
                                                     ? `${selectedSub.tests_passed}/${selectedSub.tests_total}`
-                                                    : '—'}
+                                                    : '-'}
                                             </p>
                                         </div>
                                         <div className="bg-[#2a2a2a] rounded-lg px-2.5 py-2">
@@ -2400,7 +2400,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             {selectedSub.ai_flagged
                                                 ? 'High likelihood of AI-generated code detected'
                                                 : selectedSub.ai_score !== null && selectedSub.ai_score > 40
-                                                    ? 'Some AI characteristics detected — review manually'
+                                                    ? 'Some AI characteristics detected - review manually'
                                                     : 'Code appears to be human-written'}
                                         </p>
                                     )}
@@ -2428,16 +2428,15 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             <div className="flex items-center justify-between mb-1.5">
                                                 <span className="text-[10px] text-[#858585]">Confidence</span>
                                                 <span className="text-[10px] text-[#cccccc] font-medium">
-                                                    {selectedSub.ai_score !== null ? `${selectedSub.ai_score.toFixed(1)}%` : '—'}
+                                                    {selectedSub.ai_score !== null ? `${selectedSub.ai_score.toFixed(1)}%` : '-'}
                                                 </span>
                                             </div>
                                             <div className="h-2 rounded-full bg-[#333] overflow-hidden">
                                                 <div
-                                                    className={`h-full rounded-full transition-all ${
-                                                        selectedSub.ai_flagged ? 'bg-orange-500'
+                                                    className={`h-full rounded-full transition-all ${selectedSub.ai_flagged ? 'bg-orange-500'
                                                             : selectedSub.ai_score !== null && selectedSub.ai_score > 40 ? 'bg-[#dcdcaa]'
                                                                 : 'bg-[#4ec9b0]'
-                                                    }`}
+                                                        }`}
                                                     style={{ width: `${Math.min(selectedSub.ai_score ?? 0, 100)}%` }}
                                                 />
                                             </div>
@@ -2453,15 +2452,15 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             <p className="text-[10px] text-[#858585] uppercase tracking-wider">How to interpret</p>
                                             <div className="flex items-start gap-2">
                                                 <div className="w-2.5 h-2.5 rounded-full bg-[#4ec9b0] mt-0.5 shrink-0" />
-                                                <p className="text-[10px] text-[#858585]">&lt; 35% — Likely human-written</p>
+                                                <p className="text-[10px] text-[#858585]">&lt; 35% - Likely human-written</p>
                                             </div>
                                             <div className="flex items-start gap-2">
                                                 <div className="w-2.5 h-2.5 rounded-full bg-[#dcdcaa] mt-0.5 shrink-0" />
-                                                <p className="text-[10px] text-[#858585]">35–65% — Uncertain, review manually</p>
+                                                <p className="text-[10px] text-[#858585]">35–65% - Uncertain, review manually</p>
                                             </div>
                                             <div className="flex items-start gap-2">
                                                 <div className="w-2.5 h-2.5 rounded-full bg-orange-500 mt-0.5 shrink-0" />
-                                                <p className="text-[10px] text-[#858585]">&gt; 65% — High AI likelihood, flagged</p>
+                                                <p className="text-[10px] text-[#858585]">&gt; 65% - High AI likelihood, flagged</p>
                                             </div>
                                         </div>
 

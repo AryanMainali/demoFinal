@@ -120,7 +120,7 @@ def notify_faculty_course_assigned(
             user_id=faculty_id,
             notification_type=NotificationType.COURSE_ASSIGNED,
             title="Course Assigned",
-            message=f"You have been assigned as instructor for {course_code} — {course_name}.",
+            message=f"You have been assigned as instructor for {course_code} - {course_name}.",
             link=f"/faculty/courses/{course_id}",
             course_id=course_id,
         )

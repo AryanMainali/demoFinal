@@ -83,12 +83,17 @@ def create_course(
     db: Session = Depends(get_db)
 ):
     """Create a new course. Faculty creates for themselves; Admin can assign instructor."""
-    # Check if course code already exists
-    existing = db.query(Course).filter(Course.code == course_in.code).first()
+    # Course ID + Section must be unique
+    section_val = (course_in.section or '').strip()
+    existing = db.query(Course).filter(
+        Course.code == course_in.code,
+        Course.section == (section_val or None),
+    ).first()
     if existing:
+        suffix = f" (Section {section_val})" if section_val else ""
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Course code already exists"
+            status_code=400,
+            detail=f"A course with ID {course_in.code}{suffix} already exists",
         )
     
     course_data = course_in.model_dump()
@@ -154,23 +159,29 @@ def list_courses(
 ):
     """List courses based on user role with stats"""
     if current_user.role == UserRole.STUDENT:
-        # Get enrolled courses
         enrollments = db.query(Enrollment).filter(
             Enrollment.student_id == current_user.id,
             Enrollment.status == EnrollmentStatus.ACTIVE
         ).all()
         course_ids = [e.course_id for e in enrollments]
-        courses = db.query(Course).filter(Course.id.in_(course_ids)).offset(skip).limit(limit).all()
+        courses = db.query(Course).filter(
+            Course.id.in_(course_ids),
+            Course.is_hidden == False,
+        ).offset(skip).limit(limit).all()
     elif current_user.role == UserRole.FACULTY:
-        # Get courses taught by faculty
-        courses = db.query(Course).filter(Course.instructor_id == current_user.id).offset(skip).limit(limit).all()
+        courses = db.query(Course).filter(
+            Course.instructor_id == current_user.id,
+            Course.is_hidden == False,
+        ).offset(skip).limit(limit).all()
     elif current_user.role == UserRole.ASSISTANT:
-        # Get courses where user is assigned as assistant
         ca_list = db.query(CourseAssistant).filter(CourseAssistant.assistant_id == current_user.id).all()
         course_ids = [ca.course_id for ca in ca_list]
-        courses = db.query(Course).filter(Course.id.in_(course_ids)).offset(skip).limit(limit).all() if course_ids else []
+        courses = db.query(Course).filter(
+            Course.id.in_(course_ids),
+            Course.is_hidden == False,
+        ).offset(skip).limit(limit).all() if course_ids else []
     else:
-        # Admin sees all courses
+        # Admin sees all courses including hidden
         courses = db.query(Course).offset(skip).limit(limit).all()
     
     # Build response with stats
@@ -303,7 +314,24 @@ def update_course(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to update this course"
         )
-    
+
+    # If code or section is changing, verify uniqueness
+    update_data_check = course_update.dict(exclude_unset=True)
+    new_code = update_data_check.get('code', course.code)
+    new_section = update_data_check.get('section', course.section)
+    section_str = (new_section or '').strip()
+    conflict = db.query(Course).filter(
+        Course.id != course_id,
+        Course.code == new_code,
+        Course.section == (section_str or None),
+    ).first()
+    if conflict:
+        suffix = f" (Section {section_str})" if section_str else ""
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"A course with ID {new_code}{suffix} already exists",
+        )
+
     old_status = course.status.value if hasattr(course.status, "value") else str(course.status)
 
     # Update fields
@@ -342,36 +370,25 @@ def update_course(
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_course(
     course_id: int,
-    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+    current_user: User = Depends(require_roles(UserRole.FACULTY, UserRole.ADMIN)),
     db: Session = Depends(get_db)
 ):
-    """Delete a course (Admin or owning Faculty)"""
+    """Soft-delete a course (hide from faculty/students; admin still sees it)."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Course not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
-    # Only admin or the faculty who owns the course may delete
     if current_user.role == UserRole.FACULTY and course.instructor_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this course"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this course")
 
-    # Audit before deletion
+    course.is_hidden = True
     audit = AuditLog(
         user_id=current_user.id,
         event_type="course_deleted",
-        description=f"Course {course.code} deleted"
+        description=f"Course {course.code} soft-deleted by {current_user.email}",
     )
     db.add(audit)
-
-    # Remove course (cascades depend on DB schema)
-    db.delete(course)
     db.commit()
-
     return None
 @router.post("/{course_id}/enroll", response_model=EnrollmentSchema)
 def enroll_student(
@@ -664,7 +681,7 @@ def enroll_student_by_email(
             db.add(audit_create)
             # Fall through to enrollment below
         else:
-            # No Canvas fields — notify admin as before
+            # No Canvas fields - notify admin as before
             audit = AuditLog(
                 user_id=current_user.id,
                 event_type="student_add_requested",

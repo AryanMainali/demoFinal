@@ -113,7 +113,7 @@ export function parseCanvasCSV(text: string): CanvasParseResult {
     const firstNameIdx = findColumnIndexLoose(norm, ['firstname', 'first name', 'first_name']);
     const lastNameIdx = findColumnIndexLoose(norm, ['lastname', 'last name', 'last_name']);
     const canvasIdIdx = findColumnIndexLoose(norm, ['canvas user id', 'canvas_user_id']);
-    // "ID" column — careful: look for exact "id" to avoid matching "sis user id"
+    // "ID" column - careful: look for exact "id" to avoid matching "sis user id"
     const idIdx = norm.findIndex((h) => h === 'id');
     const sisUserIdIdx = findColumnIndexLoose(norm, ['sis user id', 'sis_user_id']);
 

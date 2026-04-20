@@ -151,7 +151,7 @@ class AutoGradingService:
                     expected_files = _get_test_case_expected_output_file_list(test_case)
                     if not expected_files:
                         result["passed"] = True
-                        result["expected"] = "[file output — no expected files configured]"
+                        result["expected"] = "[file output - no expected files configured]"
                     else:
                         all_passed = True
                         file_errors: List[str] = []
