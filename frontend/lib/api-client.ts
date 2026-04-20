@@ -256,6 +256,16 @@ class ApiClient {
         return response.data;
     }
 
+    async updateCourseGroup(courseId: number, groupId: number, data: { name?: string; max_members?: number }) {
+        const response = await this.client.put(`/courses/${courseId}/groups/${groupId}`, data);
+        return response.data;
+    }
+
+    async autoAssignGroups(courseId: number, groupSize: number) {
+        const response = await this.client.post(`/courses/${courseId}/groups/auto-assign`, { group_size: groupSize });
+        return response.data;
+    }
+
     async getCourseAssistants(courseId: number) {
         const response = await this.client.get(`/courses/${courseId}/assistants`);
         return response.data;
@@ -552,6 +562,32 @@ class ApiClient {
     async getRubricItems() {
         const response = await this.client.get('/faculty/rubric-items');
         return response.data;
+    }
+
+    // ── Rubric Templates ──────────────────────────────────────────────
+
+    async getCourseRubricTemplates(courseId: number) {
+        const response = await this.client.get(`/courses/${courseId}/rubric-templates`);
+        return response.data;
+    }
+
+    async getCourseRubricTemplate(courseId: number, templateId: number) {
+        const response = await this.client.get(`/courses/${courseId}/rubric-templates/${templateId}`);
+        return response.data;
+    }
+
+    async createCourseRubricTemplate(courseId: number, data: Record<string, unknown>) {
+        const response = await this.client.post(`/courses/${courseId}/rubric-templates`, data);
+        return response.data;
+    }
+
+    async updateCourseRubricTemplate(courseId: number, templateId: number, data: Record<string, unknown>) {
+        const response = await this.client.put(`/courses/${courseId}/rubric-templates/${templateId}`, data);
+        return response.data;
+    }
+
+    async deleteCourseRubricTemplate(courseId: number, templateId: number) {
+        await this.client.delete(`/courses/${courseId}/rubric-templates/${templateId}`);
     }
 
     // Reports endpoints

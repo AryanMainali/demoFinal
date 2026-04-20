@@ -40,6 +40,8 @@ from app.schemas.assignment import (
     TestCase as TestCaseSchema,
 )
 
+from app.models.rubric_template import CourseRubricTemplate, CourseRubricTemplateItem, CourseRubricTemplateLevelDescriptor
+
 from app.core.logging import logger
 from app.core.security import decode_token
 from app.core.database import SessionLocal
@@ -187,6 +189,9 @@ def get_assignment(
             subqueryload(Assignment.test_cases),
             joinedload(Assignment.language),
             joinedload(Assignment.course),
+            joinedload(Assignment.rubric_template).subqueryload(
+                CourseRubricTemplate.items
+            ).subqueryload(CourseRubricTemplateItem.levels),
         )
         .filter(Assignment.id == assignment_id)
         .first()

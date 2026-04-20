@@ -1188,10 +1188,12 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                         className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'description' ? 'bg-[#862733]/30 text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
                         <BookOpen className="w-3 h-3" /> Info
                     </button>
-                    <button onClick={() => setRightPanel('rubric')}
-                        className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'rubric' ? 'bg-[#862733]/30 text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
-                        <FileText className="w-3 h-3" /> Rubric
-                    </button>
+                    {!isAssistant && (
+                        <button onClick={() => setRightPanel('rubric')}
+                            className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'rubric' ? 'bg-[#862733]/30 text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
+                            <FileText className="w-3 h-3" /> Rubric
+                        </button>
+                    )}
                     {!isAssistant && (
                         <button onClick={() => { setRightPanel('plagiarism'); if (selectedSub && plagiarismMatches.length === 0) loadPlagiarismData(); }}
                             className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'plagiarism' ? 'bg-purple-500/30 text-white' : 'text-[#cccccc] hover:bg-[#505050]'}`}>
@@ -1854,7 +1856,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                 )}
 
                                 {/* Rubric Grader */}
-                                {assignment.rubric && assignment.rubric.items?.length > 0 && (
+                                {!isAssistant && assignment.rubric && assignment.rubric.items?.length > 0 && (
                                     <div>
                                         <p className="text-[10px] text-[#858585] uppercase tracking-widest mb-2">Rubric Criteria</p>
                                         <RubricGrader

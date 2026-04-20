@@ -62,6 +62,7 @@ class Course(Base):
     assignments = relationship("Assignment", back_populates="course", cascade="all, delete-orphan")
     groups = relationship("Group", back_populates="course", cascade="all, delete-orphan")
     announcements = relationship("Announcement", back_populates="course", cascade="all, delete-orphan")
+    rubric_templates = relationship("CourseRubricTemplate", back_populates="course", cascade="all, delete-orphan")
     
     # Unique constraint on code + semester + year + section
     __table_args__ = (

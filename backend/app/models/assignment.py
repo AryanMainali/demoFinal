@@ -62,6 +62,11 @@ class Assignment(Base):
     
     # Rubric weighting
     is_weighted = Column(Boolean, default=True)
+    is_template_rubric = Column(Boolean, default=False)
+    rubric_template_id = Column(Integer, ForeignKey("course_rubric_templates.id"), nullable=True)
+
+    # Bonus points (added on top of max_score)
+    bonus_points = Column(Float, default=0.0, nullable=False)
 
     # Status and publishing
     is_published = Column(Boolean, default=False)
@@ -74,6 +79,7 @@ class Assignment(Base):
     # Relationships
     course = relationship("Course", back_populates="assignments")
     language = relationship("Language", back_populates="assignments")
+    rubric_template = relationship("CourseRubricTemplate", foreign_keys=[rubric_template_id])
     test_cases = relationship("TestCase", back_populates="assignment", cascade="all, delete-orphan")
     rubric_rows = relationship("Rubric", back_populates="assignment", cascade="all, delete-orphan",
                                order_by="Rubric.id")
@@ -81,7 +87,30 @@ class Assignment(Base):
 
     @property
     def rubric(self):
-        """For API response: build rubric payload from rubric_rows (id, name, description, weight, points, min_points, max_points)."""
+        """Build rubric payload from rubric_rows, or from rubric_template when is_template_rubric is True."""
+        # Template rubric: synthesise items from the attached CourseRubricTemplate
+        if self.is_template_rubric:
+            tpl = getattr(self, "rubric_template", None)
+            if tpl is not None:
+                items = list(tpl.items or [])
+                total = sum(float(item.points or 0) for item in items)
+                return {
+                    "items": [
+                        {
+                            "id": item.id,
+                            "name": item.name,
+                            "description": item.description,
+                            "weight": float(item.weight or 0),
+                            "points": float(item.points or 0),
+                            "min_points": float(item.min_scale or 0),
+                            "max_points": float(item.max_scale or 5),
+                        }
+                        for item in items
+                    ],
+                    "total_points": total,
+                }
+            return None
+        # Regular rubric rows
         if not self.rubric_rows:
             return None
         total = sum(getattr(row, "points", 0) or 0 for row in self.rubric_rows)

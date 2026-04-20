@@ -38,6 +38,11 @@ import {
     Plus,
     Save,
     Download,
+    GraduationCap,
+    TrendingUp,
+    Award,
+    CheckSquare,
+    MinusSquare,
 } from 'lucide-react';
 
 /* ====================================================================
@@ -171,6 +176,14 @@ interface StudentGroup {
     totalAttempts: number;
 }
 
+interface CourseStudent {
+    id: number;
+    full_name: string;
+    email: string;
+    student_id?: string | null;
+    status?: string;
+}
+
 interface AssignmentGroupEntry {
     groupId: number;
     groupName: string;
@@ -240,6 +253,27 @@ const getScoreColor = (score: number | null, max: number) => {
     return 'text-red-600';
 };
 
+const getLetterGrade = (score: number | null, max: number): string => {
+    if (score === null || max === 0) return '—';
+    const pct = (score / max) * 100;
+    if (pct >= 90) return 'A';
+    if (pct >= 80) return 'B';
+    if (pct >= 70) return 'C';
+    if (pct >= 60) return 'D';
+    return 'F';
+};
+
+const getLetterGradeStyle = (grade: string) => {
+    switch (grade) {
+        case 'A': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+        case 'B': return 'bg-blue-100 text-blue-700 border-blue-200';
+        case 'C': return 'bg-amber-100 text-amber-700 border-amber-200';
+        case 'D': return 'bg-orange-100 text-orange-700 border-orange-200';
+        case 'F': return 'bg-red-100 text-red-700 border-red-200';
+        default: return 'bg-gray-100 text-gray-500 border-gray-200';
+    }
+};
+
 /* ====================================================================
    COMPONENT
    ==================================================================== */
@@ -258,8 +292,13 @@ export default function AssignmentDetailPageContent() {
     const courseId = useMemo(() => parseInt(courseIdStr, 10), [courseIdStr]);
     const assignmentId = useMemo(() => parseInt(assignmentIdStr, 10), [assignmentIdStr]);
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism' | 'ai_detection'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism' | 'ai_detection' | 'gradebook'>('overview');
     const [searchQuery, setSearchQuery] = useState('');
+
+    // Gradebook state
+    const [gradebookSearch, setGradebookSearch] = useState('');
+    const [gradebookSort, setGradebookSort] = useState<'name' | 'score' | 'grade' | 'attempts' | 'status'>('name');
+    const [gradebookSortDir, setGradebookSortDir] = useState<'asc' | 'desc'>('asc');
 
     // Test case management state
     const [editingTC, setEditingTC] = useState<TestCaseItem | null>(null);
@@ -297,7 +336,17 @@ export default function AssignmentDetailPageContent() {
     const { data: submissions = [], isLoading: isLoadingSubs } = useQuery<SubmissionItem[]>({
         queryKey: ['assignment-submissions', assignmentId],
         queryFn: () => apiClient.getAssignmentSubmissions(assignmentId),
-        enabled: !!assignmentId && (activeTab === 'submissions' || activeTab === 'plagiarism' || activeTab === 'ai_detection'),
+        enabled: !!assignmentId && (activeTab === 'submissions' || activeTab === 'plagiarism' || activeTab === 'ai_detection' || activeTab === 'gradebook'),
+    });
+
+    const { data: courseStudents = [], isLoading: courseStudentsLoading } = useQuery<CourseStudent[]>({
+        queryKey: ['course-students-gb', courseId],
+        queryFn: async () => {
+            const data = await apiClient.getCourseStudents(courseId);
+            return (Array.isArray(data) ? data : []) as CourseStudent[];
+        },
+        enabled: !!courseId && activeTab === 'gradebook',
+        staleTime: 60_000,
     });
 
     const publishMutation = useMutation({
@@ -703,6 +752,110 @@ export default function AssignmentDetailPageContent() {
         else { setSortBy(col); setSortDir(col === 'score' ? 'desc' : 'asc'); }
     }, [sortBy]);
 
+    // Gradebook: join enrolled students with their best submission
+    const gradebookRows = useMemo(() => {
+        const activeStudents = courseStudents.filter((s) => s.status === 'active' || !s.status);
+
+        // Best submission per student (by final_score, fallback raw_score)
+        const bestSubMap = new Map<number, SubmissionItem>();
+        const attemptsMap = new Map<number, number>();
+        for (const sub of submissions) {
+            attemptsMap.set(sub.student_id, (attemptsMap.get(sub.student_id) ?? 0) + 1);
+            const existing = bestSubMap.get(sub.student_id);
+            const subScore = sub.final_score ?? sub.raw_score ?? -1;
+            const existScore = existing ? (existing.final_score ?? existing.raw_score ?? -1) : -Infinity;
+            if (!existing || subScore > existScore) bestSubMap.set(sub.student_id, sub);
+        }
+
+        const rows = activeStudents.map((student) => {
+            const sub = bestSubMap.get(student.id) ?? null;
+            const score = sub?.final_score ?? sub?.raw_score ?? null;
+            const attempts = attemptsMap.get(student.id) ?? 0;
+            return { student, sub, score, attempts };
+        });
+
+        // Filter
+        const q = gradebookSearch.trim().toLowerCase();
+        const filtered = q
+            ? rows.filter(r =>
+                r.student.full_name.toLowerCase().includes(q) ||
+                r.student.email.toLowerCase().includes(q) ||
+                (r.student.student_id ?? '').toLowerCase().includes(q),
+              )
+            : rows;
+
+        // Sort
+        return [...filtered].sort((a, b) => {
+            let cmp = 0;
+            switch (gradebookSort) {
+                case 'name': cmp = a.student.full_name.localeCompare(b.student.full_name); break;
+                case 'score': cmp = (a.score ?? -1) - (b.score ?? -1); break;
+                case 'grade': {
+                    const gradeOrder: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, F: 1, '—': 0 };
+                    const ga = getLetterGrade(a.score, assignment?.max_score ?? 100);
+                    const gb = getLetterGrade(b.score, assignment?.max_score ?? 100);
+                    cmp = (gradeOrder[ga] ?? 0) - (gradeOrder[gb] ?? 0);
+                    break;
+                }
+                case 'attempts': cmp = a.attempts - b.attempts; break;
+                case 'status': cmp = (a.attempts > 0 ? 1 : 0) - (b.attempts > 0 ? 1 : 0); break;
+            }
+            return gradebookSortDir === 'asc' ? cmp : -cmp;
+        });
+    }, [courseStudents, submissions, gradebookSearch, gradebookSort, gradebookSortDir, assignment]);
+
+    const gradebookStats = useMemo(() => {
+        const max = assignment?.max_score ?? 100;
+        const submitted = gradebookRows.filter(r => r.attempts > 0);
+        const scores = submitted.map(r => r.score).filter((s): s is number => s !== null);
+        const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+        const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+        for (const s of scores) {
+            const g = getLetterGrade(s, max);
+            if (g in grades) grades[g as keyof typeof grades]++;
+        }
+        return {
+            total: gradebookRows.length,
+            submitted: submitted.length,
+            graded: scores.length,
+            avg,
+            grades,
+        };
+    }, [gradebookRows, assignment]);
+
+    const exportGradebookCSV = useCallback(() => {
+        if (!assignment) return;
+        const headers = ['Name', 'Email', 'Student ID', 'Score', 'Max Score', 'Percentage', 'Grade', 'Status', 'Attempts', 'Submission ID', 'Last Submitted'];
+        const rows = gradebookRows.map(r => {
+            const pct = r.score !== null ? ((r.score / assignment.max_score) * 100).toFixed(1) : '';
+            const grade = getLetterGrade(r.score, assignment.max_score);
+            const lastSub = r.sub ? format(new Date(r.sub.submitted_at), 'yyyy-MM-dd HH:mm') : '';
+            return [
+                `"${r.student.full_name}"`,
+                `"${r.student.email}"`,
+                `"${r.student.student_id ?? ''}"`,
+                r.score !== null ? r.score.toFixed(1) : '',
+                assignment.max_score,
+                pct,
+                grade === '—' ? '' : grade,
+                r.attempts > 0 ? 'Submitted' : 'Not Submitted',
+                r.attempts,
+                r.sub?.id ?? '',
+                lastSub,
+            ].join(',');
+        });
+        const csv = [headers.join(','), ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `gradebook-${assignment.title.replace(/[^a-zA-Z0-9]/g, '_')}-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, [gradebookRows, assignment]);
+
     /* ===== RENDER ===== */
     const accentColor = course?.color || '#862733';
     const headerGradient = useMemo(() => {
@@ -898,6 +1051,17 @@ export default function AssignmentDetailPageContent() {
                                     </span>
                                 </button>
                             )}
+                            <button
+                                onClick={() => setActiveTab('gradebook')}
+                                className={`relative block rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${activeTab === 'gradebook'
+                                        ? 'bg-white/25 text-white'
+                                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                                    }`}
+                            >
+                                <span className="relative z-10 flex items-center gap-2">
+                                    <GraduationCap className="w-4 h-4" /> Gradebook
+                                </span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -2347,6 +2511,383 @@ export default function AssignmentDetailPageContent() {
                                 </>
                             );
                         })()}
+                    </div>
+                )}
+
+                {/* ─── Gradebook Tab ─── */}
+                {activeTab === 'gradebook' && (
+                    <div className="space-y-5">
+                        {(courseStudentsLoading || isLoadingSubs) ? (
+                            <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                                <span className="text-sm">Loading gradebook…</span>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Stats row */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    <Card className="border-0 shadow-sm">
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
+                                                    <Users className="w-4 h-4" style={{ color: accentColor }} />
+                                                </div>
+                                                <div>
+                                                    <p className="text-xl font-bold text-gray-900">{gradebookStats.total}</p>
+                                                    <p className="text-xs text-gray-500">Enrolled</p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card className="border-0 shadow-sm">
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+                                                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-xl font-bold text-emerald-600">{gradebookStats.submitted}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        Submitted
+                                                        {gradebookStats.total > 0 && (
+                                                            <span className="ml-1 text-gray-400">
+                                                                ({Math.round((gradebookStats.submitted / gradebookStats.total) * 100)}%)
+                                                            </span>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card className="border-0 shadow-sm">
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
+                                                    <MinusSquare className="w-4 h-4 text-amber-600" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-xl font-bold text-amber-600">{gradebookStats.total - gradebookStats.submitted}</p>
+                                                    <p className="text-xs text-gray-500">Not Submitted</p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card className="border-0 shadow-sm">
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
+                                                    <TrendingUp className="w-4 h-4 text-blue-600" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-xl font-bold text-blue-600">
+                                                        {gradebookStats.avg !== null
+                                                            ? `${gradebookStats.avg.toFixed(1)}`
+                                                            : '—'}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500">
+                                                        Avg Score
+                                                        {gradebookStats.avg !== null && assignment && (
+                                                            <span className="ml-1 text-gray-400">/ {assignment.max_score}</span>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                {/* Grade distribution */}
+                                {gradebookStats.graded > 0 && (
+                                    <Card className="border-0 shadow-sm">
+                                        <CardContent className="p-4">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                                                    <Award className="w-4 h-4" style={{ color: accentColor }} />
+                                                    Grade Distribution
+                                                </p>
+                                                <span className="text-xs text-gray-400">{gradebookStats.graded} graded</span>
+                                            </div>
+                                            <div className="flex items-end gap-3">
+                                                {(['A', 'B', 'C', 'D', 'F'] as const).map((g) => {
+                                                    const count = gradebookStats.grades[g];
+                                                    const pct = gradebookStats.graded > 0 ? (count / gradebookStats.graded) * 100 : 0;
+                                                    const barColors = { A: 'bg-emerald-500', B: 'bg-blue-500', C: 'bg-amber-500', D: 'bg-orange-500', F: 'bg-red-500' };
+                                                    return (
+                                                        <div key={g} className="flex-1 flex flex-col items-center gap-1">
+                                                            <span className="text-xs font-medium text-gray-600">{count}</span>
+                                                            <div className="w-full bg-gray-100 rounded-t-sm" style={{ height: 48 }}>
+                                                                <div
+                                                                    className={`w-full rounded-t-sm transition-all ${barColors[g]}`}
+                                                                    style={{ height: `${Math.max(pct, count > 0 ? 8 : 0)}%`, minHeight: count > 0 ? 4 : 0, marginTop: 'auto' }}
+                                                                />
+                                                            </div>
+                                                            <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getLetterGradeStyle(g)}`}>{g}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                {/* Search + export toolbar */}
+                                <div className="flex items-center gap-3">
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name, email, or student ID…"
+                                            value={gradebookSearch}
+                                            onChange={e => setGradebookSearch(e.target.value)}
+                                            className="w-full h-9 pl-9 pr-3 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:border-transparent bg-white"
+                                            style={{ '--tw-ring-color': accentColor } as React.CSSProperties}
+                                        />
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={exportGradebookCSV}
+                                        disabled={gradebookRows.length === 0}
+                                        className="gap-1.5 h-9 px-3 text-xs shrink-0"
+                                    >
+                                        <Download className="w-3.5 h-3.5" /> Export CSV
+                                    </Button>
+                                </div>
+
+                                {/* Gradebook table */}
+                                {gradebookRows.length === 0 ? (
+                                    <div className="text-center py-16 border-2 border-dashed border-gray-200 rounded-2xl">
+                                        <GraduationCap className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                                        <p className="font-medium text-gray-500">No students found</p>
+                                        <p className="text-sm text-gray-400 mt-1">
+                                            {gradebookSearch ? 'Try a different search term.' : 'No active students enrolled.'}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <Card className="border-gray-200 shadow-sm overflow-hidden">
+                                        {/* Table header */}
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-full text-sm">
+                                                <thead>
+                                                    <tr className="bg-gray-50 border-b border-gray-200">
+                                                        <th className="text-left px-4 py-3 font-medium text-gray-600 w-8">#</th>
+                                                        <th className="text-left px-4 py-3 font-medium text-gray-600">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (gradebookSort === 'name') setGradebookSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                                                                    else { setGradebookSort('name'); setGradebookSortDir('asc'); }
+                                                                }}
+                                                                className="flex items-center gap-1 hover:text-gray-900"
+                                                            >
+                                                                Student
+                                                                {gradebookSort === 'name' && (
+                                                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${gradebookSortDir === 'desc' ? 'rotate-180' : ''}`} />
+                                                                )}
+                                                            </button>
+                                                        </th>
+                                                        <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Student ID</th>
+                                                        <th className="text-center px-4 py-3 font-medium text-gray-600">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (gradebookSort === 'status') setGradebookSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                                                                    else { setGradebookSort('status'); setGradebookSortDir('desc'); }
+                                                                }}
+                                                                className="flex items-center gap-1 hover:text-gray-900"
+                                                            >
+                                                                Status
+                                                                {gradebookSort === 'status' && (
+                                                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${gradebookSortDir === 'desc' ? 'rotate-180' : ''}`} />
+                                                                )}
+                                                            </button>
+                                                        </th>
+                                                        <th className="text-right px-4 py-3 font-medium text-gray-600">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (gradebookSort === 'score') setGradebookSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                                                                    else { setGradebookSort('score'); setGradebookSortDir('desc'); }
+                                                                }}
+                                                                className="flex items-center gap-1 hover:text-gray-900 ml-auto"
+                                                            >
+                                                                Score
+                                                                {gradebookSort === 'score' && (
+                                                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${gradebookSortDir === 'desc' ? 'rotate-180' : ''}`} />
+                                                                )}
+                                                            </button>
+                                                        </th>
+                                                        <th className="text-center px-4 py-3 font-medium text-gray-600 hidden md:table-cell">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (gradebookSort === 'grade') setGradebookSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                                                                    else { setGradebookSort('grade'); setGradebookSortDir('desc'); }
+                                                                }}
+                                                                className="flex items-center gap-1 hover:text-gray-900 mx-auto"
+                                                            >
+                                                                Grade
+                                                                {gradebookSort === 'grade' && (
+                                                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${gradebookSortDir === 'desc' ? 'rotate-180' : ''}`} />
+                                                                )}
+                                                            </button>
+                                                        </th>
+                                                        <th className="text-center px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (gradebookSort === 'attempts') setGradebookSortDir(d => d === 'asc' ? 'desc' : 'asc');
+                                                                    else { setGradebookSort('attempts'); setGradebookSortDir('desc'); }
+                                                                }}
+                                                                className="flex items-center gap-1 hover:text-gray-900 mx-auto"
+                                                            >
+                                                                Attempts
+                                                                {gradebookSort === 'attempts' && (
+                                                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${gradebookSortDir === 'desc' ? 'rotate-180' : ''}`} />
+                                                                )}
+                                                            </button>
+                                                        </th>
+                                                        <th className="text-right px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {gradebookRows.map((row, idx) => {
+                                                        const max = assignment?.max_score ?? 100;
+                                                        const pct = row.score !== null ? (row.score / max) * 100 : null;
+                                                        const grade = getLetterGrade(row.score, max);
+                                                        const hasSubmission = row.attempts > 0;
+
+                                                        const barColor = pct === null ? '#e5e7eb'
+                                                            : pct >= 90 ? '#16a34a'
+                                                            : pct >= 70 ? '#2563eb'
+                                                            : pct >= 50 ? '#d97706'
+                                                            : '#dc2626';
+
+                                                        return (
+                                                            <tr
+                                                                key={row.student.id}
+                                                                className="hover:bg-gray-50/70 transition-colors"
+                                                            >
+                                                                {/* Index */}
+                                                                <td className="px-4 py-3 text-xs text-gray-400 w-8">{idx + 1}</td>
+
+                                                                {/* Student */}
+                                                                <td className="px-4 py-3">
+                                                                    <div className="flex items-center gap-3 min-w-0">
+                                                                        <div
+                                                                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                                                                            style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
+                                                                        >
+                                                                            {row.student.full_name.charAt(0).toUpperCase()}
+                                                                        </div>
+                                                                        <div className="min-w-0">
+                                                                            <p className="font-medium text-gray-900 truncate text-sm">{row.student.full_name}</p>
+                                                                            <p className="text-xs text-gray-400 truncate">{row.student.email}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+
+                                                                {/* Student ID */}
+                                                                <td className="px-4 py-3 text-xs text-gray-500 font-mono hidden sm:table-cell">
+                                                                    {row.student.student_id ?? <span className="text-gray-300 italic">—</span>}
+                                                                </td>
+
+                                                                {/* Status */}
+                                                                <td className="px-4 py-3 text-center">
+                                                                    {hasSubmission ? (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                                                            <CheckSquare className="w-3 h-3" /> Submitted
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">
+                                                                            <MinusSquare className="w-3 h-3" /> Missing
+                                                                        </span>
+                                                                    )}
+                                                                </td>
+
+                                                                {/* Score */}
+                                                                <td className="px-4 py-3">
+                                                                    <div className="flex flex-col items-end gap-1 min-w-[100px]">
+                                                                        <div className="flex items-baseline gap-1">
+                                                                            {row.score !== null ? (
+                                                                                <>
+                                                                                    <span className="text-sm font-bold" style={{ color: barColor }}>
+                                                                                        {row.score % 1 === 0 ? row.score : row.score.toFixed(1)}
+                                                                                    </span>
+                                                                                    <span className="text-xs text-gray-400">/ {max}</span>
+                                                                                </>
+                                                                            ) : (
+                                                                                <span className="text-xs text-gray-400 italic">Not graded</span>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                                            <div
+                                                                                className="h-full rounded-full transition-all"
+                                                                                style={{
+                                                                                    width: pct !== null ? `${Math.min(pct, 100)}%` : '0%',
+                                                                                    backgroundColor: barColor,
+                                                                                }}
+                                                                            />
+                                                                        </div>
+                                                                        {pct !== null && (
+                                                                            <span className="text-[10px] font-medium" style={{ color: barColor }}>
+                                                                                {pct.toFixed(0)}%
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+
+                                                                {/* Letter grade */}
+                                                                <td className="px-4 py-3 text-center hidden md:table-cell">
+                                                                    <span className={`inline-block px-2.5 py-0.5 rounded text-xs font-bold border ${getLetterGradeStyle(grade)}`}>
+                                                                        {grade}
+                                                                    </span>
+                                                                </td>
+
+                                                                {/* Attempts */}
+                                                                <td className="px-4 py-3 text-center text-sm text-gray-600 hidden lg:table-cell">
+                                                                    {row.attempts > 0 ? row.attempts : <span className="text-gray-300">0</span>}
+                                                                </td>
+
+                                                                {/* Actions */}
+                                                                <td className="px-4 py-3 text-right hidden lg:table-cell">
+                                                                    {hasSubmission ? (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant="outline"
+                                                                            onClick={() => navigateToGrading(row.student.id)}
+                                                                            className="h-7 px-2.5 text-xs gap-1"
+                                                                        >
+                                                                            <Eye className="w-3 h-3" /> Grade
+                                                                        </Button>
+                                                                    ) : (
+                                                                        <span className="text-xs text-gray-300 italic">No submission</span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {/* Footer summary */}
+                                        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+                                            <span>{gradebookRows.length} student{gradebookRows.length !== 1 ? 's' : ''} shown</span>
+                                            {gradebookSearch && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setGradebookSearch('')}
+                                                    className="text-xs text-gray-400 hover:text-gray-700 underline"
+                                                >
+                                                    Clear search
+                                                </button>
+                                            )}
+                                        </div>
+                                    </Card>
+                                )}
+                            </>
+                        )}
                     </div>
                 )}
             </div>

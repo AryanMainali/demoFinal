@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, model_validator
 
 from app.schemas.language import Language as LanguageSchema
+from app.schemas.rubric_template import TemplateResponse
 
 # --- Test Case Schemas ---
 
@@ -118,6 +119,9 @@ class AssignmentBase(BaseModel):
     is_published: bool = False
     grades_published: bool = False
     is_weighted: bool = True
+    is_template_rubric: bool = False
+    rubric_template_id: Optional[int] = None
+    bonus_points: float = 0.0
 
     @model_validator(mode='after')
     def validate_date_range(self):
@@ -160,6 +164,9 @@ class AssignmentUpdate(BaseModel):
 
     is_published: Optional[bool] = None
     is_weighted: Optional[bool] = None
+    is_template_rubric: Optional[bool] = None
+    rubric_template_id: Optional[int] = None
+    bonus_points: Optional[float] = None
     test_cases: Optional[List[TestCaseCreate]] = None
     rubric: Optional[RubricUpdate] = None
 
@@ -194,3 +201,4 @@ class AssignmentDetail(Assignment):
     rubric: Optional[Rubric] = None
     test_cases: List[TestCase] = []
     test_suites: List[Any] = []
+    rubric_template: Optional[TemplateResponse] = None

@@ -81,6 +81,31 @@ interface RunCodeResult {
     stderr?: string | null
 }
 
+interface RubricLevel {
+    id: number
+    score: number
+    comment: string
+}
+
+interface RubricTemplateItem {
+    id: number
+    name: string
+    description?: string | null
+    min_scale: number
+    max_scale: number
+    weight: number
+    points: number
+    sort_order: number
+    levels: RubricLevel[]
+}
+
+interface RubricTemplate {
+    id: number
+    title: string
+    description?: string | null
+    items: RubricTemplateItem[]
+}
+
 interface Assignment {
     id: number
     title: string
@@ -98,6 +123,7 @@ interface Assignment {
     allow_groups: boolean
     max_group_size: number
     grades_published: boolean
+    is_template_rubric?: boolean
     language: {
         id: number
         name: string
@@ -109,7 +135,19 @@ interface Assignment {
         name: string
         code: string
     }
-    rubric?: any
+    rubric?: {
+        items: {
+            id: number
+            name: string
+            description?: string | null
+            weight: number
+            points: number
+            min_points: number
+            max_points: number
+        }[]
+        total_points: number
+    } | null
+    rubric_template?: RubricTemplate | null
 }
 
 interface GroupMember {
@@ -206,6 +244,7 @@ export default function StudentAssignmentPage() {
     const [rightPanel, setRightPanel] = useState<'description' | 'instructions' | 'rubric' | 'grading' | 'supplementary' | 'custom' | 'group' | null>(null)
     const [showConfetti, setShowConfetti] = useState(false)
     const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set())
+    const [expandedLevels, setExpandedLevels] = useState<Set<number>>(new Set())
     const [submittedAttemptNum, setSubmittedAttemptNum] = useState<number | null>(null)
 
     // API
@@ -1447,62 +1486,196 @@ export default function StudentAssignmentPage() {
                                 )}
 
                                 {rightPanel === 'rubric' && (
-                                    <div>
-                                        {assignment.rubric ? (
-                                            <div className="space-y-3">
-                                                <p className="text-[12px] text-[#bdbdbd]">
-                                                    Your submission will be evaluated against these criteria.
-                                                </p>
-                                                <div className="rounded-lg border border-[#3c3c3c] overflow-hidden">
-                                                    <div className="px-3 py-2.5 bg-[#1e1e1e] border-b border-[#3c3c3c] flex items-center justify-between">
-                                                        <span className="text-[11px] font-semibold text-[#cccccc] uppercase tracking-wider">Criteria</span>
-                                                        <span className="text-[11px] text-[#dcdcaa] font-semibold">
-                                                            {assignment.rubric.total_points} pts total
-                                                        </span>
+                                    <div className="space-y-3">
+                                        {(() => {
+                                            const isTemplate = assignment.is_template_rubric
+                                            const rubric = assignment.rubric
+                                            const template = assignment.rubric_template
+
+                                            // Determine rubric items (could come from rubric or template)
+                                            const rubricItems = rubric?.items ?? []
+                                            const hasRubric = rubricItems.length > 0
+
+                                            if (!hasRubric) {
+                                                return (
+                                                    <div className="text-center py-10">
+                                                        <ClipboardList className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                        <p className="text-[#858585] text-[13px]">No rubric for this assignment.</p>
                                                     </div>
-                                                    <div className="divide-y divide-[#3c3c3c]">
-                                                        {assignment.rubric.items?.map((item: any, idx: number) => {
-                                                            const hasScale = item.min_points != null && item.max_points != null
-                                                            // Find graded score for this item if available
-                                                            const gradedScore = latestSubmissionDetail?.rubric_scores?.find(
-                                                                rs => rs.rubric_item_id === item.id
-                                                            )
+                                                )
+                                            }
+
+                                            return (
+                                                <>
+                                                    {/* Header */}
+                                                    {isTemplate && template && (
+                                                        <div className="rounded-lg border border-[#3c3c3c] bg-[#1a1a2e] px-3 py-2.5">
+                                                            <p className="text-[11px] font-semibold text-[#c586c0] flex items-center gap-1.5">
+                                                                <ClipboardList className="w-3.5 h-3.5" /> {template.title}
+                                                            </p>
+                                                            {template.description && (
+                                                                <p className="text-[10px] text-[#858585] mt-0.5">{template.description}</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    <p className="text-[11px] text-[#858585]">
+                                                        Your submission will be evaluated against these criteria.
+                                                    </p>
+
+                                                    {/* Total */}
+                                                    <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#1e1e1e] border border-[#3c3c3c]">
+                                                        <span className="text-[11px] text-[#bdbdbd]">Total rubric points</span>
+                                                        <span className="text-[12px] font-bold text-[#dcdcaa]">{rubric?.total_points ?? 0} pts</span>
+                                                    </div>
+
+                                                    {/* Criteria list */}
+                                                    <div className="rounded-lg border border-[#3c3c3c] overflow-hidden divide-y divide-[#3c3c3c]">
+                                                        {rubricItems.map((item, idx) => {
+                                                            const templateItem = template?.items?.find(ti => ti.id === item.id)
+                                                            const levels = templateItem?.levels ?? []
+                                                            const hasLevels = levels.length > 0
+                                                            const isLevelsOpen = expandedLevels.has(item.id)
+
+                                                            // Graded score for this criterion
+                                                            const gradedScore = gradesPublished
+                                                                ? latestSubmissionDetail?.rubric_scores?.find(rs => rs.rubric_item_id === item.id)
+                                                                : null
+
+                                                            const rawItemScore = gradedScore ? Number(gradedScore.score) : null
+                                                            const scaleMax = item.max_points
+                                                            const pts = item.points
+                                                            const weighted = scaleMax > 0 && rawItemScore !== null
+                                                                ? (rawItemScore / scaleMax) * pts
+                                                                : null
+                                                            const pct = pts > 0 && weighted !== null ? (weighted / pts) * 100 : null
+                                                            const scoreColor = pct === null ? '#858585'
+                                                                : pct >= 90 ? '#4ec9b0'
+                                                                : pct >= 70 ? '#dcdcaa'
+                                                                : pct >= 50 ? '#ce9178'
+                                                                : '#f44747'
+
+                                                            // Find matching level descriptor
+                                                            const matchedLevel = hasLevels && rawItemScore !== null
+                                                                ? levels.find(l => l.score === rawItemScore) ?? null
+                                                                : null
+
                                                             return (
-                                                                <div key={item.id ?? idx} className="px-3 py-3 hover:bg-[#2a2d2e]">
-                                                                    <div className="flex items-start justify-between gap-2 mb-1">
-                                                                        <span className="text-[12px] font-medium text-white leading-tight">{item.name}</span>
-                                                                        <span className="text-[11px] text-[#dcdcaa] font-semibold shrink-0">
-                                                                            {gradedScore != null
-                                                                                ? `${Number(gradedScore.score).toFixed(1)} / ${item.points ?? item.max_points ?? '?'}`
-                                                                                : `${item.points ?? item.max_points ?? '?'} pts`
-                                                                            }
-                                                                        </span>
+                                                                <div key={item.id ?? idx} className="bg-[#252526]">
+                                                                    <div className="px-3 py-2.5">
+                                                                        {/* Criterion name + score */}
+                                                                        <div className="flex items-start justify-between gap-2 mb-1">
+                                                                            <span className="text-[12px] font-semibold text-white leading-tight">{item.name}</span>
+                                                                            <span className="text-[11px] font-bold shrink-0" style={{ color: gradedScore ? scoreColor : '#dcdcaa' }}>
+                                                                                {gradedScore
+                                                                                    ? `${(weighted ?? 0).toFixed(1)} / ${pts} pts`
+                                                                                    : `${pts} pts`
+                                                                                }
+                                                                            </span>
+                                                                        </div>
+
+                                                                        {item.description && (
+                                                                            <p className="text-[11px] text-[#858585] leading-relaxed mb-1.5">{item.description}</p>
+                                                                        )}
+
+                                                                        {/* Scale info */}
+                                                                        <p className="text-[10px] text-[#606060]">
+                                                                            Scale: {item.min_points} – {item.max_points}
+                                                                            {scaleMax > 0 && ` → 0 – ${pts} pts`}
+                                                                        </p>
+
+                                                                        {/* Score bar when graded */}
+                                                                        {gradedScore && pct !== null && (
+                                                                            <div className="mt-2">
+                                                                                <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                                                    <div className="h-full rounded-full transition-all duration-500"
+                                                                                        style={{ width: `${pct}%`, backgroundColor: scoreColor }} />
+                                                                                </div>
+                                                                                <p className="text-[10px] mt-0.5 font-medium" style={{ color: scoreColor }}>
+                                                                                    {rawItemScore?.toFixed(1)}/{scaleMax} × {pts} = {(weighted ?? 0).toFixed(1)} pts ({pct.toFixed(0)}%)
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Matched level descriptor (when graded) */}
+                                                                        {matchedLevel && (
+                                                                            <div className="mt-2 rounded border border-[#4ec9b0]/30 bg-[#4ec9b0]/5 p-2">
+                                                                                <p className="text-[10px] font-semibold text-[#4ec9b0] mb-0.5">
+                                                                                    Score {matchedLevel.score} — Achieved level
+                                                                                </p>
+                                                                                <p className="text-[11px] text-[#c8c8c8] leading-relaxed">{matchedLevel.comment}</p>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Instructor comment */}
+                                                                        {gradedScore?.comment && (
+                                                                            <p className="mt-2 text-[11px] text-[#a0a0a0] bg-[#1e1e1e] rounded p-2 border border-[#3c3c3c] leading-relaxed">
+                                                                                💬 {gradedScore.comment}
+                                                                            </p>
+                                                                        )}
+
+                                                                        {/* Level descriptors toggle */}
+                                                                        {hasLevels && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => setExpandedLevels(prev => {
+                                                                                    const next = new Set(prev)
+                                                                                    if (next.has(item.id)) next.delete(item.id)
+                                                                                    else next.add(item.id)
+                                                                                    return next
+                                                                                })}
+                                                                                className="mt-2 text-[10px] text-[#569cd6] hover:text-[#9cdcfe] flex items-center gap-1 transition-colors"
+                                                                            >
+                                                                                {isLevelsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                                                                {isLevelsOpen ? 'Hide' : 'Show'} scoring levels ({levels.length})
+                                                                            </button>
+                                                                        )}
                                                                     </div>
-                                                                    {item.description && (
-                                                                        <p className="text-[11px] text-[#858585] mt-0.5 leading-relaxed">{item.description}</p>
-                                                                    )}
-                                                                    {hasScale && (
-                                                                        <p className="text-[10px] text-[#606060] mt-1">
-                                                                            Scale: {item.min_points} – {item.max_points} → 0 – {item.points} pts
-                                                                        </p>
-                                                                    )}
-                                                                    {gradedScore?.comment && (
-                                                                        <p className="mt-1.5 text-[11px] text-[#a0a0a0] bg-[#1e1e1e] rounded p-1.5 border border-[#3c3c3c]">
-                                                                            💬 {gradedScore.comment}
-                                                                        </p>
+
+                                                                    {/* Level descriptors (expanded) */}
+                                                                    {hasLevels && isLevelsOpen && (
+                                                                        <div className="border-t border-[#3c3c3c] bg-[#1e1e1e]">
+                                                                            {[...levels].sort((a, b) => b.score - a.score).map(level => {
+                                                                                const isAchieved = gradedScore && rawItemScore === level.score
+                                                                                return (
+                                                                                    <div
+                                                                                        key={level.id}
+                                                                                        className={`px-3 py-2 border-b border-[#2a2a2a] last:border-0 ${isAchieved ? 'bg-[#4ec9b0]/8' : ''}`}
+                                                                                    >
+                                                                                        <div className="flex items-center gap-2 mb-0.5">
+                                                                                            <span className={`text-[11px] font-bold min-w-[28px] ${isAchieved ? 'text-[#4ec9b0]' : 'text-[#dcdcaa]'}`}>
+                                                                                                {level.score}
+                                                                                            </span>
+                                                                                            {isAchieved && (
+                                                                                                <span className="text-[9px] font-semibold text-[#4ec9b0] border border-[#4ec9b0]/40 rounded px-1 py-0.5">
+                                                                                                    ✓ Your score
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                        {level.comment && (
+                                                                                            <p className={`text-[11px] leading-relaxed ${isAchieved ? 'text-[#c8c8c8]' : 'text-[#858585]'}`}>
+                                                                                                {level.comment}
+                                                                                            </p>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )
+                                                                            })}
+                                                                        </div>
                                                                     )}
                                                                 </div>
                                                             )
                                                         })}
                                                     </div>
-                                                </div>
-                                            </div>
-                                        ) : (
-                                            <div className="text-center py-8">
-                                                <ClipboardList className="w-10 h-10 mx-auto text-[#505050] mb-3" />
-                                                <p className="text-[#858585]">No rubric for this assignment.</p>
-                                            </div>
-                                        )}
+
+                                                    {/* Not yet graded notice */}
+                                                    {!gradesPublished && isSubmitted && (
+                                                        <p className="text-[10px] text-[#606060] text-center">
+                                                            Scores will appear here once grades are published.
+                                                        </p>
+                                                    )}
+                                                </>
+                                            )
+                                        })()}
                                     </div>
                                 )}
 
@@ -1586,28 +1759,36 @@ export default function StudentAssignmentPage() {
                                                             {/* Rubric item breakdown */}
                                                             {latestSubmissionDetail?.rubric_scores && latestSubmissionDetail.rubric_scores.length > 0 && (
                                                                 <div className="rounded-lg border border-[#3c3c3c] overflow-hidden">
-                                                                    <div className="px-3 py-2 bg-[#1e1e1e] border-b border-[#3c3c3c]">
+                                                                    <div className="px-3 py-2 bg-[#1e1e1e] border-b border-[#3c3c3c] flex items-center justify-between">
                                                                         <span className="text-[10px] font-semibold text-[#bdbdbd] uppercase tracking-wider">Rubric Criteria</span>
+                                                                        {assignment.is_template_rubric && assignment.rubric_template && (
+                                                                            <span className="text-[10px] text-[#c586c0]">{assignment.rubric_template.title}</span>
+                                                                        )}
                                                                     </div>
                                                                     <div className="divide-y divide-[#3c3c3c]">
                                                                         {latestSubmissionDetail.rubric_scores.map((rs, idx) => {
-                                                                            const rubricItem = assignment?.rubric?.items?.find((item: any) => item?.id === rs.rubric_item_id)
-                                                                            const rubricScaleMax = Number(rubricItem?.max_points ?? rs?.item?.max_points ?? 0)
-                                                                            const criterionMaxPoints = Number(rubricItem?.points ?? rs.max_score ?? 0)
+                                                                            const rubricItem = assignment?.rubric?.items?.find(item => item?.id === rs.rubric_item_id)
+                                                                            const templateItem = assignment?.rubric_template?.items?.find(ti => ti.id === rs.rubric_item_id)
+                                                                            const itemName = rubricItem?.name ?? rs?.item?.name ?? templateItem?.name ?? `Criterion ${idx + 1}`
+                                                                            const rubricScaleMax = Number(rubricItem?.max_points ?? templateItem?.max_scale ?? rs?.item?.max_points ?? 0)
+                                                                            const criterionMaxPoints = Number(rubricItem?.points ?? templateItem?.points ?? rs.max_score ?? 0)
                                                                             const itemScore = Number(rs.score ?? 0)
                                                                             const weightedCriterionScore = rubricScaleMax > 0
                                                                                 ? (itemScore / rubricScaleMax) * criterionMaxPoints
                                                                                 : itemScore
                                                                             const itemPct = criterionMaxPoints > 0 ? (weightedCriterionScore / criterionMaxPoints) * 100 : 0
                                                                             const itemColor = itemPct >= 90 ? '#4ec9b0' : itemPct >= 70 ? '#dcdcaa' : itemPct >= 50 ? '#ce9178' : '#f44747'
+
+                                                                            // Level descriptor for this score
+                                                                            const levels = templateItem?.levels ?? []
+                                                                            const matchedLevel = levels.find(l => l.score === itemScore) ?? null
+
                                                                             return (
                                                                                 <div key={`${rs.rubric_item_id}-${idx}`} className="px-3 py-3 hover:bg-[#2a2d2e]">
                                                                                     <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                                                        <span className="text-[12px] font-medium text-white truncate">
-                                                                                            {rs?.item?.name || `Criterion ${idx + 1}`}
-                                                                                        </span>
+                                                                                        <span className="text-[12px] font-medium text-white truncate">{itemName}</span>
                                                                                         <span className="text-[11px] font-semibold shrink-0" style={{ color: itemColor }}>
-                                                                                            {weightedCriterionScore.toFixed(1)}/{criterionMaxPoints.toFixed(1)}
+                                                                                            {weightedCriterionScore.toFixed(1)}/{criterionMaxPoints.toFixed(1)} pts
                                                                                         </span>
                                                                                     </div>
                                                                                     {rubricScaleMax > 0 && criterionMaxPoints > 0 && (
@@ -1619,9 +1800,20 @@ export default function StudentAssignmentPage() {
                                                                                         <div className="h-full rounded-full transition-all duration-500"
                                                                                             style={{ width: `${itemPct}%`, backgroundColor: itemColor }} />
                                                                                     </div>
+
+                                                                                    {/* Matched level descriptor */}
+                                                                                    {matchedLevel && matchedLevel.comment && (
+                                                                                        <div className="mt-2 rounded border border-[#4ec9b0]/25 bg-[#4ec9b0]/5 px-2 py-1.5">
+                                                                                            <p className="text-[10px] font-semibold text-[#4ec9b0] mb-0.5">
+                                                                                                Score {matchedLevel.score}
+                                                                                            </p>
+                                                                                            <p className="text-[11px] text-[#c8c8c8] leading-relaxed">{matchedLevel.comment}</p>
+                                                                                        </div>
+                                                                                    )}
+
                                                                                     {rs.comment && (
                                                                                         <p className="mt-2 text-[11px] text-[#a0a0a0] whitespace-pre-wrap leading-relaxed bg-[#1e1e1e] rounded p-2 border border-[#3c3c3c]">
-                                                                                            {rs.comment}
+                                                                                            💬 {rs.comment}
                                                                                         </p>
                                                                                     )}
                                                                                 </div>

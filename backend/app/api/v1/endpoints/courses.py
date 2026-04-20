@@ -1076,6 +1076,15 @@ class GroupCreate(BaseModel):
     max_members: int = 4
 
 
+class GroupUpdate(BaseModel):
+    name: Optional[str] = None
+    max_members: Optional[int] = None
+
+
+class AutoAssignRequest(BaseModel):
+    group_size: int
+
+
 class GroupMemberRequest(BaseModel):
     user_id: int
 
@@ -1323,3 +1332,128 @@ def remove_group_member(
 
     db.commit()
     return {"message": "Member removed from group"}
+
+
+@router.put("/{course_id}/groups/{group_id}", response_model=GroupResponse)
+def update_course_group(
+    course_id: int,
+    group_id: int,
+    group_in: GroupUpdate,
+    current_user: User = Depends(require_roles(UserRole.FACULTY, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Update a group's name and/or max_members."""
+    _authorize_course_faculty(course_id, current_user, db)
+    group = db.query(Group).filter(Group.id == group_id, Group.course_id == course_id).first()
+    if not group:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    if group_in.name is not None:
+        if not group_in.name.strip():
+            raise HTTPException(status_code=422, detail="Group name cannot be empty")
+        group.name = group_in.name.strip()
+    if group_in.max_members is not None:
+        if group_in.max_members < 1:
+            raise HTTPException(status_code=422, detail="Max members must be at least 1")
+        group.max_members = group_in.max_members
+    db.commit()
+    db.refresh(group)
+
+    members = db.query(GroupMembership).filter(GroupMembership.group_id == group.id).all()
+    return GroupResponse(
+        id=group.id,
+        name=group.name,
+        max_members=group.max_members,
+        created_at=group.created_at.isoformat(),
+        members=[
+            GroupMemberResponse(
+                id=m.id,
+                user_id=m.user_id,
+                full_name=m.user.full_name if m.user else "",
+                email=m.user.email if m.user else "",
+                student_id=m.user.student_id if m.user else None,
+                is_leader=m.is_leader,
+            )
+            for m in members
+        ],
+    )
+
+
+@router.post("/{course_id}/groups/auto-assign", response_model=List[GroupResponse])
+def auto_assign_groups(
+    course_id: int,
+    req: AutoAssignRequest,
+    current_user: User = Depends(require_roles(UserRole.FACULTY, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Randomly assign all unassigned enrolled students into groups of req.group_size."""
+    import random
+
+    _authorize_course_faculty(course_id, current_user, db)
+
+    if req.group_size < 1:
+        raise HTTPException(status_code=422, detail="Group size must be at least 1")
+
+    # Fetch all active enrollments
+    enrollments = (
+        db.query(Enrollment)
+        .filter(Enrollment.course_id == course_id, Enrollment.status == EnrollmentStatus.ACTIVE)
+        .all()
+    )
+    enrolled_ids = {e.student_id for e in enrollments}
+
+    # Find already-assigned student IDs
+    assigned = (
+        db.query(GroupMembership.user_id)
+        .join(Group)
+        .filter(Group.course_id == course_id)
+        .all()
+    )
+    assigned_ids = {r.user_id for r in assigned}
+
+    unassigned_ids = list(enrolled_ids - assigned_ids)
+    if not unassigned_ids:
+        raise HTTPException(status_code=400, detail="All enrolled students are already assigned to groups.")
+
+    random.shuffle(unassigned_ids)
+
+    # Figure out current group count for naming
+    existing_count = db.query(Group).filter(Group.course_id == course_id).count()
+
+    # Chunk students into groups of group_size
+    chunks = [unassigned_ids[i:i + req.group_size] for i in range(0, len(unassigned_ids), req.group_size)]
+
+    created_groups = []
+    for idx, chunk in enumerate(chunks):
+        group = Group(
+            course_id=course_id,
+            name=f"Group {existing_count + idx + 1}",
+            max_members=req.group_size,
+        )
+        db.add(group)
+        db.flush()
+
+        members_out = []
+        for pos, user_id in enumerate(chunk):
+            m = GroupMembership(group_id=group.id, user_id=user_id, is_leader=(pos == 0))
+            db.add(m)
+            db.flush()
+            user = db.query(User).filter(User.id == user_id).first()
+            members_out.append(GroupMemberResponse(
+                id=m.id,
+                user_id=m.user_id,
+                full_name=user.full_name if user else "",
+                email=user.email if user else "",
+                student_id=user.student_id if user else None,
+                is_leader=m.is_leader,
+            ))
+
+        created_groups.append(GroupResponse(
+            id=group.id,
+            name=group.name,
+            max_members=group.max_members,
+            created_at=group.created_at.isoformat(),
+            members=members_out,
+        ))
+
+    db.commit()
+    return created_groups

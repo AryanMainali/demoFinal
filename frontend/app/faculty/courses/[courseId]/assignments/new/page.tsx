@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import apiClient from '@/lib/api-client';
 import { Input } from '@/components/ui/input';
@@ -131,9 +132,18 @@ export function AssignmentUpsertPage({
 
     // Rubric: per-criterion min/max scale + total points (must sum to max_score)
     const [rubricEnabled, setRubricEnabled] = useState(false);
-    const [isWeighted, setIsWeighted] = useState(true);
+    const [rubricMode, setRubricMode] = useState<'weighted' | 'unweighted' | 'template'>('weighted');
+    const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
     const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
     const [rubricLibrary, setRubricLibrary] = useState<RubricLibraryItem[]>([]);
+    const [bonusPoints, setBonusPoints] = useState(0);
+
+    // Load course rubric templates for the Template mode
+    const { data: courseTemplates = [] } = useQuery<{ id: number; title: string; description?: string; item_count: number; total_points: number }[]>({
+        queryKey: ['rubric-templates', courseId],
+        queryFn: () => apiClient.getCourseRubricTemplates(courseId),
+        enabled: !!courseId && !isNaN(courseId),
+    });
 
     // Load reusable rubric items for selection
     useEffect(() => {
@@ -286,11 +296,21 @@ export function AssignmentUpsertPage({
                     })),
                 );
 
+                // Prefill bonus points
+                setBonusPoints(existing.bonus_points ?? 0);
+
                 // Prefill rubric if present
                 const rubric = existing.rubric?.items ?? [];
                 if (Array.isArray(rubric) && rubric.length > 0) {
                     setRubricEnabled(true);
-                    setIsWeighted(existing.is_weighted ?? true);
+                    if (existing.is_template_rubric) {
+                        setRubricMode('template');
+                        setSelectedTemplateId(existing.rubric_template_id ?? null);
+                    } else if (existing.is_weighted === false) {
+                        setRubricMode('unweighted');
+                    } else {
+                        setRubricMode('weighted');
+                    }
                     setRubricItems(
                         rubric.map((item: any) => ({
                             name: item.name ?? '',
@@ -391,14 +411,29 @@ export function AssignmentUpsertPage({
 
     // ─── Rubric Management (flat list of items) ───
     const addRubricItem = () => {
+        const posCount = rubricItems.filter(i => Number(i.totalPoints) >= 0).length;
         setRubricItems(prev => [
             ...prev,
             {
-                name: `Criterion ${prev.length + 1}`,
+                name: `Criterion ${posCount + 1}`,
                 description: '',
                 minPoints: 0,
                 maxPoints: 5,
                 totalPoints: 0,
+            },
+        ]);
+    };
+
+    const addPenaltyItem = () => {
+        const penCount = rubricItems.filter(i => Number(i.totalPoints) < 0).length;
+        setRubricItems(prev => [
+            ...prev,
+            {
+                name: `Penalty ${penCount + 1}`,
+                description: '',
+                minPoints: 0,
+                maxPoints: 1,
+                totalPoints: -1,
             },
         ]);
     };
@@ -470,15 +505,16 @@ export function AssignmentUpsertPage({
 
             if (rubricEnabled && rubricItems.length > 0) {
                 const maxScore = Number(values.max_score) || 100;
-                const pointsSum = rubricItems.reduce((s, i) => s + (Number(i.totalPoints) || 0), 0);
-                if (Math.abs(pointsSum - maxScore) > 0.01) {
-                    setError(`Rubric total points must sum to the assignment max score (${maxScore}). Current total: ${pointsSum.toFixed(1)}.`);
+                const positiveItems = rubricItems.filter(i => Number(i.totalPoints) >= 0);
+                const positiveSum = positiveItems.reduce((s, i) => s + Number(i.totalPoints), 0);
+                if (Math.abs(positiveSum - maxScore) > 0.01) {
+                    setError(`Positive criteria must sum to the assignment max score (${maxScore}). Current positive total: ${positiveSum.toFixed(1)}. Penalty items are deductions on top of that.`);
                     setErrorModalOpen(true);
                     setLoading(false);
                     return;
                 }
-                if (isWeighted) {
-                    const invalidItem = rubricItems.find((item) => {
+                if (rubricMode === 'weighted') {
+                    const invalidItem = rubricItems.filter(i => Number(i.totalPoints) >= 0).find((item) => {
                         return Number(item.maxPoints) <= Number(item.minPoints);
                     });
                     if (invalidItem) {
@@ -516,7 +552,10 @@ export function AssignmentUpsertPage({
                 enable_ai_detection: values.enable_ai_detection,
                 ai_detection_threshold: values.ai_detection_threshold,
                 is_published: values.is_published,
-                is_weighted: rubricEnabled ? isWeighted : true,
+                is_weighted: rubricEnabled ? rubricMode === 'weighted' : true,
+                is_template_rubric: rubricEnabled && rubricMode === 'template',
+                rubric_template_id: rubricEnabled && rubricMode === 'template' ? selectedTemplateId : null,
+                bonus_points: bonusPoints || 0,
             };
 
             const fileToBase64 = async (file: File | null | undefined): Promise<string | undefined> => {
@@ -589,17 +628,18 @@ export function AssignmentUpsertPage({
                 payload.test_cases = testCasePayloads;
             }
 
-            if (rubricEnabled && rubricItems.length > 0) {
+            if (rubricEnabled && rubricItems.length > 0 && rubricMode !== 'template') {
                 const maxScore = Number(values.max_score) || 100;
                 payload.rubric = {
                     items: rubricItems.map((item) => {
-                        const totalPts = Number(item.totalPoints) || 0;
+                        const totalPts = isNaN(Number(item.totalPoints)) ? 0 : Number(item.totalPoints);
+                        const isPenalty = totalPts < 0;
                         const weight = maxScore > 0 ? (totalPts / maxScore) * 100 : 0;
                         return {
                             name: item.name.trim(),
                             description: (item.description || '').trim() || undefined,
-                            min_points: isWeighted ? (Number(item.minPoints) || 0) : 0,
-                            max_points: isWeighted ? (Number(item.maxPoints) || 5) : 1,
+                            min_points: isPenalty ? totalPts : (rubricMode === 'weighted' ? (Number(item.minPoints) || 0) : 0),
+                            max_points: isPenalty ? 0 : (rubricMode === 'weighted' ? (Number(item.maxPoints) || 5) : 1),
                             points: totalPts,
                             weight,
                         };
@@ -973,6 +1013,21 @@ export function AssignmentUpsertPage({
                                         error={errors.passing_score?.message}
                                         placeholder="60"
                                     />
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                                            Bonus Points
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            step={1}
+                                            value={bonusPoints}
+                                            onChange={(e) => setBonusPoints(parseFloat(e.target.value) || 0)}
+                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                                            placeholder="0"
+                                        />
+                                        <p className="mt-1 text-xs text-gray-400">Added on top of the assignment max score</p>
+                                    </div>
                                 </div>
 
                                 {/* Late Policy */}
@@ -1380,171 +1435,372 @@ export function AssignmentUpsertPage({
 
                                 {rubricEnabled && (
                                     <>
-                                        {/* Weighted / Unweighted toggle */}
-                                        <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                                            <span className="text-sm font-medium text-gray-700 mr-1">Grading type:</span>
+                                        {/* Rubric mode toggle */}
+                                        <div className="flex flex-wrap items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                            <span className="text-sm font-medium text-gray-700">Grading type:</span>
                                             <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5 text-sm">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setIsWeighted(true)}
-                                                    className={`px-4 py-1.5 rounded-md font-medium transition-all ${isWeighted
-                                                        ? 'bg-indigo-600 text-white shadow-sm'
-                                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                                                    }`}
-                                                >
-                                                    Weighted
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setIsWeighted(false)}
-                                                    className={`px-4 py-1.5 rounded-md font-medium transition-all ${!isWeighted
-                                                        ? 'bg-indigo-600 text-white shadow-sm'
-                                                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                                                    }`}
-                                                >
-                                                    Unweighted
-                                                </button>
+                                                {(['weighted', 'unweighted', 'template'] as const).map((mode) => (
+                                                    <button
+                                                        key={mode}
+                                                        type="button"
+                                                        onClick={() => setRubricMode(mode)}
+                                                        className={`px-4 py-1.5 rounded-md font-medium capitalize transition-all ${rubricMode === mode
+                                                            ? 'bg-indigo-600 text-white shadow-sm'
+                                                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                                                        }`}
+                                                    >
+                                                        {mode === 'template' ? 'Template' : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                                                    </button>
+                                                ))}
                                             </div>
                                             <span className="text-xs text-gray-500">
-                                                {isWeighted
-                                                    ? 'Each criterion has a rubric scale (e.g. 0–5) and total points'
-                                                    : 'Each criterion has a name, description, and point value only'}
+                                                {rubricMode === 'weighted' && 'Each criterion has a rubric scale (e.g. 0–5) and total points'}
+                                                {rubricMode === 'unweighted' && 'Each criterion has a name, description, and point value only'}
+                                                {rubricMode === 'template' && 'Use a pre-built course rubric template'}
                                             </span>
                                         </div>
 
-                                        {/* Summary banner */}
-                                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 flex items-center justify-between gap-3">
-                                            {isWeighted
-                                                ? <span>Each criterion has its own rubric scale (e.g. 0–5) and total assignment points. A score of <strong>max</strong> on the scale earns all total points. Total points must sum to <strong>{watchMaxScore}</strong>.</span>
-                                                : <span>Each criterion has a name, description, and point value. Total points must sum to <strong>{watchMaxScore}</strong>.</span>
-                                            }
-                                            {(() => {
-                                                const total = rubricItems.reduce((s, i) => s + (Number(i.totalPoints) || 0), 0);
-                                                const ok = Math.abs(total - watchMaxScore) < 0.01;
-                                                return rubricItems.length > 0 ? (
-                                                    <span className={`font-semibold whitespace-nowrap ${ok ? 'text-green-700' : 'text-orange-700'}`}>
-                                                        {total.toFixed(1)} / {watchMaxScore} pts
-                                                    </span>
-                                                ) : null;
-                                            })()}
-                                        </div>
+                                        {/* Template picker */}
+                                        {rubricMode === 'template' && (
+                                            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-3">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                                                        Select Rubric Template <span className="text-red-500">*</span>
+                                                    </label>
+                                                    <select
+                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                        value={selectedTemplateId ?? ''}
+                                                        onChange={(e) => setSelectedTemplateId(e.target.value ? Number(e.target.value) : null)}
+                                                    >
+                                                        <option value="">— Choose a template —</option>
+                                                        {courseTemplates.map((tpl) => (
+                                                            <option key={tpl.id} value={tpl.id}>
+                                                                {tpl.title} ({tpl.item_count} criteria · {tpl.total_points} pts)
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    {courseTemplates.length === 0 && (
+                                                        <p className="mt-1.5 text-xs text-amber-700 flex items-center gap-1">
+                                                            <AlertCircle className="w-3.5 h-3.5" />
+                                                            No templates yet — create one on the Assignments page first.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                {selectedTemplateId && (() => {
+                                                    const tpl = courseTemplates.find((t) => t.id === selectedTemplateId);
+                                                    return tpl ? (
+                                                        <div className="text-xs text-indigo-800 bg-white rounded-lg px-3 py-2 border border-indigo-200">
+                                                            <span className="font-semibold">{tpl.title}</span> — {tpl.item_count} criteria, {tpl.total_points} total points
+                                                        </div>
+                                                    ) : null;
+                                                })()}
+                                            </div>
+                                        )}
 
-                                        {rubricItems.length === 0 ? (
+                                        {/* Penalty deductions (template mode only) */}
+                                        {rubricMode === 'template' && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-gray-800">Penalty Deductions <span className="text-gray-400 font-normal text-xs">(optional)</span></p>
+                                                        <p className="text-xs text-gray-500 mt-0.5">Subtract points from the template score when conditions are met</p>
+                                                    </div>
+                                                    {rubricItems.filter(i => Number(i.totalPoints) < 0).length > 0 && (
+                                                        <span className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-full px-2.5 py-0.5">
+                                                            {rubricItems.filter(i => Number(i.totalPoints) < 0).reduce((s, i) => s + Number(i.totalPoints), 0).toFixed(1)} pts total
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {rubricItems.filter(i => Number(i.totalPoints) < 0).length === 0 ? (
+                                                    <div className="text-center py-6 border-2 border-dashed border-red-200 rounded-xl bg-red-50/30">
+                                                        <p className="text-xs text-gray-500 mb-3">No penalties added — template criteria will be used as-is</p>
+                                                        <Button
+                                                            type="button"
+                                                            onClick={addPenaltyItem}
+                                                            className="gap-2 h-8 rounded-lg px-4 text-xs bg-red-600 hover:bg-red-700 text-white"
+                                                        >
+                                                            <Plus className="w-3.5 h-3.5" /> Add Penalty
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-2">
+                                                        {rubricItems.map((item, index) => {
+                                                            if (Number(item.totalPoints) >= 0) return null;
+                                                            return (
+                                                                <div key={index} className="rounded-xl p-4 border border-red-200 bg-red-50/30 space-y-3">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="flex-shrink-0 w-7 h-7 rounded-md bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs">−</div>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={item.name}
+                                                                            onChange={(e) => updateRubricItem(index, 'name', e.target.value)}
+                                                                            className="flex-1 rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent placeholder-gray-400"
+                                                                            placeholder="Penalty description (e.g. No comments)"
+                                                                        />
+                                                                        <span className="flex-shrink-0 text-[10px] font-bold text-red-600 bg-red-100 px-2 py-1 rounded-full">PENALTY</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => removeRubricItem(index)}
+                                                                            className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-100 transition-all"
+                                                                        >
+                                                                            <Trash2 className="w-4 h-4" />
+                                                                        </button>
+                                                                    </div>
+                                                                    <div className="pl-10 flex items-end gap-3">
+                                                                        <div>
+                                                                            <label className="block text-[11px] font-bold text-red-700 uppercase tracking-wide mb-1">Deduction (pts)</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step={0.5}
+                                                                                value={item.totalPoints}
+                                                                                onChange={(e) => {
+                                                                                    const v = parseFloat(e.target.value);
+                                                                                    updateRubricItem(index, 'totalPoints', isNaN(v) ? -1 : (v > 0 ? -v : v));
+                                                                                }}
+                                                                                className="w-32 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-center text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+                                                                                placeholder="-1"
+                                                                            />
+                                                                        </div>
+                                                                        <p className="text-[11px] text-red-600 pb-2">
+                                                                            Subtracts <strong>{Math.abs(Number(item.totalPoints))} pt{Math.abs(Number(item.totalPoints)) !== 1 ? 's' : ''}</strong> from earned score
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="pl-10">
+                                                                        <textarea
+                                                                            value={item.description}
+                                                                            onChange={(e) => updateRubricItem(index, 'description', e.target.value)}
+                                                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-red-400 placeholder-gray-400 resize-none"
+                                                                            placeholder="When should this penalty be applied?"
+                                                                            rows={2}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        <Button
+                                                            type="button"
+                                                            onClick={addPenaltyItem}
+                                                            className="w-full h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 transition-all"
+                                                        >
+                                                            <Plus className="w-4 h-4" /> Add Another Penalty
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Summary banner (only for weighted/unweighted) */}
+                                        {rubricMode !== 'template' && (
+                                            <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-xs text-indigo-900 space-y-1.5">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    {rubricMode === 'weighted'
+                                                        ? <span>Positive criteria use a rubric scale — a score of <strong>max</strong> earns full points. Penalty criteria subtract points from the earned score.</span>
+                                                        : <span>Positive criteria earn points; penalty criteria subtract from the earned score.</span>
+                                                    }
+                                                </div>
+                                                {rubricItems.length > 0 && (() => {
+                                                    const positiveSum = rubricItems.filter(i => Number(i.totalPoints) >= 0).reduce((s, i) => s + Number(i.totalPoints), 0);
+                                                    const penaltySum = rubricItems.filter(i => Number(i.totalPoints) < 0).reduce((s, i) => s + Number(i.totalPoints), 0);
+                                                    const hasPenalties = penaltySum < 0;
+                                                    const posOk = Math.abs(positiveSum - watchMaxScore) < 0.01;
+                                                    return (
+                                                        <div className="flex flex-wrap items-center gap-3">
+                                                            <span className={`font-semibold ${posOk ? 'text-green-700' : 'text-orange-700'}`}>
+                                                                Positive: {positiveSum.toFixed(1)} / {watchMaxScore} pts{posOk ? ' ✓' : ''}
+                                                            </span>
+                                                            {hasPenalties && (
+                                                                <span className="font-semibold text-red-700">
+                                                                    Penalties: {penaltySum.toFixed(1)} pts
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        )}
+
+                                        {/* Criteria list (only for weighted/unweighted) */}
+                                        {rubricMode !== 'template' && rubricItems.length === 0 ? (
                                             <div className="text-center py-12 border-2 border-dashed border-indigo-300 rounded-xl bg-gradient-to-b from-indigo-50 to-indigo-50/50">
                                                 <div className="relative w-14 h-14 mx-auto mb-3 bg-indigo-100 rounded-full flex items-center justify-center">
                                                     <Layers className="w-7 h-7 text-indigo-600" />
                                                 </div>
                                                 <p className="text-sm font-semibold text-gray-900">Add Grading Criteria</p>
                                                 <p className="text-xs text-gray-600 mt-1 mb-4">Define standards for evaluating student work</p>
-                                                <Button
-                                                    type="button"
-                                                    onClick={addRubricItem}
-                                                    className="gap-2 h-9 rounded-lg px-4 bg-indigo-600 hover:bg-indigo-700 text-white"
-                                                >
-                                                    <Plus className="w-4 h-4" /> Add First Criterion
-                                                </Button>
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-2">
-                                                {rubricItems.map((item, index) => (
-                                                    <div key={index} className="group rounded-xl p-4 border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all bg-white space-y-3">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="flex-shrink-0 w-7 h-7 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs">
-                                                                {index + 1}
-                                                            </div>
-                                                            <input
-                                                                type="text"
-                                                                value={item.name}
-                                                                onChange={(e) => updateRubricItem(index, 'name', e.target.value)}
-                                                                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400"
-                                                                placeholder="Criterion title (e.g. Code Quality)"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => removeRubricItem(index)}
-                                                                className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
-                                                                title="Remove criterion"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        </div>
-
-                                                        {isWeighted ? (
-                                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pl-10">
-                                                                {/* Rubric Scale */}
-                                                                <div>
-                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Min</label>
-                                                                    <input
-                                                                        type="number"
-                                                                        min={0}
-                                                                        step={1}
-                                                                        value={item.minPoints}
-                                                                        onChange={(e) => updateRubricItem(index, 'minPoints', parseFloat(e.target.value) || 0)}
-                                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                                        placeholder="0"
-                                                                    />
-                                                                </div>
-                                                                <div>
-                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Rubric Max</label>
-                                                                    <input
-                                                                        type="number"
-                                                                        min={1}
-                                                                        step={1}
-                                                                        value={item.maxPoints}
-                                                                        onChange={(e) => updateRubricItem(index, 'maxPoints', parseFloat(e.target.value) || 5)}
-                                                                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                                        placeholder="5"
-                                                                    />
-                                                                </div>
-                                                                <div>
-                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Total Points</label>
-                                                                    <input
-                                                                        type="number"
-                                                                        min={0}
-                                                                        step={1}
-                                                                        value={item.totalPoints}
-                                                                        onChange={(e) => updateRubricItem(index, 'totalPoints', parseFloat(e.target.value) || 0)}
-                                                                        className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                                        placeholder="e.g. 40"
-                                                                    />
-                                                                    <p className="text-[10px] text-indigo-600 mt-0.5 text-center">
-                                                                        {item.minPoints} → 0 pts · {item.maxPoints} → {item.totalPoints} pts
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div className="pl-10">
-                                                                <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Points</label>
-                                                                <input
-                                                                    type="number"
-                                                                    min={0}
-                                                                    step={1}
-                                                                    value={item.totalPoints}
-                                                                    onChange={(e) => updateRubricItem(index, 'totalPoints', parseFloat(e.target.value) || 0)}
-                                                                    className="w-40 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                                                    placeholder="e.g. 20"
-                                                                />
-                                                            </div>
-                                                        )}
-
-                                                        <div className="pl-10">
-                                                            <textarea
-                                                                value={item.description}
-                                                                onChange={(e) => updateRubricItem(index, 'description', e.target.value)}
-                                                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400 resize-none"
-                                                                placeholder="Describe what excellence looks like for this criterion..."
-                                                                rows={2}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                                <div className="pt-2">
+                                                <div className="flex flex-wrap justify-center gap-2">
                                                     <Button
                                                         type="button"
                                                         onClick={addRubricItem}
-                                                        className="w-full h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition-all"
+                                                        className="gap-2 h-9 rounded-lg px-4 bg-indigo-600 hover:bg-indigo-700 text-white"
                                                     >
-                                                        <Plus className="w-4 h-4" /> Add Another Criterion
+                                                        <Plus className="w-4 h-4" /> Add Criterion
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={addPenaltyItem}
+                                                        className="gap-2 h-9 rounded-lg px-4 bg-red-600 hover:bg-red-700 text-white"
+                                                    >
+                                                        <Plus className="w-4 h-4" /> Add Penalty
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {rubricItems.map((item, index) => {
+                                                    const isPenalty = Number(item.totalPoints) < 0;
+                                                    return (
+                                                        <div key={index} className={`group rounded-xl p-4 border hover:shadow-md transition-all bg-white space-y-3 ${
+                                                            isPenalty
+                                                                ? 'border-red-200 hover:border-red-400 bg-red-50/30'
+                                                                : 'border-gray-200 hover:border-indigo-300'
+                                                        }`}>
+                                                            {/* Header row */}
+                                                            <div className="flex items-center gap-3">
+                                                                <div className={`flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center font-bold text-xs ${
+                                                                    isPenalty
+                                                                        ? 'bg-red-100 text-red-700'
+                                                                        : 'bg-indigo-100 text-indigo-700'
+                                                                }`}>
+                                                                    {isPenalty ? '−' : index + 1}
+                                                                </div>
+                                                                <input
+                                                                    type="text"
+                                                                    value={item.name}
+                                                                    onChange={(e) => updateRubricItem(index, 'name', e.target.value)}
+                                                                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:border-transparent placeholder-gray-400 ${
+                                                                        isPenalty
+                                                                            ? 'border-red-300 focus:ring-red-400'
+                                                                            : 'border-gray-300 focus:ring-indigo-500'
+                                                                    }`}
+                                                                    placeholder={isPenalty ? 'Penalty description (e.g. No comments)' : 'Criterion title (e.g. Code Quality)'}
+                                                                />
+                                                                {isPenalty && (
+                                                                    <span className="flex-shrink-0 text-[10px] font-bold text-red-600 bg-red-100 px-2 py-1 rounded-full whitespace-nowrap">
+                                                                        PENALTY
+                                                                    </span>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeRubricItem(index)}
+                                                                    className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                                                                    title="Remove"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
+
+                                                            {/* Points fields */}
+                                                            {isPenalty ? (
+                                                                /* Penalty: just a single deduction field */
+                                                                <div className="pl-10 flex items-end gap-3">
+                                                                    <div>
+                                                                        <label className="block text-[11px] font-bold text-red-700 uppercase tracking-wide mb-1">Deduction (pts)</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            step={0.5}
+                                                                            value={item.totalPoints}
+                                                                            onChange={(e) => {
+                                                                                const v = parseFloat(e.target.value);
+                                                                                updateRubricItem(index, 'totalPoints', isNaN(v) ? -1 : (v > 0 ? -v : v));
+                                                                            }}
+                                                                            className="w-32 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-bold text-center text-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent"
+                                                                            placeholder="-1"
+                                                                        />
+                                                                    </div>
+                                                                    <p className="text-[11px] text-red-600 pb-2">
+                                                                        Subtracts <strong>{Math.abs(Number(item.totalPoints))} pt{Math.abs(Number(item.totalPoints)) !== 1 ? 's' : ''}</strong> from earned score
+                                                                    </p>
+                                                                </div>
+                                                            ) : rubricMode === 'weighted' ? (
+                                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pl-10">
+                                                                    <div>
+                                                                        <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Scale Min</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            step={1}
+                                                                            value={item.minPoints}
+                                                                            onChange={(e) => updateRubricItem(index, 'minPoints', parseFloat(e.target.value) || 0)}
+                                                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                            placeholder="0"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Scale Max</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min={1}
+                                                                            step={1}
+                                                                            value={item.maxPoints}
+                                                                            onChange={(e) => updateRubricItem(index, 'maxPoints', parseFloat(e.target.value) || 5)}
+                                                                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                            placeholder="5"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Total Points</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min={0}
+                                                                            step={0.5}
+                                                                            value={item.totalPoints}
+                                                                            onChange={(e) => {
+                                                                                const v = parseFloat(e.target.value);
+                                                                                updateRubricItem(index, 'totalPoints', isNaN(v) ? 0 : v);
+                                                                            }}
+                                                                            className="w-full rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                            placeholder="e.g. 40"
+                                                                        />
+                                                                        <p className="text-[10px] text-indigo-600 mt-0.5 text-center">
+                                                                            {item.minPoints} → 0 pts · {item.maxPoints} → {item.totalPoints} pts
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="pl-10">
+                                                                    <label className="block text-[11px] font-bold text-gray-600 uppercase tracking-wide mb-1">Points</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min={0}
+                                                                        step={0.5}
+                                                                        value={item.totalPoints}
+                                                                        onChange={(e) => {
+                                                                            const v = parseFloat(e.target.value);
+                                                                            updateRubricItem(index, 'totalPoints', isNaN(v) ? 0 : v);
+                                                                        }}
+                                                                        className="w-40 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                                                        placeholder="e.g. 20"
+                                                                    />
+                                                                </div>
+                                                            )}
+
+                                                            {/* Description */}
+                                                            <div className="pl-10">
+                                                                <textarea
+                                                                    value={item.description}
+                                                                    onChange={(e) => updateRubricItem(index, 'description', e.target.value)}
+                                                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400 resize-none"
+                                                                    placeholder={isPenalty ? 'When should this penalty be applied?' : 'Describe what excellence looks like for this criterion...'}
+                                                                    rows={2}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                                <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                                                    <Button
+                                                        type="button"
+                                                        onClick={addRubricItem}
+                                                        className="flex-1 h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-400 transition-all"
+                                                    >
+                                                        <Plus className="w-4 h-4" /> Add Criterion
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={addPenaltyItem}
+                                                        className="flex-1 h-10 gap-2 text-sm font-medium rounded-lg border-2 border-dashed border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 transition-all"
+                                                    >
+                                                        <Plus className="w-4 h-4" /> Add Penalty
                                                     </Button>
                                                 </div>
                                             </div>

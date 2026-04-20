@@ -4,6 +4,7 @@ from app.api.v1.endpoints import (
     students, faculty, settings, code, languages, code_execution, notifications,
     ai_detection, tasks,
 )
+from app.api.v1.endpoints import rubric_templates
 
 api_router = APIRouter()
 
@@ -54,4 +55,7 @@ api_router.include_router(ai_detection.router, prefix="/ai-detection", tags=["AI
 
 # Personal Tasks (all roles)
 api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
+
+# Course Rubric Templates
+api_router.include_router(rubric_templates.router, tags=["Rubric Templates"])
 

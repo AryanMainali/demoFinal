@@ -64,6 +64,13 @@ from app.models.notification import (
 # Personal Task Model
 from app.models.task import UserTask, TaskStatus
 
+# Rubric Template Models
+from app.models.rubric_template import (
+    CourseRubricTemplate,
+    CourseRubricTemplateItem,
+    CourseRubricTemplateLevelDescriptor,
+)
+
 
 # All models for Alembic migrations
 __all__ = [
@@ -111,4 +118,9 @@ __all__ = [
 
     # Tasks
     "UserTask", "TaskStatus",
+
+    # Rubric Templates
+    "CourseRubricTemplate",
+    "CourseRubricTemplateItem",
+    "CourseRubricTemplateLevelDescriptor",
 ]
