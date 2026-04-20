@@ -122,11 +122,29 @@ class ApiClient {
     }
 
     async logout() {
+        try {
+            await this.client.post('/auth/logout');
+        } catch {
+            // Best-effort audit call; always clear local auth state.
+        }
         this.clearTokens();
     }
 
     async getCurrentUser() {
         const response = await this.client.get('/auth/me');
+        return response.data;
+    }
+
+    async getAuditLogs(params?: {
+        user_id?: number;
+        event_type?: string;
+        days?: number;
+        from_date?: string;
+        to_date?: string;
+        skip?: number;
+        limit?: number;
+    }) {
+        const response = await this.client.get('/admin/audit-logs', { params });
         return response.data;
     }
 

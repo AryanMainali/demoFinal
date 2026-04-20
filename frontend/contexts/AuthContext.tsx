@@ -96,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [router]);
 
     const logout = useCallback(() => {
-        apiClient.logout();
+        void apiClient.logout();
         clearRoleCookie();
         setUser(null);
         router.push('/login');

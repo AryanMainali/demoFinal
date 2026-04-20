@@ -3,18 +3,27 @@ Settings & Profile Endpoints - User preferences, notifications, profile manageme
 """
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
 from app.models import (
-    User, UserRole, NotificationSettings, UserPreferences
+    User, UserRole, NotificationSettings, UserPreferences, AuditLog
 )
 from app.core.security import verify_password, get_password_hash
 from app.core.logging import logger
 from pydantic import BaseModel, EmailStr, Field
 
 router = APIRouter()
+
+
+def _get_client_ip(request: Request) -> Optional[str]:
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
 
 
 # ============== Schemas ==============
@@ -159,12 +168,22 @@ async def upload_avatar(
 @router.put("/profile/password")
 def change_password(
     password_change: PasswordChange,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Change user password"""
     # Verify current password
     if not verify_password(password_change.current_password, current_user.hashed_password):
+        db.add(AuditLog(
+            user_id=current_user.id,
+            event_type="password_change_failed",
+            description=f"Failed password change attempt for {current_user.email}",
+            ip_address=_get_client_ip(request),
+            status="failure",
+            error_message="Current password is incorrect",
+        ))
+        db.commit()
         raise HTTPException(
             status_code=400,
             detail="Current password is incorrect"
@@ -174,6 +193,13 @@ def change_password(
     current_user.hashed_password = get_password_hash(password_change.new_password)
     current_user.password_changed_at = datetime.utcnow()
     current_user.updated_at = datetime.utcnow()
+    db.add(AuditLog(
+        user_id=current_user.id,
+        event_type="password_changed",
+        description=f"Password changed for {current_user.email}",
+        ip_address=_get_client_ip(request),
+        status="success",
+    ))
     db.commit()
     
     logger.info(f"User {current_user.id} changed password")

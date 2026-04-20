@@ -4,7 +4,7 @@ import tempfile
 import secrets
 import string
 import re
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, text
 from datetime import datetime, timedelta
@@ -22,6 +22,15 @@ from app.services.email import send_email
 from pydantic import BaseModel, EmailStr
 
 router = APIRouter()
+
+
+def _get_client_ip(request: Request) -> Optional[str]:
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -139,6 +148,7 @@ def get_admin_settings(
 @router.put("/settings", response_model=AdminSettingsResponse)
 def update_admin_settings(
     settings_update: AdminSettingsUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -177,6 +187,15 @@ def update_admin_settings(
 
     db.commit()
     db.refresh(settings_row)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        event_type="admin_settings_updated",
+        description="System settings updated by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
+    ))
+    db.commit()
 
     logger.info(f"Admin settings updated by admin {current_user.id}")
     return _admin_settings_to_response(settings_row)
@@ -276,6 +295,7 @@ def list_users(
 @router.post("/users", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
 def create_user(
     user_in: UserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -316,7 +336,9 @@ def create_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_created",
-        description=f"User {user.email} created with role {user.role.value} by admin"
+        description=f"User {user.email} created with role {user.role.value} by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -353,6 +375,7 @@ def get_user(
 def update_user(
     user_id: int,
     user_update: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -376,7 +399,9 @@ def update_user(
         audit = AuditLog(
             user_id=current_user.id,
             event_type="role_changed",
-            description=f"User role changed from {old_role} to {user.role}"
+            description=f"User role changed from {old_role} to {user.role}",
+            ip_address=_get_client_ip(request),
+            status="success",
         )
         db.add(audit)
         db.commit()
@@ -388,6 +413,7 @@ def update_user(
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -403,7 +429,9 @@ def delete_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_deleted",
-        description=f"User {user.email} deleted by admin"
+        description=f"User {user.email} deleted by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     
@@ -417,6 +445,7 @@ def delete_user(
 @router.post("/users/{user_id}/activate")
 def activate_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -433,7 +462,9 @@ def activate_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_activated",
-        description=f"User {user.email} activated"
+        description=f"User {user.email} activated",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -444,6 +475,7 @@ def activate_user(
 @router.post("/users/{user_id}/deactivate")
 def deactivate_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -463,7 +495,9 @@ def deactivate_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_deactivated",
-        description=f"User {user.email} deactivated"
+        description=f"User {user.email} deactivated",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -475,6 +509,7 @@ def deactivate_user(
 def admin_reset_password(
     user_id: int,
     new_password: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -492,7 +527,9 @@ def admin_reset_password(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="password_reset",
-        description=f"Password reset for user {user.email} by admin"
+        description=f"Password reset for user {user.email} by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -506,6 +543,8 @@ def get_audit_logs(
     user_id: int = None,
     event_type: str = None,
     days: int = 30,
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -522,9 +561,14 @@ def get_audit_logs(
     if event_type:
         query = query.filter(AuditLog.event_type == event_type)
     
-    # Filter by date range
-    since = datetime.utcnow() - timedelta(days=days)
-    query = query.filter(AuditLog.created_at >= since)
+    # Filter by explicit date range when provided, otherwise fallback to rolling window.
+    if from_date:
+        query = query.filter(AuditLog.created_at >= from_date)
+    if to_date:
+        query = query.filter(AuditLog.created_at <= to_date)
+    if not from_date and not to_date:
+        since = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(AuditLog.created_at >= since)
     
     # Order by most recent
     query = query.order_by(AuditLog.created_at.desc())
