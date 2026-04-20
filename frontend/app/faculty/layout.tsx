@@ -18,7 +18,7 @@ export default function FacultyLayout({ children }: { children: React.ReactNode 
             getEventHref={(event: CalendarEvent) => {
                 if (event.event_type === 'course_start' || event.event_type === 'course_end')
                     return `/faculty/courses/${event.id}`;
-                return `/faculty/assignments/${event.id}`;
+                return `/faculty/courses/${event.course_id}/assignments/${event.id}`;
             }}
             hideCalendarSidebar={isGradingPage}
         >

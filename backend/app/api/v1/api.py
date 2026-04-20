@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth, courses, assignments, submissions, reports, admin,
     students, faculty, settings, code, languages, code_execution, notifications,
-    ai_detection,
+    ai_detection, tasks,
 )
 
 api_router = APIRouter()
@@ -51,4 +51,7 @@ api_router.include_router(notifications.router, tags=["Notifications"])
 
 # AI-Generated Code Detection
 api_router.include_router(ai_detection.router, prefix="/ai-detection", tags=["AI Detection"])
+
+# Personal Tasks (all roles)
+api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 

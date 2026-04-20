@@ -79,6 +79,9 @@ class User(Base):
     
     # Relationships - Announcements
     announcements = relationship("Announcement", back_populates="author", foreign_keys="Announcement.author_id")
+
+    # Relationships - Personal Tasks
+    tasks = relationship("UserTask", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User {self.email} ({self.role})>"

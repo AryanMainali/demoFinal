@@ -61,6 +61,9 @@ from app.models.notification import (
     Notification, NotificationType
 )
 
+# Personal Task Model
+from app.models.task import UserTask, TaskStatus
+
 
 # All models for Alembic migrations
 __all__ = [
@@ -105,4 +108,7 @@ __all__ = [
     
     # Notification
     "Notification", "NotificationType",
+
+    # Tasks
+    "UserTask", "TaskStatus",
 ]

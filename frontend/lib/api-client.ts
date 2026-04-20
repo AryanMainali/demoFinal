@@ -509,6 +509,32 @@ class ApiClient {
         return response.data;
     }
 
+    async requestLanguage(data: { language_name: string; version?: string; notes?: string }) {
+        const response = await this.client.post('/faculty/request-language', data);
+        return response.data;
+    }
+
+    // ── Personal Tasks (all roles) ──────────────────────────────────────────
+
+    async getTasks(params?: { from_date?: string; to_date?: string; status?: string }) {
+        const response = await this.client.get('/tasks', { params });
+        return response.data;
+    }
+
+    async createTask(data: { title: string; date: string; status?: string }) {
+        const response = await this.client.post('/tasks', data);
+        return response.data;
+    }
+
+    async updateTask(taskId: number, data: { title?: string; date?: string; status?: string }) {
+        const response = await this.client.patch(`/tasks/${taskId}`, data);
+        return response.data;
+    }
+
+    async deleteTask(taskId: number) {
+        await this.client.delete(`/tasks/${taskId}`);
+    }
+
     async getFacultyStudents() {
         const response = await this.client.get('/faculty/students');
         return response.data;
