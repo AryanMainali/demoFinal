@@ -33,6 +33,8 @@ import {
     Download,
     Users,
     Crown,
+    Video,
+    ExternalLink,
 } from 'lucide-react'
 
 import { ProtectedRoute } from '@/components/ProtectedRoute'
@@ -148,6 +150,7 @@ interface Assignment {
         total_points: number
     } | null
     rubric_template?: RubricTemplate | null
+    video_url?: string | null
 }
 
 interface GroupMember {
@@ -241,7 +244,7 @@ export default function StudentAssignmentPage() {
     const [explorerOpen, setExplorerOpen] = useState(true)
     const [panelOpen, setPanelOpen] = useState(true)
     const [activePanel, setActivePanel] = useState<'output' | 'tests'>('output')
-    const [rightPanel, setRightPanel] = useState<'description' | 'instructions' | 'rubric' | 'grading' | 'supplementary' | 'custom' | 'group' | null>(null)
+    const [rightPanel, setRightPanel] = useState<'description' | 'instructions' | 'rubric' | 'grading' | 'supplementary' | 'custom' | 'group' | 'video' | null>(null)
     const [showConfetti, setShowConfetti] = useState(false)
     const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set())
     const [expandedLevels, setExpandedLevels] = useState<Set<number>>(new Set())
@@ -307,9 +310,7 @@ export default function StudentAssignmentPage() {
 
     const isGraded = useMemo(() => {
         if (!latestSubmission || !gradesPublished) return false
-        if (latestSubmission.final_score !== null) return true
-        const s = String(latestSubmission.status || '').toLowerCase()
-        return s === 'completed' || s === 'graded'
+        return latestSubmission.final_score !== null && latestSubmission.final_score !== undefined
     }, [latestSubmission, gradesPublished])
 
     const isSubmitted = !!latestSubmission
@@ -888,6 +889,12 @@ export default function StudentAssignmentPage() {
                                 {myGroup && <span className="px-1 py-0 text-[9px] bg-[#505050] rounded">{myGroup.members.length}</span>}
                             </button>
                         )}
+                        {assignment.video_url && (
+                            <button onClick={() => setRightPanel(rightPanel === 'video' ? null : 'video')}
+                                className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'video' ? 'bg-[#094771] text-white' : 'text-[#4ec9b0] hover:bg-[#505050]'}`}>
+                                <Video className="w-3 h-3" /> Watch Video
+                            </button>
+                        )}
                         <div className="w-px h-4 bg-[#5a5a5a] mx-1" />
                         <Button onClick={runCode} disabled={isRunning || files.length === 0} size="sm"
                             className="h-6 px-3 text-[10px] bg-[#0e639c] hover:bg-[#1177bb] text-white border-0">
@@ -1424,6 +1431,7 @@ export default function StudentAssignmentPage() {
                                     {rightPanel === 'supplementary' && <><Paperclip className="w-4 h-4 text-[#dcdcaa]" /> Supplementary Files</>}
                                     {rightPanel === 'custom' && <><UploadIcon className="w-4 h-4 text-[#4ec9b0]" /> Custom Input</>}
                                     {rightPanel === 'group' && <><Users className="w-4 h-4 text-[#4ec9b0]" /> My Group</>}
+                                    {rightPanel === 'video' && <><Video className="w-4 h-4 text-[#4ec9b0]" /> Watch Video</>}
                                 </div>
                                 <button onClick={() => setRightPanel(null)} className="p-1 rounded hover:bg-[#505050] text-[#858585]">
                                     <X className="w-3.5 h-3.5" />
@@ -1772,20 +1780,45 @@ export default function StudentAssignmentPage() {
                                 {rightPanel === 'grading' && (
                                     <div className="space-y-4">
                                         {!isGraded ? (
-                                            <div className="text-center py-10 space-y-4">
-                                                <div className="w-16 h-16 mx-auto rounded-full bg-[#dcdcaa]/10 border border-[#dcdcaa]/20 flex items-center justify-center">
-                                                    <Clock className="w-7 h-7 text-[#dcdcaa]" />
+                                            <div className="space-y-3">
+                                                {/* Status banner */}
+                                                <div className="flex items-start gap-3 p-3 rounded-lg border border-[#dcdcaa]/30 bg-[#332b00]/60">
+                                                    <Clock className="w-5 h-5 text-[#dcdcaa] shrink-0 mt-0.5" />
+                                                    <div>
+                                                        <p className="text-[13px] font-semibold text-[#dcdcaa]">Awaiting Instructor Grade</p>
+                                                        <p className="text-[11px] text-[#bdbdbd] mt-0.5">
+                                                            Attempt #{latestSubmission?.attempt_number} submitted. Your instructor will review and assign a final grade.
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="text-[#cfcfcf] font-semibold text-[14px]">Awaiting Grade</p>
-                                                    <p className="text-[12px] text-[#858585] mt-1">Submitted on attempt #{latestSubmission?.attempt_number}.</p>
-                                                    <p className="text-[11px] text-[#606060] mt-1">Your instructor will grade this soon.</p>
-                                                </div>
+
+                                                {/* Test results preview (informational only) */}
+                                                {latestSubmission && (latestSubmission.tests_total ?? 0) > 0 && (
+                                                    <div className="rounded-lg border border-[#3c3c3c] overflow-hidden">
+                                                        <div className="px-3 py-2 bg-[#1e1e1e] border-b border-[#3c3c3c]">
+                                                            <span className="text-[10px] font-semibold text-[#bdbdbd] uppercase tracking-wider">Test Results (preview)</span>
+                                                        </div>
+                                                        <div className="px-3 py-3 space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-[12px] text-[#cccccc]">Tests Passed</span>
+                                                                <span className={`text-[13px] font-bold ${latestSubmission.tests_passed === latestSubmission.tests_total ? 'text-[#4ec9b0]' : 'text-[#dcdcaa]'}`}>
+                                                                    {latestSubmission.tests_passed ?? 0} / {latestSubmission.tests_total ?? 0}
+                                                                </span>
+                                                            </div>
+                                                            <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                                <div className={`h-full rounded-full transition-all duration-700 ${latestSubmission.tests_passed === latestSubmission.tests_total ? 'bg-[#4ec9b0]' : 'bg-[#dcdcaa]'}`}
+                                                                    style={{ width: `${(latestSubmission.tests_total ?? 0) > 0 ? ((latestSubmission.tests_passed ?? 0) / (latestSubmission.tests_total ?? 1)) * 100 : 0}%` }} />
+                                                            </div>
+                                                            <p className="text-[10px] text-[#606060]">Test results are visible but the final grade is set by your instructor.</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 {latestSubmission?.is_late && (
-                                                    <div className="rounded-lg border border-[#665500] bg-[#332b00] p-3 text-left">
+                                                    <div className="rounded-lg border border-[#665500] bg-[#332b00] p-3">
                                                         <p className="text-[11px] font-semibold text-[#dcdcaa]">⚠ Late Submission</p>
                                                         <p className="text-[10px] text-[#cccccc] mt-1">
-                                                            A {latestSubmission.late_penalty_applied ?? 0}% penalty may be applied.
+                                                            A {latestSubmission.late_penalty_applied ?? 0}% penalty may be applied by your instructor.
                                                         </p>
                                                     </div>
                                                 )}
@@ -2172,6 +2205,74 @@ export default function StudentAssignmentPage() {
                                                     <p>• All members are notified when the submission is graded.</p>
                                                 </div>
                                             </>
+                                        )}
+                                    </div>
+                                )}
+
+                                {rightPanel === 'video' && (
+                                    <div className="space-y-4">
+                                        {assignment.video_url ? (() => {
+                                            const url = assignment.video_url!;
+                                            const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s?#]+)/);
+                                            const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+                                            const loomMatch = url.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
+                                            return (
+                                                <>
+                                                    {/* Embed */}
+                                                    {ytMatch ? (
+                                                        <div className="rounded-lg overflow-hidden border border-[#3c3c3c]" style={{ aspectRatio: '16/9' }}>
+                                                            <iframe
+                                                                src={`https://www.youtube.com/embed/${ytMatch[1]}`}
+                                                                className="w-full h-full"
+                                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                                allowFullScreen
+                                                            />
+                                                        </div>
+                                                    ) : vimeoMatch ? (
+                                                        <div className="rounded-lg overflow-hidden border border-[#3c3c3c]" style={{ aspectRatio: '16/9' }}>
+                                                            <iframe
+                                                                src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
+                                                                className="w-full h-full"
+                                                                allow="autoplay; fullscreen; picture-in-picture"
+                                                                allowFullScreen
+                                                            />
+                                                        </div>
+                                                    ) : loomMatch ? (
+                                                        <div className="rounded-lg overflow-hidden border border-[#3c3c3c]" style={{ aspectRatio: '16/9' }}>
+                                                            <iframe
+                                                                src={`https://www.loom.com/embed/${loomMatch[1]}`}
+                                                                className="w-full h-full"
+                                                                allowFullScreen
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        <div className="rounded-lg border border-[#3c3c3c] bg-[#1e1e1e] p-4 flex items-center gap-3">
+                                                            <div className="w-12 h-12 rounded-lg bg-[#4ec9b0]/10 border border-[#4ec9b0]/20 flex items-center justify-center shrink-0">
+                                                                <Play className="w-6 h-6 text-[#4ec9b0]" />
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="text-[12px] font-medium text-[#cccccc] truncate">{url}</p>
+                                                                <p className="text-[10px] text-[#606060] mt-0.5">External video resource</p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {/* Open externally */}
+                                                    <a
+                                                        href={url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="flex items-center justify-center gap-2 w-full py-2 rounded-lg border border-[#3c3c3c] text-[11px] text-[#4ec9b0] hover:bg-[#4ec9b0]/10 transition-colors"
+                                                    >
+                                                        <ExternalLink className="w-3.5 h-3.5" /> Open in new tab
+                                                    </a>
+                                                </>
+                                            );
+                                        })() : (
+                                            <div className="text-center py-12">
+                                                <Video className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                                <p className="text-[#858585] text-[13px]">No video for this assignment.</p>
+                                                <p className="text-[11px] text-[#606060] mt-1">Your instructor hasn't added one yet.</p>
+                                            </div>
                                         )}
                                     </div>
                                 )}

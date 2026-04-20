@@ -39,10 +39,12 @@ import {
     Save,
     Download,
     GraduationCap,
-    TrendingUp,
     Award,
     CheckSquare,
-    MinusSquare,
+    Video,
+    ExternalLink,
+    Link2,
+    Play,
 } from 'lucide-react';
 
 /* ====================================================================
@@ -103,6 +105,7 @@ interface Assignment {
     submission_count?: number;
     test_cases?: TestCaseItem[];
     rubric?: { items: RubricItem[]; total_points: number } | null;
+    video_url?: string | null;
     created_at: string;
     updated_at?: string;
 }
@@ -292,7 +295,9 @@ export default function AssignmentDetailPageContent() {
     const courseId = useMemo(() => parseInt(courseIdStr, 10), [courseIdStr]);
     const assignmentId = useMemo(() => parseInt(assignmentIdStr, 10), [assignmentIdStr]);
 
-    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism' | 'ai_detection' | 'gradebook'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'submissions' | 'plagiarism' | 'ai_detection' | 'gradebook' | 'video'>('overview');
+    const [videoUrlDraft, setVideoUrlDraft] = useState('');
+    const [savingVideoUrl, setSavingVideoUrl] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
     // Gradebook state
@@ -767,11 +772,24 @@ export default function AssignmentDetailPageContent() {
             if (!existing || subScore > existScore) bestSubMap.set(sub.student_id, sub);
         }
 
+        const now = new Date();
+        const dueDate = assignment?.due_date ? new Date(assignment.due_date) : null;
+
         const rows = activeStudents.map((student) => {
             const sub = bestSubMap.get(student.id) ?? null;
-            const score = sub?.final_score ?? sub?.raw_score ?? null;
+            const score = sub?.final_score ?? null;
             const attempts = attemptsMap.get(student.id) ?? 0;
-            return { student, sub, score, attempts };
+            let status: 'graded' | 'ungraded' | 'missing' | 'unsubmitted';
+            if (sub && sub.final_score !== null && sub.final_score !== undefined) {
+                status = 'graded';
+            } else if (sub) {
+                status = 'ungraded';
+            } else if (dueDate && now > dueDate) {
+                status = 'missing';
+            } else {
+                status = 'unsubmitted';
+            }
+            return { student, sub, score, attempts, status };
         });
 
         // Filter
@@ -798,53 +816,43 @@ export default function AssignmentDetailPageContent() {
                     break;
                 }
                 case 'attempts': cmp = a.attempts - b.attempts; break;
-                case 'status': cmp = (a.attempts > 0 ? 1 : 0) - (b.attempts > 0 ? 1 : 0); break;
+                case 'status': {
+                    const statusOrder = { graded: 3, ungraded: 2, missing: 1, unsubmitted: 0 };
+                    cmp = (statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0);
+                    break;
+                }
             }
             return gradebookSortDir === 'asc' ? cmp : -cmp;
         });
     }, [courseStudents, submissions, gradebookSearch, gradebookSort, gradebookSortDir, assignment]);
 
     const gradebookStats = useMemo(() => {
-        const max = assignment?.max_score ?? 100;
-        const submitted = gradebookRows.filter(r => r.attempts > 0);
-        const scores = submitted.map(r => r.score).filter((s): s is number => s !== null);
-        const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-        const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
-        for (const s of scores) {
-            const g = getLetterGrade(s, max);
-            if (g in grades) grades[g as keyof typeof grades]++;
-        }
-        return {
-            total: gradebookRows.length,
-            submitted: submitted.length,
-            graded: scores.length,
-            avg,
-            grades,
-        };
-    }, [gradebookRows, assignment]);
+        const graded = gradebookRows.filter(r => r.status === 'graded').length;
+        const ungraded = gradebookRows.filter(r => r.status === 'ungraded').length;
+        const missing = gradebookRows.filter(r => r.status === 'missing').length;
+        const unsubmitted = gradebookRows.filter(r => r.status === 'unsubmitted').length;
+        return { graded, ungraded, missing, unsubmitted, total: gradebookRows.length };
+    }, [gradebookRows]);
 
     const exportGradebookCSV = useCallback(() => {
         if (!assignment) return;
-        const headers = ['Name', 'Email', 'Student ID', 'Score', 'Max Score', 'Percentage', 'Grade', 'Status', 'Attempts', 'Submission ID', 'Last Submitted'];
+        const colCount = 7;
+        const blank = Array(colCount - 1).fill('').join(',');
+        const title = `"${assignment.title}"${blank}`;
+        const headers = ['Name', 'Email', 'Student ID', 'Score', 'Total Points', 'Status', 'Attempts'];
         const rows = gradebookRows.map(r => {
-            const pct = r.score !== null ? ((r.score / assignment.max_score) * 100).toFixed(1) : '';
-            const grade = getLetterGrade(r.score, assignment.max_score);
-            const lastSub = r.sub ? format(new Date(r.sub.submitted_at), 'yyyy-MM-dd HH:mm') : '';
+            const statusLabel = { graded: 'Graded', ungraded: 'Ungraded', missing: 'Missing', unsubmitted: 'Unsubmitted' }[r.status];
             return [
                 `"${r.student.full_name}"`,
                 `"${r.student.email}"`,
                 `"${r.student.student_id ?? ''}"`,
                 r.score !== null ? r.score.toFixed(1) : '',
                 assignment.max_score,
-                pct,
-                grade === '—' ? '' : grade,
-                r.attempts > 0 ? 'Submitted' : 'Not Submitted',
+                statusLabel,
                 r.attempts,
-                r.sub?.id ?? '',
-                lastSub,
             ].join(',');
         });
-        const csv = [headers.join(','), ...rows].join('\n');
+        const csv = [title, headers.join(','), ...rows].join('\n');
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1060,6 +1068,24 @@ export default function AssignmentDetailPageContent() {
                             >
                                 <span className="relative z-10 flex items-center gap-2">
                                     <GraduationCap className="w-4 h-4" /> Gradebook
+                                </span>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setActiveTab('video');
+                                    setVideoUrlDraft(assignment.video_url ?? '');
+                                }}
+                                className={`relative block rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${activeTab === 'video'
+                                        ? 'bg-white/25 text-white'
+                                        : 'text-white/80 hover:text-white hover:bg-white/10'
+                                    }`}
+                            >
+                                <span className="relative z-10 flex items-center gap-2">
+                                    <Video className="w-4 h-4" />
+                                    Watch Video
+                                    {assignment.video_url && (
+                                        <span className="w-2 h-2 rounded-full bg-emerald-400" title="Video linked" />
+                                    )}
                                 </span>
                             </button>
                         </div>
@@ -2524,111 +2550,29 @@ export default function AssignmentDetailPageContent() {
                             </div>
                         ) : (
                             <>
-                                {/* Stats row */}
+                                {/* Status summary */}
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                    <Card className="border-0 shadow-sm">
-                                        <CardContent className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
-                                                    <Users className="w-4 h-4" style={{ color: accentColor }} />
+                                    {([
+                                        { key: 'graded', label: 'Graded', count: gradebookStats.graded, icon: CheckSquare, bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200' },
+                                        { key: 'ungraded', label: 'Ungraded', count: gradebookStats.ungraded, icon: FileText, bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
+                                        { key: 'missing', label: 'Missing', count: gradebookStats.missing, icon: AlertCircle, bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200' },
+                                        { key: 'unsubmitted', label: 'Unsubmitted', count: gradebookStats.unsubmitted, icon: Clock, bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200' },
+                                    ] as const).map(({ key, label, count, icon: Icon, bg, text, border }) => (
+                                        <Card key={key} className={`border shadow-sm ${border}`}>
+                                            <CardContent className="p-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${bg}`}>
+                                                        <Icon className={`w-4 h-4 ${text}`} />
+                                                    </div>
+                                                    <div>
+                                                        <p className={`text-2xl font-bold ${text}`}>{count}</p>
+                                                        <p className="text-xs text-gray-500">{label}</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="text-xl font-bold text-gray-900">{gradebookStats.total}</p>
-                                                    <p className="text-xs text-gray-500">Enrolled</p>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                    <Card className="border-0 shadow-sm">
-                                        <CardContent className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
-                                                    <CheckSquare className="w-4 h-4 text-emerald-600" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-xl font-bold text-emerald-600">{gradebookStats.submitted}</p>
-                                                    <p className="text-xs text-gray-500">
-                                                        Submitted
-                                                        {gradebookStats.total > 0 && (
-                                                            <span className="ml-1 text-gray-400">
-                                                                ({Math.round((gradebookStats.submitted / gradebookStats.total) * 100)}%)
-                                                            </span>
-                                                        )}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                    <Card className="border-0 shadow-sm">
-                                        <CardContent className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center">
-                                                    <MinusSquare className="w-4 h-4 text-amber-600" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-xl font-bold text-amber-600">{gradebookStats.total - gradebookStats.submitted}</p>
-                                                    <p className="text-xs text-gray-500">Not Submitted</p>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                    <Card className="border-0 shadow-sm">
-                                        <CardContent className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center">
-                                                    <TrendingUp className="w-4 h-4 text-blue-600" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-xl font-bold text-blue-600">
-                                                        {gradebookStats.avg !== null
-                                                            ? `${gradebookStats.avg.toFixed(1)}`
-                                                            : '—'}
-                                                    </p>
-                                                    <p className="text-xs text-gray-500">
-                                                        Avg Score
-                                                        {gradebookStats.avg !== null && assignment && (
-                                                            <span className="ml-1 text-gray-400">/ {assignment.max_score}</span>
-                                                        )}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
                                 </div>
-
-                                {/* Grade distribution */}
-                                {gradebookStats.graded > 0 && (
-                                    <Card className="border-0 shadow-sm">
-                                        <CardContent className="p-4">
-                                            <div className="flex items-center justify-between mb-3">
-                                                <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                                                    <Award className="w-4 h-4" style={{ color: accentColor }} />
-                                                    Grade Distribution
-                                                </p>
-                                                <span className="text-xs text-gray-400">{gradebookStats.graded} graded</span>
-                                            </div>
-                                            <div className="flex items-end gap-3">
-                                                {(['A', 'B', 'C', 'D', 'F'] as const).map((g) => {
-                                                    const count = gradebookStats.grades[g];
-                                                    const pct = gradebookStats.graded > 0 ? (count / gradebookStats.graded) * 100 : 0;
-                                                    const barColors = { A: 'bg-emerald-500', B: 'bg-blue-500', C: 'bg-amber-500', D: 'bg-orange-500', F: 'bg-red-500' };
-                                                    return (
-                                                        <div key={g} className="flex-1 flex flex-col items-center gap-1">
-                                                            <span className="text-xs font-medium text-gray-600">{count}</span>
-                                                            <div className="w-full bg-gray-100 rounded-t-sm" style={{ height: 48 }}>
-                                                                <div
-                                                                    className={`w-full rounded-t-sm transition-all ${barColors[g]}`}
-                                                                    style={{ height: `${Math.max(pct, count > 0 ? 8 : 0)}%`, minHeight: count > 0 ? 4 : 0, marginTop: 'auto' }}
-                                                                />
-                                                            </div>
-                                                            <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getLetterGradeStyle(g)}`}>{g}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                )}
 
                                 {/* Search + export toolbar */}
                                 <div className="flex items-center gap-3">
@@ -2717,22 +2661,7 @@ export default function AssignmentDetailPageContent() {
                                                                 )}
                                                             </button>
                                                         </th>
-                                                        <th className="text-center px-4 py-3 font-medium text-gray-600 hidden md:table-cell">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    if (gradebookSort === 'grade') setGradebookSortDir(d => d === 'asc' ? 'desc' : 'asc');
-                                                                    else { setGradebookSort('grade'); setGradebookSortDir('desc'); }
-                                                                }}
-                                                                className="flex items-center gap-1 hover:text-gray-900 mx-auto"
-                                                            >
-                                                                Grade
-                                                                {gradebookSort === 'grade' && (
-                                                                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${gradebookSortDir === 'desc' ? 'rotate-180' : ''}`} />
-                                                                )}
-                                                            </button>
-                                                        </th>
-                                                        <th className="text-center px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">
+                                                        <th className="text-center px-4 py-3 font-medium text-gray-600">
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -2747,21 +2676,21 @@ export default function AssignmentDetailPageContent() {
                                                                 )}
                                                             </button>
                                                         </th>
-                                                        <th className="text-right px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">Actions</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {gradebookRows.map((row, idx) => {
                                                         const max = assignment?.max_score ?? 100;
                                                         const pct = row.score !== null ? (row.score / max) * 100 : null;
-                                                        const grade = getLetterGrade(row.score, max);
-                                                        const hasSubmission = row.attempts > 0;
+                                                        const barColor = pct === null ? '#6b7280' : pct >= 90 ? '#16a34a' : pct >= 70 ? '#2563eb' : pct >= 50 ? '#d97706' : '#dc2626';
 
-                                                        const barColor = pct === null ? '#e5e7eb'
-                                                            : pct >= 90 ? '#16a34a'
-                                                            : pct >= 70 ? '#2563eb'
-                                                            : pct >= 50 ? '#d97706'
-                                                            : '#dc2626';
+                                                        const statusConfig = {
+                                                            graded: { label: 'Graded', icon: CheckSquare, cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+                                                            ungraded: { label: 'Ungraded', icon: FileText, cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+                                                            missing: { label: 'Missing', icon: AlertCircle, cls: 'bg-red-100 text-red-700 border-red-200' },
+                                                            unsubmitted: { label: 'Unsubmitted', icon: Clock, cls: 'bg-gray-100 text-gray-500 border-gray-200' },
+                                                        }[row.status];
+                                                        const StatusIcon = statusConfig.icon;
 
                                                         return (
                                                             <tr
@@ -2794,75 +2723,26 @@ export default function AssignmentDetailPageContent() {
 
                                                                 {/* Status */}
                                                                 <td className="px-4 py-3 text-center">
-                                                                    {hasSubmission ? (
-                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-200">
-                                                                            <CheckSquare className="w-3 h-3" /> Submitted
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 border border-gray-200">
-                                                                            <MinusSquare className="w-3 h-3" /> Missing
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-
-                                                                {/* Score */}
-                                                                <td className="px-4 py-3">
-                                                                    <div className="flex flex-col items-end gap-1 min-w-[100px]">
-                                                                        <div className="flex items-baseline gap-1">
-                                                                            {row.score !== null ? (
-                                                                                <>
-                                                                                    <span className="text-sm font-bold" style={{ color: barColor }}>
-                                                                                        {row.score % 1 === 0 ? row.score : row.score.toFixed(1)}
-                                                                                    </span>
-                                                                                    <span className="text-xs text-gray-400">/ {max}</span>
-                                                                                </>
-                                                                            ) : (
-                                                                                <span className="text-xs text-gray-400 italic">Not graded</span>
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                                                            <div
-                                                                                className="h-full rounded-full transition-all"
-                                                                                style={{
-                                                                                    width: pct !== null ? `${Math.min(pct, 100)}%` : '0%',
-                                                                                    backgroundColor: barColor,
-                                                                                }}
-                                                                            />
-                                                                        </div>
-                                                                        {pct !== null && (
-                                                                            <span className="text-[10px] font-medium" style={{ color: barColor }}>
-                                                                                {pct.toFixed(0)}%
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                </td>
-
-                                                                {/* Letter grade */}
-                                                                <td className="px-4 py-3 text-center hidden md:table-cell">
-                                                                    <span className={`inline-block px-2.5 py-0.5 rounded text-xs font-bold border ${getLetterGradeStyle(grade)}`}>
-                                                                        {grade}
+                                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusConfig.cls}`}>
+                                                                        <StatusIcon className="w-3 h-3" /> {statusConfig.label}
                                                                     </span>
                                                                 </td>
 
-                                                                {/* Attempts */}
-                                                                <td className="px-4 py-3 text-center text-sm text-gray-600 hidden lg:table-cell">
-                                                                    {row.attempts > 0 ? row.attempts : <span className="text-gray-300">0</span>}
+                                                                {/* Score */}
+                                                                <td className="px-4 py-3 text-right">
+                                                                    {row.score !== null ? (
+                                                                        <span className="text-sm font-bold" style={{ color: barColor }}>
+                                                                            {row.score % 1 === 0 ? row.score : row.score.toFixed(1)}
+                                                                            <span className="text-xs font-normal text-gray-400 ml-1">/ {max}</span>
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-xs text-gray-400 italic">—</span>
+                                                                    )}
                                                                 </td>
 
-                                                                {/* Actions */}
-                                                                <td className="px-4 py-3 text-right hidden lg:table-cell">
-                                                                    {hasSubmission ? (
-                                                                        <Button
-                                                                            size="sm"
-                                                                            variant="outline"
-                                                                            onClick={() => navigateToGrading(row.student.id)}
-                                                                            className="h-7 px-2.5 text-xs gap-1"
-                                                                        >
-                                                                            <Eye className="w-3 h-3" /> Grade
-                                                                        </Button>
-                                                                    ) : (
-                                                                        <span className="text-xs text-gray-300 italic">No submission</span>
-                                                                    )}
+                                                                {/* Attempts */}
+                                                                <td className="px-4 py-3 text-center text-sm text-gray-600">
+                                                                    {row.attempts > 0 ? row.attempts : <span className="text-gray-300">0</span>}
                                                                 </td>
                                                             </tr>
                                                         );
@@ -2887,6 +2767,161 @@ export default function AssignmentDetailPageContent() {
                                     </Card>
                                 )}
                             </>
+                        )}
+                    </div>
+                )}
+
+                {/* ─── Video Tab ─── */}
+                {activeTab === 'video' && (
+                    <div className="max-w-2xl mx-auto space-y-6">
+                        {/* Faculty: link management */}
+                        <Card className="border-0 shadow-sm overflow-hidden">
+                            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${accentColor}18` }}>
+                                    <Link2 className="w-4 h-4" style={{ color: accentColor }} />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-gray-900">Video Resource</h3>
+                                    <p className="text-xs text-gray-500 mt-0.5">Paste any video URL — YouTube, Vimeo, Loom, or direct link</p>
+                                </div>
+                            </div>
+                            <CardContent className="p-5 space-y-4">
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                        <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                                        <input
+                                            type="url"
+                                            value={videoUrlDraft}
+                                            onChange={e => setVideoUrlDraft(e.target.value)}
+                                            placeholder="https://youtube.com/watch?v=..."
+                                            className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent transition"
+                                            style={{ '--tw-ring-color': accentColor } as React.CSSProperties}
+                                        />
+                                    </div>
+                                    <Button
+                                        disabled={savingVideoUrl}
+                                        onClick={async () => {
+                                            setSavingVideoUrl(true);
+                                            try {
+                                                await apiClient.updateAssignment(assignmentId, { video_url: videoUrlDraft.trim() || null });
+                                                queryClient.invalidateQueries({ queryKey: ['assignment', assignmentId] });
+                                            } catch {
+                                                /* swallow — show stale data */
+                                            } finally {
+                                                setSavingVideoUrl(false);
+                                            }
+                                        }}
+                                        className="px-4 text-white gap-2 shrink-0"
+                                        style={{ backgroundColor: accentColor }}
+                                    >
+                                        {savingVideoUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                        Save
+                                    </Button>
+                                </div>
+                                {videoUrlDraft.trim() && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setVideoUrlDraft('')}
+                                        className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                                    >
+                                        Clear link
+                                    </button>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        {/* Preview */}
+                        {assignment.video_url ? (
+                            <Card className="border-0 shadow-sm overflow-hidden">
+                                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Play className="w-4 h-4" style={{ color: accentColor }} />
+                                        <span className="font-semibold text-gray-900 text-sm">Preview</span>
+                                    </div>
+                                    <a
+                                        href={assignment.video_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-1 text-xs hover:underline"
+                                        style={{ color: accentColor }}
+                                    >
+                                        Open in new tab <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                </div>
+                                <CardContent className="p-0">
+                                    {(() => {
+                                        const url = assignment.video_url;
+                                        // YouTube
+                                        const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s?#]+)/);
+                                        if (ytMatch) {
+                                            return (
+                                                <div className="aspect-video">
+                                                    <iframe
+                                                        src={`https://www.youtube.com/embed/${ytMatch[1]}`}
+                                                        className="w-full h-full"
+                                                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                        allowFullScreen
+                                                    />
+                                                </div>
+                                            );
+                                        }
+                                        // Vimeo
+                                        const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+                                        if (vimeoMatch) {
+                                            return (
+                                                <div className="aspect-video">
+                                                    <iframe
+                                                        src={`https://player.vimeo.com/video/${vimeoMatch[1]}`}
+                                                        className="w-full h-full"
+                                                        allow="autoplay; fullscreen; picture-in-picture"
+                                                        allowFullScreen
+                                                    />
+                                                </div>
+                                            );
+                                        }
+                                        // Loom
+                                        const loomMatch = url.match(/loom\.com\/share\/([a-zA-Z0-9]+)/);
+                                        if (loomMatch) {
+                                            return (
+                                                <div className="aspect-video">
+                                                    <iframe
+                                                        src={`https://www.loom.com/embed/${loomMatch[1]}`}
+                                                        className="w-full h-full"
+                                                        allowFullScreen
+                                                    />
+                                                </div>
+                                            );
+                                        }
+                                        // Generic fallback — link card
+                                        return (
+                                            <div className="p-5 flex items-center gap-4">
+                                                <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${accentColor}18` }}>
+                                                    <Play className="w-7 h-7" style={{ color: accentColor }} />
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-sm font-medium text-gray-900 truncate">{url}</p>
+                                                    <p className="text-xs text-gray-400 mt-0.5">External video resource</p>
+                                                </div>
+                                                <a
+                                                    href={url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="shrink-0 px-3 py-1.5 rounded-lg text-xs text-white font-medium"
+                                                    style={{ backgroundColor: accentColor }}
+                                                >
+                                                    Watch
+                                                </a>
+                                            </div>
+                                        );
+                                    })()}
+                                </CardContent>
+                            </Card>
+                        ) : (
+                            <div className="text-center py-16 text-gray-400">
+                                <Video className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                                <p className="text-sm font-medium">No video linked yet</p>
+                                <p className="text-xs mt-1 opacity-70">Paste a URL above and click Save to add a video for students</p>
+                            </div>
                         )}
                     </div>
                 )}

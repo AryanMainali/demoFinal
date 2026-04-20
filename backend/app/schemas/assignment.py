@@ -122,6 +122,7 @@ class AssignmentBase(BaseModel):
     is_template_rubric: bool = False
     rubric_template_id: Optional[int] = None
     bonus_points: float = 0.0
+    video_url: Optional[str] = None
 
     @model_validator(mode='after')
     def validate_date_range(self):
@@ -167,6 +168,7 @@ class AssignmentUpdate(BaseModel):
     is_template_rubric: Optional[bool] = None
     rubric_template_id: Optional[int] = None
     bonus_points: Optional[float] = None
+    video_url: Optional[str] = None
     test_cases: Optional[List[TestCaseCreate]] = None
     rubric: Optional[RubricUpdate] = None
 

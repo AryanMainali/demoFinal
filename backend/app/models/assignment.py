@@ -68,6 +68,9 @@ class Assignment(Base):
     # Bonus points (added on top of max_score)
     bonus_points = Column(Float, default=0.0, nullable=False)
 
+    # Video resource link (faculty can attach a YouTube/Vimeo/etc. URL for students)
+    video_url = Column(String(1024), nullable=True)
+
     # Status and publishing
     is_published = Column(Boolean, default=False)
     grades_published = Column(Boolean, default=False)

@@ -142,6 +142,31 @@ interface RubricFlat {
     total_points: number;
 }
 
+interface RubricLevel {
+    id: number;
+    score: number;
+    comment: string;
+}
+
+interface RubricTemplateItem {
+    id: number;
+    name: string;
+    description?: string | null;
+    min_scale: number;
+    max_scale: number;
+    weight: number;
+    points: number;
+    sort_order: number;
+    levels: RubricLevel[];
+}
+
+interface RubricTemplate {
+    id: number;
+    title: string;
+    description?: string | null;
+    items: RubricTemplateItem[];
+}
+
 interface Assignment {
     id: number;
     title: string;
@@ -162,6 +187,8 @@ interface Assignment {
     language?: { id: number; name: string; display_name: string; file_extension: string };
     course?: { id: number; name: string; code: string };
     rubric?: RubricFlat;
+    is_template_rubric?: boolean;
+    rubric_template?: RubricTemplate | null;
     test_cases?: {
         id: number;
         name: string;
@@ -305,6 +332,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
 
     // Rubric grading state
     const [rubricScores, setRubricScores] = useState<Record<number, number>>({});
+    const [rubricComments, setRubricComments] = useState<Record<number, string>>({});
     const [rubricTotalScore, setRubricTotalScore] = useState<number>(0);
 
     const handleRubricScoreChange = (itemId: number, score: number) => {
@@ -580,9 +608,14 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             acc[rs.rubric_item_id] = Number(rs.score ?? 0);
             return acc;
         }, {});
+        const savedRubricComments = (selectedSub.rubric_scores || []).reduce<Record<number, string>>((acc, rs) => {
+            if (rs.comment) acc[rs.rubric_item_id] = rs.comment;
+            return acc;
+        }, {});
         const savedRubricTotal = (selectedSub.rubric_scores || []).reduce((sum, rs) => sum + Number(rs.score ?? 0), 0);
 
         setRubricScores(savedRubricScores);
+        setRubricComments(savedRubricComments);
         // Use the aggregate rubric_score from the submission if per-item scores aren't populated
         const rubricTotal = savedRubricTotal > 0
             ? savedRubricTotal
@@ -882,16 +915,28 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             const overrides = Object.entries(gradeState.testOverrides).map(([id, val]) => ({
                 id: Number(id), ...val,
             }));
-            const rubricItems = assignment?.rubric?.items ?? [];
+            const isTemplateRubric = !!assignment?.is_template_rubric;
+            const templateItems = assignment?.rubric_template?.items ?? [];
+            const regularItems = assignment?.rubric?.items ?? [];
+            const hasRubric = isTemplateRubric ? templateItems.length > 0 : regularItems.length > 0;
 
-            await apiClient.saveManualGrade(selectedSub.id, {
-                final_score: gradeState.finalScore ? parseFloat(gradeState.finalScore) : (rubricItems.length ? Math.round(rubricTotalScore * 2) / 2 : undefined),
-                feedback: gradeState.feedback || undefined,
-                rubric_scores: rubricItems.map(item => ({
+            const rubricScorePayload = isTemplateRubric
+                ? templateItems.map(item => ({
                     rubric_item_id: item.id,
                     score: rubricScores[item.id] ?? 0,
                     max_score: item.points ?? 0,
-                })),
+                    comment: rubricComments[item.id] ?? undefined,
+                }))
+                : regularItems.map(item => ({
+                    rubric_item_id: item.id,
+                    score: rubricScores[item.id] ?? 0,
+                    max_score: item.points ?? 0,
+                }));
+
+            await apiClient.saveManualGrade(selectedSub.id, {
+                final_score: gradeState.finalScore ? parseFloat(gradeState.finalScore) : (hasRubric ? Math.round(rubricTotalScore * 2) / 2 : undefined),
+                feedback: gradeState.feedback || undefined,
+                rubric_scores: rubricScorePayload,
                 test_overrides: overrides.length > 0 ? overrides : undefined,
             });
 
@@ -1856,35 +1901,241 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                 )}
 
                                 {/* Rubric Grader */}
-                                {!isAssistant && assignment.rubric && assignment.rubric.items?.length > 0 && (
-                                    <div>
-                                        <p className="text-[10px] text-[#858585] uppercase tracking-widest mb-2">Rubric Criteria</p>
-                                        <RubricGrader
-                                            rubricItems={assignment.rubric.items.map(item => ({
-                                                itemId: item.id,
-                                                name: item.name,
-                                                description: item.description || '',
-                                                weight: item.weight,
-                                                minPoints: item.min_points ?? 0,
-                                                maxPoints: item.max_points ?? item.points ?? 0,
-                                                earnedPoints: Math.min(rubricScores[item.id] || 0, item.max_points ?? item.points ?? 0),
-                                            }))}
-                                            mode={assignment.rubric.items.some(i => i.weight > 0) ? 'weight' : 'points'}
-                                            maxScore={assignment.max_score}
-                                            onScoreChange={(itemId, score) => {
-                                                const item = assignment.rubric?.items.find(i => i.id === itemId);
-                                                const maxPts = item?.max_points ?? item?.points ?? 0;
-                                                handleRubricScoreChange(itemId, Math.min(Math.max(0, score), maxPts));
-                                            }}
-                                            onTotalScoreChange={handleRubricTotalChange}
-                                            onCalculate={() => {
-                                                const roundedTotal = Math.round(rubricTotalScore * 2) / 2;
-                                                setGradeState(prev => ({ ...prev, finalScore: String(roundedTotal) }));
-                                                toast({ title: 'Score applied', description: `${roundedTotal.toFixed(1)} / ${assignment.max_score} pts` });
-                                            }}
-                                        />
-                                    </div>
-                                )}
+                                {!isAssistant && (() => {
+                                    const isTemplate = !!assignment.is_template_rubric;
+                                    const templateItems = assignment.rubric_template?.items ?? [];
+                                    const regularItems = assignment.rubric?.items ?? [];
+
+                                    // ── Template rubric score entry ─────────────────────
+                                    if (isTemplate && templateItems.length > 0) {
+                                        const totalEarned = templateItems.reduce((sum, ti) => {
+                                            const raw = rubricScores[ti.id] ?? 0;
+                                            const scaleMax = ti.max_scale || 1;
+                                            return sum + (raw / scaleMax) * ti.points;
+                                        }, 0);
+
+                                        return (
+                                            <div className="space-y-3">
+                                                <p className="text-[10px] text-[#858585] uppercase tracking-widest">Rubric Criteria</p>
+
+                                                {templateItems.map(ti => {
+                                                    const sortedLevels = [...ti.levels].sort((a, b) => b.score - a.score);
+                                                    const currentScore = rubricScores[ti.id] ?? null;
+                                                    const matchedLevel = currentScore !== null
+                                                        ? sortedLevels.find(l => l.score === currentScore) ?? null
+                                                        : null;
+                                                    const scaleMax = ti.max_scale || 1;
+                                                    const earnedPts = currentScore !== null ? (currentScore / scaleMax) * ti.points : null;
+
+                                                    return (
+                                                        <div key={ti.id} className="rounded-lg border border-[#3c3c3c] overflow-hidden">
+                                                            {/* Criterion header */}
+                                                            <div className="px-3 py-2 bg-[#1e1e1e] border-b border-[#3c3c3c]">
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <div className="min-w-0">
+                                                                        <p className="text-[12px] font-semibold text-white leading-tight">{ti.name}</p>
+                                                                        {ti.description && <p className="text-[10px] text-[#858585] mt-0.5">{ti.description}</p>}
+                                                                        <p className="text-[10px] text-[#606060] mt-0.5">Scale {ti.min_scale}–{ti.max_scale} · {ti.points} pts</p>
+                                                                    </div>
+                                                                    <div className="text-right shrink-0">
+                                                                        {earnedPts !== null ? (
+                                                                            <>
+                                                                                <p className="text-[13px] font-bold text-[#4ec9b0]">{earnedPts.toFixed(1)}</p>
+                                                                                <p className="text-[10px] text-[#606060]">/ {ti.points} pts</p>
+                                                                            </>
+                                                                        ) : (
+                                                                            <p className="text-[11px] text-[#606060]">— / {ti.points}</p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Score input row */}
+                                                                <div className="mt-2 flex items-center gap-2">
+                                                                    <span className="text-[10px] text-[#858585]">Score:</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        value={currentScore ?? ''}
+                                                                        onChange={e => {
+                                                                            const v = parseFloat(e.target.value);
+                                                                            if (!Number.isFinite(v)) {
+                                                                                setRubricScores(p => { const n = { ...p }; delete n[ti.id]; return n; });
+                                                                                return;
+                                                                            }
+                                                                            const clamped = Math.min(Math.max(ti.min_scale, v), ti.max_scale);
+                                                                            setRubricScores(p => ({ ...p, [ti.id]: clamped }));
+                                                                            // Auto-fill comment from matched level
+                                                                            const lv = sortedLevels.find(l => l.score === clamped);
+                                                                            if (lv?.comment) setRubricComments(p => ({ ...p, [ti.id]: lv.comment }));
+                                                                        }}
+                                                                        placeholder={`${ti.min_scale}–${ti.max_scale}`}
+                                                                        step="1"
+                                                                        min={ti.min_scale}
+                                                                        max={ti.max_scale}
+                                                                        className="w-20 bg-[#2a2a2a] border border-[#505050] rounded px-2 py-1 text-[13px] font-bold text-white text-center focus:outline-none focus:border-[#862733] transition-colors"
+                                                                    />
+                                                                    {/* Quick-select level buttons */}
+                                                                    <div className="flex gap-1 flex-wrap">
+                                                                        {sortedLevels.map(lv => (
+                                                                            <button
+                                                                                key={lv.id}
+                                                                                onClick={() => {
+                                                                                    setRubricScores(p => ({ ...p, [ti.id]: lv.score }));
+                                                                                    if (lv.comment) setRubricComments(p => ({ ...p, [ti.id]: lv.comment }));
+                                                                                }}
+                                                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors ${currentScore === lv.score
+                                                                                    ? 'bg-[#4ec9b0]/20 border-[#4ec9b0] text-[#4ec9b0]'
+                                                                                    : 'border-[#3c3c3c] text-[#858585] hover:border-[#505050] hover:text-[#ccc]'
+                                                                                }`}
+                                                                                title={lv.comment}
+                                                                            >
+                                                                                {lv.score}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Level descriptors — highlight matched level */}
+                                                            <div className="divide-y divide-[#2a2a2a]">
+                                                                {sortedLevels.map(level => {
+                                                                    const isActive = currentScore === level.score;
+                                                                    return (
+                                                                        <button
+                                                                            key={level.id}
+                                                                            onClick={() => {
+                                                                                setRubricScores(p => ({ ...p, [ti.id]: level.score }));
+                                                                                if (level.comment) setRubricComments(p => ({ ...p, [ti.id]: level.comment }));
+                                                                            }}
+                                                                            className={`w-full text-left flex gap-0 transition-colors ${isActive
+                                                                                ? 'bg-[#4ec9b0]/10 border-l-2 border-[#4ec9b0]'
+                                                                                : 'bg-[#252526] hover:bg-[#2a2d2e]'
+                                                                            }`}
+                                                                        >
+                                                                            <div className="flex items-center justify-center px-2.5 shrink-0 w-8 py-2">
+                                                                                <span className={`text-[12px] font-bold ${isActive ? 'text-[#4ec9b0]' : 'text-[#dcdcaa]'}`}>
+                                                                                    {level.score}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="flex-1 py-2 pr-3">
+                                                                                {isActive && (
+                                                                                    <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#4ec9b0] bg-[#4ec9b0]/15 border border-[#4ec9b0]/30 rounded px-1.5 py-0.5 mb-1">
+                                                                                        ✓ SELECTED
+                                                                                    </span>
+                                                                                )}
+                                                                                <p className={`text-[11px] leading-relaxed ${isActive ? 'text-[#e0e0e0]' : 'text-[#999]'}`}>
+                                                                                    {level.comment || <span className="italic text-[#555]">No description</span>}
+                                                                                </p>
+                                                                            </div>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+
+                                                            {/* Comment override */}
+                                                            <div className="px-3 py-2 bg-[#1a1a1a] border-t border-[#3c3c3c]">
+                                                                <p className="text-[10px] text-[#606060] mb-1">Instructor comment</p>
+                                                                <textarea
+                                                                    value={rubricComments[ti.id] ?? ''}
+                                                                    onChange={e => setRubricComments(p => ({ ...p, [ti.id]: e.target.value }))}
+                                                                    placeholder="Add comment for this criterion…"
+                                                                    rows={2}
+                                                                    className="w-full bg-[#252526] border border-[#3c3c3c] rounded px-2 py-1.5 text-[11px] text-[#cccccc] placeholder-[#555] resize-none focus:outline-none focus:border-[#505050] leading-relaxed"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+
+                                                {/* Total + Apply */}
+                                                {(() => {
+                                                    const maxPts = templateItems.reduce((s, i) => s + i.points, 0);
+                                                    const pct = maxPts > 0 ? (totalEarned / maxPts) * 100 : 0;
+                                                    const scoreColor = pct >= 90 ? '#4ec9b0' : pct >= 70 ? '#dcdcaa' : pct >= 50 ? '#ce9178' : '#f44747';
+                                                    const allScored = templateItems.every(ti => rubricScores[ti.id] !== undefined);
+                                                    return (
+                                                        <div className="rounded-xl border border-[#3c3c3c] bg-[#1e1e1e] overflow-hidden">
+                                                            {/* Score summary */}
+                                                            <div className="px-4 py-3 flex items-center justify-between gap-3">
+                                                                <div>
+                                                                    <p className="text-[10px] text-[#858585] uppercase tracking-wider mb-0.5">Rubric Total</p>
+                                                                    <div className="flex items-end gap-1">
+                                                                        <span className="text-[22px] font-bold leading-none" style={{ color: scoreColor }}>
+                                                                            {totalEarned.toFixed(1)}
+                                                                        </span>
+                                                                        <span className="text-[12px] text-[#858585] mb-0.5">/ {maxPts} pts</span>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <p className="text-[10px] text-[#858585] mb-0.5">Progress</p>
+                                                                    <p className="text-[13px] font-semibold" style={{ color: scoreColor }}>{pct.toFixed(0)}%</p>
+                                                                </div>
+                                                            </div>
+                                                            {/* Progress bar */}
+                                                            <div className="h-1 bg-[#2a2a2a]">
+                                                                <div className="h-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: scoreColor }} />
+                                                            </div>
+                                                            {/* Apply button */}
+                                                            <div className="px-4 py-3 border-t border-[#2a2a2a]">
+                                                                {!allScored && (
+                                                                    <p className="text-[10px] text-[#dcdcaa] mb-2 flex items-center gap-1">
+                                                                        <span>⚠</span> Score all {templateItems.length} criteria before applying
+                                                                    </p>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const rounded = Math.round(totalEarned * 2) / 2;
+                                                                        setRubricTotalScore(rounded);
+                                                                        setGradeState(prev => ({ ...prev, finalScore: String(rounded) }));
+                                                                        toast({ title: 'Score applied', description: `${rounded.toFixed(1)} / ${assignment.max_score} pts — scroll up to save` });
+                                                                    }}
+                                                                    className="w-full py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 bg-[#862733] hover:bg-[#a0303f] text-white shadow-md hover:shadow-lg active:scale-[0.98]"
+                                                                >
+                                                                    Apply to Final Score
+                                                                    <span className="text-[11px] opacity-75">({totalEarned.toFixed(1)} pts)</span>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+                                        );
+                                    }
+
+                                    // ── Regular rubric ──────────────────────────────────
+                                    if (regularItems.length > 0) {
+                                        return (
+                                            <div>
+                                                <p className="text-[10px] text-[#858585] uppercase tracking-widest mb-2">Rubric Criteria</p>
+                                                <RubricGrader
+                                                    rubricItems={regularItems.map(item => ({
+                                                        itemId: item.id,
+                                                        name: item.name,
+                                                        description: item.description || '',
+                                                        weight: item.weight,
+                                                        minPoints: item.min_points ?? 0,
+                                                        maxPoints: item.max_points ?? item.points ?? 0,
+                                                        earnedPoints: Math.min(rubricScores[item.id] || 0, item.max_points ?? item.points ?? 0),
+                                                    }))}
+                                                    mode={regularItems.some(i => i.weight > 0) ? 'weight' : 'points'}
+                                                    maxScore={assignment.max_score}
+                                                    onScoreChange={(itemId, score) => {
+                                                        const item = regularItems.find(i => i.id === itemId);
+                                                        const maxPts = item?.max_points ?? item?.points ?? 0;
+                                                        handleRubricScoreChange(itemId, Math.min(Math.max(0, score), maxPts));
+                                                    }}
+                                                    onTotalScoreChange={handleRubricTotalChange}
+                                                    onCalculate={() => {
+                                                        const roundedTotal = Math.round(rubricTotalScore * 2) / 2;
+                                                        setGradeState(prev => ({ ...prev, finalScore: String(roundedTotal) }));
+                                                        toast({ title: 'Score applied', description: `${roundedTotal.toFixed(1)} / ${assignment.max_score} pts` });
+                                                    }}
+                                                />
+                                            </div>
+                                        );
+                                    }
+
+                                    return null;
+                                })()}
                             </div>
                         )}
 
@@ -2324,46 +2575,114 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                         )}
 
                         {rightPanel === 'rubric' && (
-                            <div className="space-y-4">
-                                {assignment.rubric && assignment.rubric.items?.length > 0 ? (
-                                    <div className="space-y-3">
-                                        <div className="bg-[#1e1e1e] rounded-lg p-3 border border-[#3c3c3c]">
-                                            <p className="text-[12px] text-[#cccccc]">
-                                                Total Rubric Points:{' '}
-                                                <span className="text-white font-semibold">
-                                                    {assignment.rubric.total_points}
-                                                </span>
-                                            </p>
-                                            <p className="text-[10px] text-[#858585] mt-1">
-                                                {assignment.rubric.items.length} grading criteria
-                                            </p>
-                                        </div>
-                                        <div className="bg-[#1e1e1e] rounded-lg border border-[#3c3c3c] divide-y divide-[#3c3c3c]">
-                                            {assignment.rubric.items.map((item, idx) => (
-                                                <div
-                                                    key={item.id ?? idx}
-                                                    className="px-3 py-2 flex items-start justify-between gap-2"
-                                                >
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-[11px] font-medium text-white">
-                                                            {item.name}
-                                                        </p>
-                                                        <p className="text-[10px] text-white mt-0.5">
-                                                            Points: <span className="text-white font-semibold">{item.points}</span>
-                                                        </p>
+                            <div className="space-y-3">
+                                {(() => {
+                                    const isTemplate = !!assignment.is_template_rubric;
+                                    const template = assignment.rubric_template ?? null;
+
+                                    // ── Template rubric: full matrix display ────────────────
+                                    if (isTemplate && template) {
+                                        const totalPts = template.items.reduce((s, i) => s + i.points, 0);
+                                        return (
+                                            <>
+                                                {/* Header */}
+                                                <div className="rounded-lg border border-[#c586c0]/30 bg-gradient-to-r from-[#1a1a2e] to-[#1e1e2e] px-3 py-2.5">
+                                                    <div className="flex items-center gap-2 mb-0.5">
+                                                        <FileText className="w-3.5 h-3.5 text-[#c586c0] shrink-0" />
+                                                        <span className="text-[12px] font-semibold text-[#c586c0]">{template.title}</span>
+                                                        <span className="ml-auto text-[9px] text-[#606060] shrink-0">Rubric Template</span>
+                                                    </div>
+                                                    {template.description && (
+                                                        <p className="text-[11px] text-[#858585] ml-5">{template.description}</p>
+                                                    )}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div className="rounded bg-[#1e1e1e] border border-[#3c3c3c] px-2 py-1.5 text-center">
+                                                        <p className="text-[10px] text-[#606060]">Criteria</p>
+                                                        <p className="text-[13px] font-bold text-white">{template.items.length}</p>
+                                                    </div>
+                                                    <div className="rounded bg-[#1e1e1e] border border-[#3c3c3c] px-2 py-1.5 text-center">
+                                                        <p className="text-[10px] text-[#606060]">Total pts</p>
+                                                        <p className="text-[13px] font-bold text-[#dcdcaa]">{totalPts}</p>
                                                     </div>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="text-center py-8">
-                                        <FileText className="w-10 h-10 mx-auto text-[#505050] mb-3" />
-                                        <p className="text-[12px] text-[#858585]">No rubric for this assignment</p>
-                                    </div>
-                                )}
 
-                                {/* Test Cases Summary (reference only; grading is rubric-based) */}
+                                                {/* Per-criterion cards */}
+                                                {template.items.map((ti, idx) => {
+                                                    const sortedLevels = [...ti.levels].sort((a, b) => b.score - a.score);
+                                                    return (
+                                                        <div key={ti.id} className="rounded-lg border border-[#3c3c3c] overflow-hidden">
+                                                            <div className="px-3 py-2 bg-[#1e1e1e] border-b border-[#3c3c3c] flex items-start justify-between gap-2">
+                                                                <div className="min-w-0">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[10px] text-[#606060] font-mono shrink-0">{idx + 1}</span>
+                                                                        <span className="text-[12px] font-semibold text-white">{ti.name}</span>
+                                                                    </div>
+                                                                    {ti.description && <p className="text-[11px] text-[#858585] mt-0.5 ml-4">{ti.description}</p>}
+                                                                    <p className="text-[10px] text-[#606060] mt-0.5 ml-4">Scale {ti.min_scale}–{ti.max_scale}</p>
+                                                                </div>
+                                                                <div className="text-right shrink-0">
+                                                                    <p className="text-[13px] font-bold text-[#dcdcaa]">{ti.points}</p>
+                                                                    <p className="text-[10px] text-[#606060]">pts</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="divide-y divide-[#2a2a2a]">
+                                                                {sortedLevels.map(level => (
+                                                                    <div key={level.id} className="flex gap-0 bg-[#252526]">
+                                                                        <div className="flex items-center justify-center px-2.5 shrink-0 w-8">
+                                                                            <span className="text-[12px] font-bold text-[#dcdcaa]">{level.score}</span>
+                                                                        </div>
+                                                                        <div className="flex-1 py-2 pr-3">
+                                                                            <p className="text-[11px] text-[#999] leading-relaxed">
+                                                                                {level.comment || <span className="italic text-[#555]">No description</span>}
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </>
+                                        );
+                                    }
+
+                                    // ── Regular rubric ──────────────────────────────────────
+                                    if (assignment.rubric && assignment.rubric.items?.length > 0) {
+                                        return (
+                                            <div className="space-y-3">
+                                                <div className="bg-[#1e1e1e] rounded-lg p-3 border border-[#3c3c3c]">
+                                                    <p className="text-[12px] text-[#cccccc]">
+                                                        Total Rubric Points:{' '}
+                                                        <span className="text-white font-semibold">{assignment.rubric.total_points}</span>
+                                                    </p>
+                                                    <p className="text-[10px] text-[#858585] mt-1">{assignment.rubric.items.length} grading criteria</p>
+                                                </div>
+                                                <div className="bg-[#1e1e1e] rounded-lg border border-[#3c3c3c] divide-y divide-[#3c3c3c]">
+                                                    {assignment.rubric.items.map((item, idx) => (
+                                                        <div key={item.id ?? idx} className="px-3 py-2.5 flex items-start justify-between gap-2">
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-[11px] font-medium text-white">{item.name}</p>
+                                                                {item.description && <p className="text-[10px] text-[#858585] mt-0.5">{item.description}</p>}
+                                                                <p className="text-[10px] text-[#606060] mt-0.5">Scale: {item.min_points ?? 0}–{item.max_points ?? item.points}</p>
+                                                            </div>
+                                                            <span className="text-[12px] font-bold text-[#dcdcaa] shrink-0">{item.points} pts</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+
+                                    return (
+                                        <div className="text-center py-8">
+                                            <FileText className="w-10 h-10 mx-auto text-[#505050] mb-3" />
+                                            <p className="text-[12px] text-[#858585]">No rubric for this assignment</p>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Test Cases reference */}
                                 {assignment.test_cases && assignment.test_cases.length > 0 && (
                                     <div className="bg-[#1e1e1e] rounded-lg p-3 border border-[#3c3c3c]">
                                         <p className="text-[11px] text-[#858585] uppercase tracking-wider mb-2">Test Cases ({assignment.test_cases.length})</p>
@@ -2371,9 +2690,7 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             {assignment.test_cases.map(tc => (
                                                 <div key={tc.id} className="flex items-center justify-between text-[11px]">
                                                     <span className="text-[#cccccc] truncate flex-1">{tc.name}</span>
-                                                    <div className="flex items-center gap-2 shrink-0">
-                                                        {tc.is_hidden && <span className="text-[9px] px-1 py-0.5 rounded bg-[#505050] text-[#858585]">Hidden</span>}
-                                                    </div>
+                                                    {tc.is_hidden && <span className="text-[9px] px-1 py-0.5 rounded bg-[#505050] text-[#858585]">Hidden</span>}
                                                 </div>
                                             ))}
                                         </div>

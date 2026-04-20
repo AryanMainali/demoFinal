@@ -38,12 +38,8 @@ router = APIRouter()
 
 
 def _is_submission_graded(submission: Submission) -> bool:
-    """Treat submission as graded if it has a score or a graded/completed status."""
-    status_value = str(submission.status or "").lower()
-    return (
-        submission.final_score is not None
-        or status_value in {"completed", "autograded", "graded"}
-    )
+    """A submission is graded only when a faculty member has set a final score."""
+    return submission.final_score is not None
 
 
 def _can_grade_for_course(db: Session, user: User, course_id: int) -> bool:

@@ -193,52 +193,23 @@ class GradingService:
                     "total_tests": total_count,
                     "final_score": saved_final_score,
                 }
-            elif assignment.rubric:
+            else:
+                # Tests ran (with or without a rubric). Never auto-commit a final grade —
+                # faculty must review and grade manually.
                 submission.rubric_score = None
                 submission.raw_score = None
                 submission.final_score = None
                 submission.status = SubmissionStatus.MANUAL_REVIEW
                 submission.graded_at = None
                 self.db.commit()
-                logger.info(f"Submission {submission_id} ready for manual rubric grading")
+                logger.info(
+                    f"Submission {submission_id} tests done "
+                    f"({passed_count}/{total_count}); awaiting faculty grade"
+                )
                 return {
                     "submission_id": submission_id,
                     "status": "manual_review",
                     "test_score": test_score,
-                    "tests_passed": passed_count,
-                    "total_tests": total_count,
-                }
-            elif total_count == 0:
-                # No test cases and no rubric - leave ungraded for faculty to grade manually
-                submission.raw_score = None
-                submission.final_score = None
-                submission.status = SubmissionStatus.PENDING
-                submission.graded_at = None
-                self.db.commit()
-                logger.info(f"Submission {submission_id} has no test cases; awaiting manual grade")
-                return {
-                    "submission_id": submission_id,
-                    "status": "pending",
-                    "test_score": None,
-                    "tests_passed": 0,
-                    "total_tests": 0,
-                }
-            else:
-                raw_score = test_score
-                final_score = raw_score * (1 - (submission.late_penalty_applied or 0) / 100)
-                submission.rubric_score = None
-                submission.raw_score = raw_score
-                submission.final_score = final_score
-                submission.status = SubmissionStatus.AUTOGRADED
-                submission.graded_at = datetime.utcnow()
-                self.db.commit()
-                logger.info(f"Grading completed for submission {submission_id}: {final_score:.2f}%")
-                return {
-                    "submission_id": submission_id,
-                    "status": "graded",
-                    "test_score": test_score,
-                    "raw_score": raw_score,
-                    "final_score": final_score,
                     "tests_passed": passed_count,
                     "total_tests": total_count,
                 }

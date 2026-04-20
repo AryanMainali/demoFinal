@@ -9,12 +9,13 @@ from app.core.database import Base
 
 
 class SubmissionStatus(str, PyEnum):
-    PENDING = "pending"          # Just submitted, waiting to be processed
-    AUTOGRADED = "autograded"           # Auto-grading complete
-    MANUAL_REVIEW = "manual_review"  # Needs manual review
-    COMPLETED = "completed"      # Fully graded
-    ERROR = "error"             # Error during processing
-    FLAGGED = "flagged"         # Flagged for plagiarism/AI
+    PENDING = "pending"              # Just submitted, waiting to be processed
+    MANUAL_REVIEW = "manual_review"  # Tests run; awaiting faculty grade
+    COMPLETED = "completed"          # Fully graded by faculty
+    GRADED = "graded"                # Alias used by faculty grading endpoints
+    ERROR = "error"                  # Error during processing
+    FLAGGED = "flagged"              # Flagged for plagiarism/AI
+    AUTOGRADED = "autograded"        # Kept for DB compatibility only
 
 
 class Submission(Base):
