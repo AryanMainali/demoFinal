@@ -1949,49 +1949,24 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                                                     </div>
                                                                 </div>
 
-                                                                {/* Score input row */}
-                                                                <div className="mt-2 flex items-center gap-2">
-                                                                    <span className="text-[10px] text-[#858585]">Score:</span>
-                                                                    <input
-                                                                        type="number"
-                                                                        value={currentScore ?? ''}
-                                                                        onChange={e => {
-                                                                            const v = parseFloat(e.target.value);
-                                                                            if (!Number.isFinite(v)) {
-                                                                                setRubricScores(p => { const n = { ...p }; delete n[ti.id]; return n; });
-                                                                                return;
-                                                                            }
-                                                                            const clamped = Math.min(Math.max(ti.min_scale, v), ti.max_scale);
-                                                                            setRubricScores(p => ({ ...p, [ti.id]: clamped }));
-                                                                            // Auto-fill comment from matched level
-                                                                            const lv = sortedLevels.find(l => l.score === clamped);
-                                                                            if (lv?.comment) setRubricComments(p => ({ ...p, [ti.id]: lv.comment }));
-                                                                        }}
-                                                                        placeholder={`${ti.min_scale}–${ti.max_scale}`}
-                                                                        step="1"
-                                                                        min={ti.min_scale}
-                                                                        max={ti.max_scale}
-                                                                        className="w-20 bg-[#2a2a2a] border border-[#505050] rounded px-2 py-1 text-[13px] font-bold text-white text-center focus:outline-none focus:border-[#862733] transition-colors"
-                                                                    />
-                                                                    {/* Quick-select level buttons */}
-                                                                    <div className="flex gap-1 flex-wrap">
-                                                                        {sortedLevels.map(lv => (
-                                                                            <button
-                                                                                key={lv.id}
-                                                                                onClick={() => {
-                                                                                    setRubricScores(p => ({ ...p, [ti.id]: lv.score }));
-                                                                                    if (lv.comment) setRubricComments(p => ({ ...p, [ti.id]: lv.comment }));
-                                                                                }}
-                                                                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors ${currentScore === lv.score
-                                                                                    ? 'bg-[#4ec9b0]/20 border-[#4ec9b0] text-[#4ec9b0]'
-                                                                                    : 'border-[#3c3c3c] text-[#858585] hover:border-[#505050] hover:text-[#ccc]'
-                                                                                }`}
-                                                                                title={lv.comment}
-                                                                            >
-                                                                                {lv.score}
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
+                                                                {/* Score selector — buttons only */}
+                                                                <div className="mt-3 flex flex-wrap gap-1.5">
+                                                                    {sortedLevels.map(lv => (
+                                                                        <button
+                                                                            key={lv.id}
+                                                                            onClick={() => {
+                                                                                setRubricScores(p => ({ ...p, [ti.id]: lv.score }));
+                                                                                if (lv.comment) setRubricComments(p => ({ ...p, [ti.id]: lv.comment }));
+                                                                            }}
+                                                                            className={`w-9 h-9 rounded-lg text-[13px] font-bold border transition-colors ${currentScore === lv.score
+                                                                                ? 'bg-[#4ec9b0]/20 border-[#4ec9b0] text-[#4ec9b0]'
+                                                                                : 'bg-[#2a2a2a] border-[#3c3c3c] text-[#858585] hover:border-[#505050] hover:text-[#ccc]'
+                                                                            }`}
+                                                                            title={lv.comment}
+                                                                        >
+                                                                            {lv.score}
+                                                                        </button>
+                                                                    ))}
                                                                 </div>
                                                             </div>
 

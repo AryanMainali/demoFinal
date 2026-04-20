@@ -45,6 +45,7 @@ import {
     ExternalLink,
     Link2,
     Play,
+    BookOpen,
 } from 'lucide-react';
 
 /* ====================================================================
@@ -1081,10 +1082,10 @@ export default function AssignmentDetailPageContent() {
                                     }`}
                             >
                                 <span className="relative z-10 flex items-center gap-2">
-                                    <Video className="w-4 h-4" />
-                                    Watch Video
+                                    <BookOpen className="w-4 h-4" />
+                                    Study Resource
                                     {assignment.video_url && (
-                                        <span className="w-2 h-2 rounded-full bg-emerald-400" title="Video linked" />
+                                        <span className="w-2 h-2 rounded-full bg-emerald-400" title="Resource linked" />
                                     )}
                                 </span>
                             </button>
@@ -2781,8 +2782,8 @@ export default function AssignmentDetailPageContent() {
                                     <Link2 className="w-4 h-4" style={{ color: accentColor }} />
                                 </div>
                                 <div>
-                                    <h3 className="font-semibold text-gray-900">Video Resource</h3>
-                                    <p className="text-xs text-gray-500 mt-0.5">Paste any video URL — YouTube, Vimeo, Loom, or direct link</p>
+                                    <h3 className="font-semibold text-gray-900">Study Resource</h3>
+                                    <p className="text-xs text-gray-500 mt-0.5">Paste any URL — YouTube, Vimeo, Canvas module, PDF, or any resource link</p>
                                 </div>
                             </div>
                             <CardContent className="p-5 space-y-4">
@@ -2793,7 +2794,7 @@ export default function AssignmentDetailPageContent() {
                                             type="url"
                                             value={videoUrlDraft}
                                             onChange={e => setVideoUrlDraft(e.target.value)}
-                                            placeholder="https://youtube.com/watch?v=..."
+                                            placeholder="https://..."
                                             className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent transition"
                                             style={{ '--tw-ring-color': accentColor } as React.CSSProperties}
                                         />
@@ -2835,7 +2836,7 @@ export default function AssignmentDetailPageContent() {
                             <Card className="border-0 shadow-sm overflow-hidden">
                                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <Play className="w-4 h-4" style={{ color: accentColor }} />
+                                        <BookOpen className="w-4 h-4" style={{ color: accentColor }} />
                                         <span className="font-semibold text-gray-900 text-sm">Preview</span>
                                     </div>
                                     <a
@@ -2896,11 +2897,11 @@ export default function AssignmentDetailPageContent() {
                                         return (
                                             <div className="p-5 flex items-center gap-4">
                                                 <div className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${accentColor}18` }}>
-                                                    <Play className="w-7 h-7" style={{ color: accentColor }} />
+                                                    <ExternalLink className="w-7 h-7" style={{ color: accentColor }} />
                                                 </div>
                                                 <div className="min-w-0 flex-1">
                                                     <p className="text-sm font-medium text-gray-900 truncate">{url}</p>
-                                                    <p className="text-xs text-gray-400 mt-0.5">External video resource</p>
+                                                    <p className="text-xs text-gray-400 mt-0.5">External study resource</p>
                                                 </div>
                                                 <a
                                                     href={url}
@@ -2909,7 +2910,7 @@ export default function AssignmentDetailPageContent() {
                                                     className="shrink-0 px-3 py-1.5 rounded-lg text-xs text-white font-medium"
                                                     style={{ backgroundColor: accentColor }}
                                                 >
-                                                    Watch
+                                                    Open
                                                 </a>
                                             </div>
                                         );
@@ -2918,9 +2919,9 @@ export default function AssignmentDetailPageContent() {
                             </Card>
                         ) : (
                             <div className="text-center py-16 text-gray-400">
-                                <Video className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                                <p className="text-sm font-medium">No video linked yet</p>
-                                <p className="text-xs mt-1 opacity-70">Paste a URL above and click Save to add a video for students</p>
+                                <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                                <p className="text-sm font-medium">No resource linked yet</p>
+                                <p className="text-xs mt-1 opacity-70">Paste any URL above and click Save to share it with students</p>
                             </div>
                         )}
                     </div>

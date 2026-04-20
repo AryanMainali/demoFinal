@@ -27,16 +27,17 @@ import {
 
 // ============== Types ==============
 
-export type CalendarEventType = 
-    | 'deadline' 
-    | 'grading' 
-    | 'course_start' 
-    | 'course_end' 
+export type CalendarEventType =
+    | 'deadline'
+    | 'grading'
+    | 'course_start'
+    | 'course_end'
     | 'exam'
     | 'office_hours'
     | 'reminder'
     | 'announcement'
-    | 'submission';
+    | 'submission'
+    | 'resource';
 
 export type CalendarEvent = {
     date: string;
@@ -90,6 +91,7 @@ const EVENT_TYPE_STYLES: Record<string, { icon: typeof FileText; color: string; 
     reminder: { icon: Bell, color: 'text-yellow-500', label: 'Reminder' },
     announcement: { icon: Bell, color: 'text-cyan-500', label: 'Announcement' },
     submission: { icon: CheckCircle2, color: 'text-gray-500', label: 'Submitted' },
+    resource: { icon: FileText, color: 'text-purple-500', label: 'Resource' },
 };
 
 function getEventTypeStyle(eventType: string) {
@@ -288,6 +290,7 @@ export function DashboardCalendar({
         const hasCourseEvent = types?.has('course_start') || types?.has('course_end');
         const hasReminder = types?.has('reminder') || types?.has('announcement');
         const hasOfficeHours = types?.has('office_hours');
+        const hasResource = types?.has('resource');
         const eventCount = dayEvents.length;
 
         const isSelected = !!selectedDate && isSameDay(selectedDate, dateObj);
@@ -351,6 +354,9 @@ export function DashboardCalendar({
                         )}
                         {hasOfficeHours && (
                             <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-green-500'}`} />
+                        )}
+                        {hasResource && (
+                            <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-purple-500'}`} />
                         )}
                     </div>
                 )}
@@ -448,25 +454,11 @@ export function DashboardCalendar({
                             <span>Reminder</span>
                         </div>
                         <div className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-green-500" />
-                            <span>Office Hrs</span>
+                            <span className="w-2 h-2 rounded-full bg-purple-500" />
+                            <span>Resources</span>
                         </div>
                     </div>
-                    
-                    {/* Course color legend (if courses exist) */}
-                    {uniqueCourses.size > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                            {Array.from(uniqueCourses.entries()).slice(0, 4).map(([code, color]) => (
-                                <span key={code} className={`text-[9px] px-1.5 py-0.5 rounded ${color.bg} ${color.text}`}>
-                                    {code}
-                                </span>
-                            ))}
-                            {uniqueCourses.size > 4 && (
-                                <span className="text-[9px] text-gray-400">+{uniqueCourses.size - 4} more</span>
-                            )}
-                        </div>
-                    )}
-                    
+
                     {/* Selection and keyboard hints */}
                     <div className="flex items-center justify-between mt-2">
                         {selectedDate && (

@@ -892,7 +892,7 @@ export default function StudentAssignmentPage() {
                         {assignment.video_url && (
                             <button onClick={() => setRightPanel(rightPanel === 'video' ? null : 'video')}
                                 className={`h-6 px-2 text-[10px] rounded flex items-center gap-1 transition-colors ${rightPanel === 'video' ? 'bg-[#094771] text-white' : 'text-[#4ec9b0] hover:bg-[#505050]'}`}>
-                                <Video className="w-3 h-3" /> Watch Video
+                                <BookOpen className="w-3 h-3" /> Study Resource
                             </button>
                         )}
                         <div className="w-px h-4 bg-[#5a5a5a] mx-1" />
@@ -1431,7 +1431,7 @@ export default function StudentAssignmentPage() {
                                     {rightPanel === 'supplementary' && <><Paperclip className="w-4 h-4 text-[#dcdcaa]" /> Supplementary Files</>}
                                     {rightPanel === 'custom' && <><UploadIcon className="w-4 h-4 text-[#4ec9b0]" /> Custom Input</>}
                                     {rightPanel === 'group' && <><Users className="w-4 h-4 text-[#4ec9b0]" /> My Group</>}
-                                    {rightPanel === 'video' && <><Video className="w-4 h-4 text-[#4ec9b0]" /> Watch Video</>}
+                                    {rightPanel === 'video' && <><BookOpen className="w-4 h-4 text-[#4ec9b0]" /> Study Resource</>}
                                 </div>
                                 <button onClick={() => setRightPanel(null)} className="p-1 rounded hover:bg-[#505050] text-[#858585]">
                                     <X className="w-3.5 h-3.5" />
@@ -2248,11 +2248,11 @@ export default function StudentAssignmentPage() {
                                                     ) : (
                                                         <div className="rounded-lg border border-[#3c3c3c] bg-[#1e1e1e] p-4 flex items-center gap-3">
                                                             <div className="w-12 h-12 rounded-lg bg-[#4ec9b0]/10 border border-[#4ec9b0]/20 flex items-center justify-center shrink-0">
-                                                                <Play className="w-6 h-6 text-[#4ec9b0]" />
+                                                                <ExternalLink className="w-6 h-6 text-[#4ec9b0]" />
                                                             </div>
                                                             <div className="min-w-0 flex-1">
                                                                 <p className="text-[12px] font-medium text-[#cccccc] truncate">{url}</p>
-                                                                <p className="text-[10px] text-[#606060] mt-0.5">External video resource</p>
+                                                                <p className="text-[10px] text-[#606060] mt-0.5">External study resource</p>
                                                             </div>
                                                         </div>
                                                     )}
