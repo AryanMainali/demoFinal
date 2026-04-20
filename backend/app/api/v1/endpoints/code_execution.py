@@ -11,11 +11,42 @@ from pydantic import BaseModel, Field
 from typing import List
 
 from app.api.deps import get_db, get_current_user
-from app.models import User, UserRole, Assignment, Enrollment, EnrollmentStatus
+from app.models import User, UserRole, Assignment, Enrollment, EnrollmentStatus, AdminSettings
 from app.core.logging import logger
+from app.core.celery_app import celery_app
 from app.tasks.code_execution import run_code_task
 
 router = APIRouter()
+
+
+def _get_admin_settings(db: Session) -> AdminSettings:
+    settings_row = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+    if settings_row:
+        return settings_row
+    return AdminSettings()
+
+
+def _count_inflight_code_execution_tasks() -> int:
+    """Best-effort count of queued/running code execution tasks across workers."""
+    try:
+        inspect = celery_app.control.inspect(timeout=1.0)
+        active = inspect.active() or {}
+        reserved = inspect.reserved() or {}
+        scheduled = inspect.scheduled() or {}
+
+        def _count(tasks_obj: dict) -> int:
+            total = 0
+            for _, tasks in tasks_obj.items():
+                for task in tasks or []:
+                    name = task.get("name", "")
+                    if name.startswith("app.tasks.code_execution"):
+                        total += 1
+            return total
+
+        return _count(active) + _count(reserved) + _count(scheduled)
+    except Exception:
+        # If inspection is unavailable (e.g., broker hiccup), avoid hard-failing requests.
+        return 0
 
 
 class CodeFile(BaseModel):
@@ -46,6 +77,23 @@ async def run_code_async(
     - Better resource management
     - Can handle long-running tasks
     """
+    admin_settings = _get_admin_settings(db)
+
+    if not admin_settings.sandbox_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Code execution is currently disabled by administrator",
+        )
+
+    max_jobs = max(int(admin_settings.max_concurrent_jobs or 0), 0)
+    if max_jobs > 0:
+        inflight = _count_inflight_code_execution_tasks()
+        if inflight >= max_jobs:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Code execution queue is full ({max_jobs} concurrent jobs). Please try again shortly.",
+            )
+
     # Get assignment with language
     assignment = db.query(Assignment).options(
         joinedload(Assignment.language),

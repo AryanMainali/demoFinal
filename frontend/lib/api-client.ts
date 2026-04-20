@@ -130,11 +130,44 @@ class ApiClient {
     }
 
     async logout() {
+        try {
+            await this.client.post('/auth/logout');
+        } catch {
+            // Best-effort audit call; always clear local auth state.
+        }
         this.clearTokens();
     }
 
     async getCurrentUser() {
         const response = await this.client.get('/auth/me');
+        return response.data;
+    }
+
+    async refreshAccessToken() {
+        const refreshToken = this.getRefreshToken();
+        if (!refreshToken) {
+            throw new Error('No refresh token available');
+        }
+
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken,
+        });
+
+        const { access_token, refresh_token } = response.data;
+        this.setTokens(access_token, refresh_token);
+        return response.data;
+    }
+
+    async getAuditLogs(params?: {
+        user_id?: number;
+        event_type?: string;
+        days?: number;
+        from_date?: string;
+        to_date?: string;
+        skip?: number;
+        limit?: number;
+    }) {
+        const response = await this.client.get('/admin/audit-logs', { params });
         return response.data;
     }
 
@@ -671,15 +704,6 @@ class ApiClient {
         return response.data;
     }
 
-    async getAuditLogs(userId?: number, eventType?: string, days?: number) {
-        const params: any = {};
-        if (userId) params.user_id = userId;
-        if (eventType) params.event_type = eventType;
-        if (days) params.days = days;
-        const response = await this.client.get('/admin/audit-logs', { params });
-        return response.data;
-    }
-
     async getSystemStats() {
         const response = await this.client.get('/admin/system-stats');
         return response.data;
@@ -695,7 +719,7 @@ class ApiClient {
         return response.data;
     }
 
-    async bulkImportStudents(students: Array<{ email: string; full_name?: string; student_id?: string }>) {
+    async bulkImportStudents(students: Array<{ email: string; full_name?: string; student_id: string }>) {
         const response = await this.client.post('/admin/students/bulk-import', { students });
         return response.data;
     }
@@ -833,14 +857,8 @@ class ApiClient {
         return response.data;
     }
 
-    // Audit logs
-    async getAuditLogsFiltered(params: { 
-        dateRange?: string; 
-        action?: string; 
-        status?: string;
-        search?: string;
-    }) {
-        const response = await this.client.get('/admin/audit-logs', { params });
+    async sendAdminTestEmail() {
+        const response = await this.client.post('/admin/settings/test-email', {});
         return response.data;
     }
 

@@ -3,10 +3,11 @@ import * as XLSX from 'xlsx';
 export interface ParsedStudentRow {
     email: string;
     full_name?: string;
-    student_id?: string;
+    student_id: string;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ULM_STUDENT_DOMAIN = 'warhawks.ulm.edu';
 
 function isValidEmail(s: string): boolean {
     return EMAIL_REGEX.test((s || '').trim().toLowerCase());
@@ -44,34 +45,47 @@ function deriveNameFromEmail(email: string): string {
     return tokens.map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(' ');
 }
 
+function normalizeLoginToEmail(value: string): string {
+    const login = (value || '').trim().toLowerCase();
+    if (!login) return '';
+    if (isValidEmail(login)) return login;
+    return `${login}@${ULM_STUDENT_DOMAIN}`;
+}
+
+function getByHeaders(
+    cells: string[],
+    headerToIndex: Map<string, number>,
+    keys: string[]
+): string {
+    for (const key of keys) {
+        const idx = headerToIndex.get(key);
+        if (idx === undefined) continue;
+        const value = (cells[idx] || '').trim();
+        if (value) return value;
+    }
+    return '';
+}
+
 function mapRowByHeaders(cells: string[], headers: string[]): ParsedStudentRow | null {
     const headerToIndex = new Map<string, number>();
     headers.forEach((h, i) => headerToIndex.set(normalizeHeader(h), i));
 
-    const emailIndex =
-        headerToIndex.get('email') ??
-        headerToIndex.get('student_email') ??
-        headerToIndex.get('studentemail') ??
-        0;
-    const fullNameIndex =
-        headerToIndex.get('full_name') ??
-        headerToIndex.get('name') ??
-        headerToIndex.get('student_name');
-    const studentIdIndex =
-        headerToIndex.get('student_id') ??
-        headerToIndex.get('id') ??
-        headerToIndex.get('studentid');
-
-    const email = (cells[emailIndex] || '').trim().toLowerCase();
+    // Accept both Kriterion template and Canvas exports.
+    const email = getByHeaders(cells, headerToIndex, ['email', 'student_email', 'studentemail']).toLowerCase()
+        || normalizeLoginToEmail(getByHeaders(cells, headerToIndex, ['sis_login_id', 'sis_loginid', 'login_id', 'loginid']));
     if (!isValidEmail(email)) return null;
 
-    const fullNameRaw = fullNameIndex !== undefined ? (cells[fullNameIndex] || '').trim() : '';
-    const studentIdRaw = studentIdIndex !== undefined ? (cells[studentIdIndex] || '').trim() : '';
+    const fullNameRaw = getByHeaders(cells, headerToIndex, ['full_name', 'name', 'student_name']);
+    const firstName = getByHeaders(cells, headerToIndex, ['first_name', 'firstname']);
+    const lastName = getByHeaders(cells, headerToIndex, ['last_name', 'lastname']);
+    const combinedName = [firstName, lastName].filter(Boolean).join(' ').trim();
+    const studentIdRaw = getByHeaders(cells, headerToIndex, ['student_id', 'studentid', 'sis_userid', 'sis_user_id', 'cwid']);
+    if (!studentIdRaw) return null;
 
     return {
         email,
-        full_name: fullNameRaw || deriveNameFromEmail(email),
-        student_id: studentIdRaw || undefined,
+        full_name: fullNameRaw || combinedName || deriveNameFromEmail(email),
+        student_id: studentIdRaw,
     };
 }
 

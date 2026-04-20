@@ -4,23 +4,247 @@ import tempfile
 import secrets
 import string
 import re
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, text
 from datetime import datetime, timedelta
 
 from app.api.deps import get_db, get_current_user, require_role
-from app.models import User, UserRole, AuditLog, Course, Assignment
+from app.models import User, UserRole, AuditLog, Course, Assignment, AdminSettings
 from app.schemas.user import User as UserSchema, UserUpdate, UserCreate
 from app.schemas.audit_log import AuditLog as AuditLogSchema
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, validate_password_strength
 from app.core.logging import logger
 from app.core.config import settings
 from app.core.celery_app import celery_app
 from app.services.s3_storage import s3_service
+from app.services.email import send_email
 from pydantic import BaseModel, EmailStr
 
 router = APIRouter()
+
+
+def _get_client_ip(request: Request) -> Optional[str]:
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+def _get_password_policy(db: Session) -> AdminSettings:
+    settings_row = _get_or_create_admin_settings(db)
+    return settings_row
+
+
+def _validate_password_against_policy(password: str, settings_row: AdminSettings) -> None:
+    is_valid, message = validate_password_strength(
+        password,
+        min_length=settings_row.password_min_length,
+        require_uppercase=settings_row.password_require_uppercase,
+        require_lowercase=settings_row.password_require_lowercase,
+        require_number=settings_row.password_require_number,
+        require_special=settings_row.password_require_special,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+
+class AdminSettingsUpdate(BaseModel):
+    passwordMinLength: Optional[int] = None
+    passwordRequireUppercase: Optional[bool] = None
+    passwordRequireLowercase: Optional[bool] = None
+    passwordRequireNumber: Optional[bool] = None
+    passwordRequireSpecial: Optional[bool] = None
+    sessionTimeout: Optional[int] = None
+    maxLoginAttempts: Optional[int] = None
+    lockoutDuration: Optional[int] = None
+
+    smtpHost: Optional[str] = None
+    smtpPort: Optional[int] = None
+    smtpUser: Optional[str] = None
+    smtpPassword: Optional[str] = None
+    emailFrom: Optional[str] = None
+    emailFromName: Optional[str] = None
+
+    emailOnSubmission: Optional[bool] = None
+    emailOnGrading: Optional[bool] = None
+    emailOnNewAssignment: Optional[bool] = None
+    emailOnDueReminder: Optional[bool] = None
+    reminderDays: Optional[int] = None
+
+    defaultTimeout: Optional[int] = None
+    defaultMemoryLimit: Optional[int] = None
+    maxConcurrentJobs: Optional[int] = None
+    sandboxEnabled: Optional[bool] = None
+
+
+class AdminSettingsResponse(BaseModel):
+    passwordMinLength: int
+    passwordRequireUppercase: bool
+    passwordRequireLowercase: bool
+    passwordRequireNumber: bool
+    passwordRequireSpecial: bool
+    sessionTimeout: int
+    maxLoginAttempts: int
+    lockoutDuration: int
+
+    smtpHost: str
+    smtpPort: int
+    smtpUser: str
+    smtpPassword: str
+    emailFrom: str
+    emailFromName: str
+
+    emailOnSubmission: bool
+    emailOnGrading: bool
+    emailOnNewAssignment: bool
+    emailOnDueReminder: bool
+    reminderDays: int
+
+    defaultTimeout: int
+    defaultMemoryLimit: int
+    maxConcurrentJobs: int
+    sandboxEnabled: bool
+
+
+class TestEmailRequest(BaseModel):
+    recipientEmail: Optional[EmailStr] = None
+
+
+def _get_or_create_admin_settings(db: Session) -> AdminSettings:
+    settings_row = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+    if settings_row:
+        return settings_row
+
+    settings_row = AdminSettings(id=1)
+    db.add(settings_row)
+    db.commit()
+    db.refresh(settings_row)
+    return settings_row
+
+
+def _admin_settings_to_response(settings_row: AdminSettings) -> AdminSettingsResponse:
+    return AdminSettingsResponse(
+        passwordMinLength=settings_row.password_min_length,
+        passwordRequireUppercase=settings_row.password_require_uppercase,
+        passwordRequireLowercase=settings_row.password_require_lowercase,
+        passwordRequireNumber=settings_row.password_require_number,
+        passwordRequireSpecial=settings_row.password_require_special,
+        sessionTimeout=settings_row.session_timeout,
+        maxLoginAttempts=settings_row.max_login_attempts,
+        lockoutDuration=settings_row.lockout_duration,
+        smtpHost=settings_row.smtp_host,
+        smtpPort=settings_row.smtp_port,
+        smtpUser=settings_row.smtp_user,
+        smtpPassword=settings_row.smtp_password,
+        emailFrom=settings_row.email_from,
+        emailFromName=settings_row.email_from_name,
+        emailOnSubmission=settings_row.email_on_submission,
+        emailOnGrading=settings_row.email_on_grading,
+        emailOnNewAssignment=settings_row.email_on_new_assignment,
+        emailOnDueReminder=settings_row.email_on_due_reminder,
+        reminderDays=settings_row.reminder_days,
+        defaultTimeout=settings_row.default_timeout,
+        defaultMemoryLimit=settings_row.default_memory_limit,
+        maxConcurrentJobs=settings_row.max_concurrent_jobs,
+        sandboxEnabled=settings_row.sandbox_enabled,
+    )
+
+
+@router.get("/settings", response_model=AdminSettingsResponse)
+def get_admin_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Get system-wide admin settings."""
+    settings_row = _get_or_create_admin_settings(db)
+    return _admin_settings_to_response(settings_row)
+
+
+@router.put("/settings", response_model=AdminSettingsResponse)
+def update_admin_settings(
+    settings_update: AdminSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Update system-wide admin settings."""
+    settings_row = _get_or_create_admin_settings(db)
+    payload = settings_update.model_dump(exclude_unset=True)
+
+    field_map = {
+        "passwordMinLength": "password_min_length",
+        "passwordRequireUppercase": "password_require_uppercase",
+        "passwordRequireLowercase": "password_require_lowercase",
+        "passwordRequireNumber": "password_require_number",
+        "passwordRequireSpecial": "password_require_special",
+        "sessionTimeout": "session_timeout",
+        "maxLoginAttempts": "max_login_attempts",
+        "lockoutDuration": "lockout_duration",
+        "smtpHost": "smtp_host",
+        "smtpPort": "smtp_port",
+        "smtpUser": "smtp_user",
+        "smtpPassword": "smtp_password",
+        "emailFrom": "email_from",
+        "emailFromName": "email_from_name",
+        "emailOnSubmission": "email_on_submission",
+        "emailOnGrading": "email_on_grading",
+        "emailOnNewAssignment": "email_on_new_assignment",
+        "emailOnDueReminder": "email_on_due_reminder",
+        "reminderDays": "reminder_days",
+        "defaultTimeout": "default_timeout",
+        "defaultMemoryLimit": "default_memory_limit",
+        "maxConcurrentJobs": "max_concurrent_jobs",
+        "sandboxEnabled": "sandbox_enabled",
+    }
+
+    for field_name, value in payload.items():
+        setattr(settings_row, field_map[field_name], value)
+
+    db.commit()
+    db.refresh(settings_row)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        event_type="admin_settings_updated",
+        description="System settings updated by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
+    ))
+    db.commit()
+
+    logger.info(f"Admin settings updated by admin {current_user.id}")
+    return _admin_settings_to_response(settings_row)
+
+
+@router.post("/settings/test-email")
+def send_test_email(
+    request: TestEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Send a test email using the configured admin SMTP settings."""
+    recipient_email = request.recipientEmail or current_user.email
+    subject = "[Kriterion] Test Email"
+    body_text = (
+        "This is a test email from the Kriterion admin settings page.\n\n"
+        "If you received this, the SMTP configuration is working."
+    )
+    body_html = (
+        "<p>This is a test email from the Kriterion admin settings page.</p>"
+        "<p>If you received this, the SMTP configuration is working.</p>"
+    )
+
+    if not send_email(recipient_email, subject, body_html, body_text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Test email could not be sent. Check SMTP settings and credentials."
+        )
+
+    logger.info(f"Test email sent to {recipient_email} by admin {current_user.id}")
+    return {"message": f"Test email sent to {recipient_email}"}
 
 
 class BulkStudentImportItem(BaseModel):
@@ -31,6 +255,10 @@ class BulkStudentImportItem(BaseModel):
 
 class BulkStudentImportRequest(BaseModel):
     students: List[BulkStudentImportItem]
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
 
 
 def _generate_temp_password(length: int = 12) -> str:
@@ -89,10 +317,14 @@ def list_users(
 @router.post("/users", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
 def create_user(
     user_in: UserCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Create a new user (admin only)"""
+    settings_row = _get_password_policy(db)
+    _validate_password_against_policy(user_in.password, settings_row)
+
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == user_in.email).first()
     if existing_user:
@@ -129,7 +361,9 @@ def create_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_created",
-        description=f"User {user.email} created with role {user.role.value} by admin"
+        description=f"User {user.email} created with role {user.role.value} by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -166,6 +400,7 @@ def get_user(
 def update_user(
     user_id: int,
     user_update: UserUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -189,7 +424,9 @@ def update_user(
         audit = AuditLog(
             user_id=current_user.id,
             event_type="role_changed",
-            description=f"User role changed from {old_role} to {user.role}"
+            description=f"User role changed from {old_role} to {user.role}",
+            ip_address=_get_client_ip(request),
+            status="success",
         )
         db.add(audit)
         db.commit()
@@ -201,6 +438,7 @@ def update_user(
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -216,7 +454,9 @@ def delete_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_deleted",
-        description=f"User {user.email} deleted by admin"
+        description=f"User {user.email} deleted by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     
@@ -230,6 +470,7 @@ def delete_user(
 @router.post("/users/{user_id}/activate")
 def activate_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -246,7 +487,9 @@ def activate_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_activated",
-        description=f"User {user.email} activated"
+        description=f"User {user.email} activated",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -257,6 +500,7 @@ def activate_user(
 @router.post("/users/{user_id}/deactivate")
 def deactivate_user(
     user_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
@@ -276,7 +520,9 @@ def deactivate_user(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="user_deactivated",
-        description=f"User {user.email} deactivated"
+        description=f"User {user.email} deactivated",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -287,16 +533,31 @@ def deactivate_user(
 @router.post("/users/{user_id}/reset-password")
 def admin_reset_password(
     user_id: int,
-    new_password: str,
+    payload: AdminResetPasswordRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Reset user password (admin only)"""
+    settings_row = _get_password_policy(db)
+    is_valid, message = validate_password_strength(
+        payload.new_password,
+        min_length=settings_row.password_min_length,
+        require_uppercase=settings_row.password_require_uppercase,
+        require_lowercase=settings_row.password_require_lowercase,
+        require_number=settings_row.password_require_number,
+        require_special=settings_row.password_require_special,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    user.hashed_password = get_password_hash(new_password)
+    _validate_password_against_policy(payload.new_password, _get_password_policy(db))
+
+    user.hashed_password = get_password_hash(payload.new_password)
     user.password_changed_at = datetime.utcnow()
     user.updated_at = datetime.utcnow()
     db.commit()
@@ -305,7 +566,9 @@ def admin_reset_password(
     audit = AuditLog(
         user_id=current_user.id,
         event_type="password_reset",
-        description=f"Password reset for user {user.email} by admin"
+        description=f"Password reset for user {user.email} by admin",
+        ip_address=_get_client_ip(request),
+        status="success",
     )
     db.add(audit)
     db.commit()
@@ -319,6 +582,8 @@ def get_audit_logs(
     user_id: int = None,
     event_type: str = None,
     days: int = 30,
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -335,9 +600,14 @@ def get_audit_logs(
     if event_type:
         query = query.filter(AuditLog.event_type == event_type)
     
-    # Filter by date range
-    since = datetime.utcnow() - timedelta(days=days)
-    query = query.filter(AuditLog.created_at >= since)
+    # Filter by explicit date range when provided, otherwise fallback to rolling window.
+    if from_date:
+        query = query.filter(AuditLog.created_at >= from_date)
+    if to_date:
+        query = query.filter(AuditLog.created_at <= to_date)
+    if not from_date and not to_date:
+        since = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(AuditLog.created_at >= since)
     
     # Order by most recent
     query = query.order_by(AuditLog.created_at.desc())

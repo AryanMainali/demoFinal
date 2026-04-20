@@ -24,13 +24,23 @@ class SandboxExecutor:
         code_path: str,
         language: str,
         test_input: Optional[str] = None,
-        command_args: Optional[str] = None
+        command_args: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        memory_limit_mb: Optional[int] = None,
     ) -> Dict[str, Any]:
         start_time = datetime.utcnow()
+        effective_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else self.timeout
+        effective_memory_limit = f"{memory_limit_mb}m" if memory_limit_mb and memory_limit_mb > 0 else self.memory_limit
         
         try:
             exec_command = self._get_exec_command(language, code_path, command_args)
-            result = self._run_in_docker(exec_command, code_path, test_input)
+            result = self._run_in_docker(
+                exec_command,
+                code_path,
+                test_input,
+                timeout_seconds=effective_timeout,
+                memory_limit=effective_memory_limit,
+            )
             
             runtime = (datetime.utcnow() - start_time).total_seconds()
             timed_out = result.get("exit_code") == -1 and "timed out" in result.get("stderr", "").lower()
@@ -41,7 +51,7 @@ class SandboxExecutor:
                 "exit_code": result.get("exit_code", -1),
                 "runtime": runtime,
                 "memory_used": result.get("memory_used", 0),
-                "timed_out": timed_out or runtime >= self.timeout,
+                "timed_out": timed_out or runtime >= effective_timeout,
                 "success": result.get("exit_code", -1) == 0
             }
             
@@ -133,19 +143,22 @@ class SandboxExecutor:
         self,
         command: str,
         code_path: str,
-        stdin_input: Optional[str] = None
+        stdin_input: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        memory_limit: Optional[str] = None,
     ) -> Dict[str, Any]:
-        if os.path.exists("/.dockerenv"):
-            return self._run_local(command, code_path, stdin_input)
-        
+        effective_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else self.timeout
+        effective_memory_limit = memory_limit or self.memory_limit
+
+        # Keep local execution in development for simpler local setup.
         if settings.ENVIRONMENT == "development":
-            return self._run_local(command, code_path, stdin_input)
+            return self._run_local(command, code_path, stdin_input, timeout_seconds=effective_timeout)
         
         docker_cmd = [
             "docker", "run",
             "--rm",
             "--network", "none",
-            "--memory", self.memory_limit,
+            "--memory", effective_memory_limit,
             "--cpus", str(self.cpu_limit),
             "--user", "1000:1000",
             "-v", f"{code_path}:/workspace:ro",
@@ -159,7 +172,7 @@ class SandboxExecutor:
                 docker_cmd,
                 input=stdin_input.encode() if stdin_input else None,
                 capture_output=True,
-                timeout=self.timeout
+                timeout=effective_timeout
             )
             return {
                 "stdout": process.stdout.decode(),
@@ -182,7 +195,14 @@ class SandboxExecutor:
                 "memory_used": 0
             }
     
-    def _run_local(self, command: str, code_path: str, stdin_input: Optional[str] = None) -> Dict[str, Any]:
+    def _run_local(
+        self,
+        command: str,
+        code_path: str,
+        stdin_input: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        effective_timeout = timeout_seconds if timeout_seconds and timeout_seconds > 0 else self.timeout
         try:
             # Ensure Java is accessible on macOS by setting JAVA_HOME if not already set
             env = os.environ.copy()
@@ -206,8 +226,7 @@ class SandboxExecutor:
                 cwd=code_path,
                 input=stdin_input.encode() if stdin_input else None,
                 capture_output=True,
-                timeout=self.timeout,
-                env=env
+                timeout=effective_timeout
             )
             return {
                 "stdout": process.stdout.decode('utf-8', errors='replace'),
@@ -216,10 +235,10 @@ class SandboxExecutor:
                 "memory_used": 0
             }
         except subprocess.TimeoutExpired:
-            logger.warning(f"Process timed out after {self.timeout} seconds")
+            logger.warning(f"Process timed out after {effective_timeout} seconds")
             return {
                 "stdout": "",
-                "stderr": f"Execution timed out after {self.timeout} seconds",
+                "stderr": f"Execution timed out after {effective_timeout} seconds",
                 "exit_code": -1,
                 "memory_used": 0
             }

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import apiClient from '@/lib/api-client';
 
 export type UserRole = 'STUDENT' | 'FACULTY' | 'ASSISTANT' | 'ADMIN';
@@ -31,7 +31,7 @@ const ROLE_HOME: Record<UserRole, string> = {
     STUDENT: '/student/dashboard',
     FACULTY: '/faculty/dashboard',
     ASSISTANT: '/assistant/dashboard',
-    ADMIN: '/admin/dashboard',
+    ADMIN: '/admin/users',
 };
 
 function setRoleCookie(role: string) {
@@ -53,11 +53,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const router = useRouter();
-    const pathname = usePathname();
 
     useEffect(() => {
         checkAuth();
     }, []);
+
+    useEffect(() => {
+        if (!user || typeof window === 'undefined') return;
+
+        const keepSessionAlive = async () => {
+            if (document.visibilityState !== 'visible') return;
+            try {
+                await apiClient.refreshAccessToken();
+            } catch (error) {
+                console.error('Session refresh failed:', error);
+                apiClient.clearTokens();
+                clearRoleCookie();
+                setUser(null);
+                router.push('/login');
+            }
+        };
+
+        // Refresh periodically during active use to avoid timeout while coding.
+        const intervalId = window.setInterval(() => {
+            void keepSessionAlive();
+        }, 4 * 60 * 1000);
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                void keepSessionAlive();
+            }
+        };
+
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [user, router]);
 
     const checkAuth = async () => {
         try {
@@ -96,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [router]);
 
     const logout = useCallback(() => {
-        apiClient.logout();
+        void apiClient.logout();
         clearRoleCookie();
         setUser(null);
         router.push('/login');

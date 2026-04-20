@@ -11,7 +11,7 @@ const ROLE_HOME: Record<string, string> = {
   STUDENT: '/student/dashboard',
   FACULTY: '/faculty/dashboard',
   ASSISTANT: '/assistant/dashboard',
-  ADMIN: '/admin/dashboard',
+  ADMIN: '/admin/users',
 };
 
 const PUBLIC_PATHS = [

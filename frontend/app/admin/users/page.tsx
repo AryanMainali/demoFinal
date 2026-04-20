@@ -1,11 +1,11 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useMutationWithInvalidation } from '@/lib/use-mutation-with-invalidation';
 import apiClient from '@/lib/api-client';
-import { parseStudentsFromFile } from '@/lib/parse-students';
+import { BulkStudentImportModal } from '@/components/admin/BulkStudentImportModal';
 import * as XLSX from 'xlsx';
 import { DataTable } from '@/components/ui/data-table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -47,17 +47,15 @@ interface User {
 }
 
 export default function UsersPage() {
-    const queryClient = useQueryClient();
     const [searchQuery, setSearchQuery] = useState('');
     const [roleFilter, setRoleFilter] = useState('');
     const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
     const [deleteModal, setDeleteModal] = useState<{ open: boolean; user?: User }>({ open: false });
     const [bulkDeleteModal, setBulkDeleteModal] = useState(false);
     const [resetPasswordModal, setResetPasswordModal] = useState<{ open: boolean; user?: User }>({ open: false });
-    const [importGuideModalOpen, setImportGuideModalOpen] = useState(false);
+    const [bulkImportModalOpen, setBulkImportModalOpen] = useState(false);
     const [newPassword, setNewPassword] = useState('');
     const [importStatus, setImportStatus] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
-    const importFileInputRef = useRef<HTMLInputElement>(null);
 
     const { data: users = [], isLoading, refetch } = useQuery({
         queryKey: ['users', roleFilter],
@@ -104,67 +102,27 @@ export default function UsersPage() {
         },
     });
 
-    const bulkImportMutation = useMutationWithInvalidation({
-        mutationFn: (students: Array<{ email: string; full_name?: string; student_id?: string }>) =>
-            apiClient.bulkImportStudents(students),
-        invalidateGroups: ['allUsers', 'allDashboards'],
-        onSuccess: (data: any) => {
-            const created = data?.created || 0;
-            const skipped = data?.skipped || 0;
-            setImportStatus({
-                type: skipped > 0 ? 'warning' : 'success',
-                message: skipped > 0
-                    ? `Imported ${created} student(s). Skipped ${skipped} duplicate/existing row(s).`
-                    : `Imported ${created} student(s) successfully.`,
-            });
-            if (importFileInputRef.current) importFileInputRef.current.value = '';
-        },
-        onError: (err: any) => {
-            setImportStatus({
-                type: 'error',
-                message: err?.response?.data?.detail || 'Failed to import students.',
-            });
-            if (importFileInputRef.current) importFileInputRef.current.value = '';
-        },
-    });
-
     const handleImportClick = () => {
         setImportStatus(null);
-        setImportGuideModalOpen(true);
+        setBulkImportModalOpen(true);
     };
 
-    const handleDownloadExcelTemplate = () => {
-        const ws = XLSX.utils.aoa_to_sheet([
-            ['full_name', 'email', 'student_id'],
-            ['Ada Lovelace', 'ada.lovelace@example.edu', 'S001'],
-            ['Alan Turing', 'alan.turing@example.edu', 'S002'],
-        ]);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Students');
-        XLSX.writeFile(wb, 'bulk-student-import-template.xlsx');
+    const handleBulkImportSuccess = (data: any) => {
+        const created = data?.created || 0;
+        const skipped = data?.skipped || 0;
+        setImportStatus({
+            type: skipped > 0 ? 'warning' : 'success',
+            message: skipped > 0
+                ? `Imported ${created} student(s). Skipped ${skipped} duplicate/existing row(s).`
+                : `Imported ${created} student(s) successfully.`,
+        });
     };
 
-    const handleChooseImportFile = () => {
-        importFileInputRef.current?.click();
-    };
-
-    const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        setImportGuideModalOpen(false);
-        setImportStatus(null);
-        const parsedRows = await parseStudentsFromFile(file);
-        if (!parsedRows.length) {
-            setImportStatus({
-                type: 'error',
-                message: 'No valid rows found. Use a CSV/XLSX file with at least an email column.',
-            });
-            if (importFileInputRef.current) importFileInputRef.current.value = '';
-            return;
-        }
-
-        bulkImportMutation.mutate(parsedRows);
+    const handleBulkImportError = (err: any) => {
+        setImportStatus({
+            type: 'error',
+            message: err?.response?.data?.detail || 'Failed to import students.',
+        });
     };
 
     const handleExport = () => {
@@ -354,14 +312,6 @@ export default function UsersPage() {
                 <Card>
                     <CardContent className="p-4">
                         <div className="flex flex-col md:flex-row gap-4">
-                            <input
-                                ref={importFileInputRef}
-                                type="file"
-                                accept=".csv,.xlsx,.xls"
-                                className="hidden"
-                                onChange={handleImportFileChange}
-                            />
-
                             <SearchInput
                                 value={searchQuery}
                                 onChange={setSearchQuery}
@@ -386,10 +336,9 @@ export default function UsersPage() {
                                     variant="outline"
                                     size="sm"
                                     onClick={handleImportClick}
-                                    disabled={bulkImportMutation.isPending}
                                 >
                                     <Upload className="w-4 h-4 mr-2" />
-                                    {bulkImportMutation.isPending ? 'Importing...' : 'Import Students'}
+                                    Import Students
                                 </Button>
                                 <Button variant="outline" size="sm" onClick={handleExport}>
                                     <Download className="w-4 h-4 mr-2" />
@@ -506,62 +455,14 @@ export default function UsersPage() {
                 </ModalFooter>
             </Modal>
 
-            {/* Import Guide Modal */}
-            <Modal
-                isOpen={importGuideModalOpen}
-                onClose={() => setImportGuideModalOpen(false)}
-                title="Import Students"
-                description="Use CSV or Excel with this structure before uploading."
-            >
-                <div className="space-y-4">
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                        <p className="text-sm font-medium text-gray-900 mb-2">Required format</p>
-                        <ul className="text-sm text-gray-700 space-y-1">
-                            <li>• Headers: full_name, email, student_id</li>
-                            <li>• Email values must be valid and unique</li>
-                            <li>• The student_id is required and must be unique.</li>
-                            <li>• Missing full_name will be generated from the email</li>
-                        </ul>
-                    </div>
-
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                        <div className="bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-700 uppercase tracking-wide">
-                            Example rows
-                        </div>
-                        <div className="p-3 text-sm text-gray-700 font-mono space-y-1">
-                            <p>full_name,email,student_id</p>
-                            <p>Ada Lovelace,ada.lovelace@example.edu,S001</p>
-                            <p>Alan Turing,alan.turing@example.edu,S002</p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 text-sm">
-                        <button
-                            type="button"
-                            onClick={handleDownloadExcelTemplate}
-                            className="text-[#862733] hover:underline"
-                        >
-                            Download Excel template
-                        </button>
-                        <a
-                            href="/bulk-student-import-template.csv"
-                            download="bulk-student-import-template.csv"
-                            className="text-[#862733] hover:underline"
-                        >
-                            Download CSV template
-                        </a>
-                    </div>
-                </div>
-
-                <ModalFooter>
-                    <Button variant="outline" onClick={() => setImportGuideModalOpen(false)}>
-                        Cancel
-                    </Button>
-                    <Button onClick={handleChooseImportFile} disabled={bulkImportMutation.isPending}>
-                        Choose File to Import
-                    </Button>
-                </ModalFooter>
-            </Modal>
+            {/* Import Modal */}
+            <BulkStudentImportModal
+                isOpen={bulkImportModalOpen}
+                onClose={() => setBulkImportModalOpen(false)}
+                onSuccess={handleBulkImportSuccess}
+                onError={handleBulkImportError}
+                invalidateKeys={[['users', roleFilter]]}
+            />
         </ProtectedRoute>
     );
 }

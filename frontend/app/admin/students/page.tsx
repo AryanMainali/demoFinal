@@ -84,7 +84,7 @@ export default function StudentsPage() {
     });
 
     const bulkImportMutation = useMutationWithInvalidation({
-        mutationFn: (students: Array<{ email: string; full_name?: string; student_id?: string }>) =>
+        mutationFn: (students: Array<{ email: string; full_name?: string; student_id: string }>) =>
             apiClient.bulkImportStudents(students),
         invalidateGroups: ['allUsers', 'allDashboards'],
         onSuccess: (data: BulkImportSummary) => {
@@ -481,10 +481,13 @@ export default function StudentsPage() {
                     <div className="bg-gray-50 rounded-lg p-4">
                         <h4 className="font-medium text-gray-900 mb-2">Template & Format:</h4>
                         <ul className="text-sm text-gray-600 space-y-1">
-                            <li>• Headers: full_name, email, student_id</li>
+                            <li>• Kriterion headers: full_name, email, student_id</li>
+                            <li>• Canvas headers also supported: LastName, FirstName, SIS UserID, SIS Login ID</li>
+                            <li>• Canvas mapping: SIS UserID -> student_id (CWID), SIS Login ID -> email local part</li>
                             <li>• Email must be unique</li>
-                            <li>• The student_id is required and must be unique.</li>
-                            <li>• If full_name is missing, it will be generated from email</li>
+                            <li>• The student_id is required and must be unique</li>
+                            <li>• If email is missing but SIS Login ID is present, email will be generated as loginID@warhawks.ulm.edu</li>
+                            <li>• If full_name is missing, it will be generated from FirstName + LastName or email</li>
                             <li>• Temporary passwords are auto-generated securely</li>
                         </ul>
                         <div className="flex items-center gap-4 mt-3">

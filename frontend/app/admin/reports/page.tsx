@@ -22,7 +22,6 @@ import {
     Calendar,
     BarChart2,
     PieChart,
-    Activity,
     Clock,
     Target,
     Award,
@@ -70,13 +69,6 @@ export default function ReportsPage() {
     const languageStats = [
         { name: 'Python', count: 1250, percentage: 44 },
         { name: 'Java', count: 850, percentage: 30 },
-    ];
-
-    const recentActivity = [
-        { type: 'submission', message: '25 new submissions in last hour', time: '1h ago' },
-        { type: 'grading', message: '180 submissions auto-graded', time: '2h ago' },
-        { type: 'enrollment', message: '15 students enrolled in Data Structures', time: '3h ago' },
-        { type: 'assignment', message: 'New assignment published: Binary Trees', time: '5h ago' },
     ];
 
     const tabs = [
@@ -156,7 +148,7 @@ export default function ReportsPage() {
                                 <Card className="lg:col-span-2">
                                     <CardHeader>
                                         <CardTitle className="flex items-center gap-2">
-                                            <Activity className="w-5 h-5 text-[#862733]" />
+                                            <BarChart2 className="w-5 h-5 text-[#862733]" />
                                             Submission Trends
                                         </CardTitle>
                                         <CardDescription>Daily submissions over the past 30 days</CardDescription>
@@ -196,7 +188,7 @@ export default function ReportsPage() {
                                 </Card>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 gap-6">
                                 {/* Top Courses */}
                                 <Card>
                                     <CardHeader>
@@ -219,38 +211,6 @@ export default function ReportsPage() {
                                                     <ScoreBadge percent={course.avgScore}>
                                                         {course.avgScore}%
                                                     </ScoreBadge>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Recent Activity */}
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2">
-                                            <Clock className="w-5 h-5 text-[#862733]" />
-                                            Recent Activity
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="space-y-4">
-                                            {recentActivity.map((activity, index) => (
-                                                <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${activity.type === 'submission' ? 'bg-blue-100 text-blue-600' :
-                                                        activity.type === 'grading' ? 'bg-green-100 text-green-600' :
-                                                            activity.type === 'enrollment' ? 'bg-purple-100 text-purple-600' :
-                                                                'bg-yellow-100 text-yellow-600'
-                                                        }`}>
-                                                        {activity.type === 'submission' ? <FileCode className="w-4 h-4" /> :
-                                                            activity.type === 'grading' ? <CheckCircle className="w-4 h-4" /> :
-                                                                activity.type === 'enrollment' ? <Users className="w-4 h-4" /> :
-                                                                    <BookOpen className="w-4 h-4" />}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <p className="text-sm text-gray-900">{activity.message}</p>
-                                                        <p className="text-xs text-gray-500">{activity.time}</p>
-                                                    </div>
                                                 </div>
                                             ))}
                                         </div>
