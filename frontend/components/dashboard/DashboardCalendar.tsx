@@ -459,20 +459,16 @@ export function DashboardCalendar({
                         </div>
                     </div>
 
-                    {/* Selection and keyboard hints */}
-                    <div className="flex items-center justify-between mt-2">
-                        {selectedDate && (
+                    {selectedDate && (
+                        <div className="mt-2">
                             <button
                                 onClick={() => onSelectDate?.(null)}
                                 className="text-[10px] text-primary hover:underline"
                             >
                                 Clear selection
                             </button>
-                        )}
-                        <span className="text-[9px] text-gray-400 ml-auto hidden sm:inline">
-                            ← → navigate · T today
-                        </span>
-                    </div>
+                        </div>
+                    )}
                 </div>
             </CardContent>
         </Card>

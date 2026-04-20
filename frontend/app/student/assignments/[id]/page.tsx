@@ -810,6 +810,11 @@ export default function StudentAssignmentPage() {
                                     ? <Badge variant="danger" className="text-[10px] px-1.5 py-0 shrink-0"><Clock className="w-2.5 h-2.5 mr-0.5" /> Overdue</Badge>
                                     : <Badge variant="success" className="text-[10px] px-1.5 py-0 shrink-0">Active</Badge>
                         }
+                        {latestSubmission?.is_late && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 font-semibold border border-orange-500/30 shrink-0">
+                                ⚠ Late
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[10px] text-[#858585]">Due: {dueDate ? format(dueDate, 'MMM dd, yyyy · hh:mm a') : 'N/A'}</span>
@@ -837,6 +842,11 @@ export default function StudentAssignmentPage() {
                                     ? `Score: ${Number(latestSubmission.final_score ?? 0).toFixed(1)} / ${assignment.max_score}`
                                     : `Attempt #${latestSubmission.attempt_number} · Awaiting grade`
                                 }
+                            </span>
+                        )}
+                        {latestSubmission?.is_late && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/25 font-semibold">
+                                Late Submission
                             </span>
                         )}
                         {files.filter(f => f.origin === 'utility').length > 0 && (
