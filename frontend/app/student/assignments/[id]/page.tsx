@@ -1488,192 +1488,282 @@ export default function StudentAssignmentPage() {
                                 {rightPanel === 'rubric' && (
                                     <div className="space-y-3">
                                         {(() => {
-                                            const isTemplate = assignment.is_template_rubric
-                                            const rubric = assignment.rubric
-                                            const template = assignment.rubric_template
+                                            const isTemplate = !!assignment.is_template_rubric
+                                            const template = assignment.rubric_template ?? null
+                                            // Prefer rubric items from the synthesized rubric; fall back to template items directly
+                                            const rubricItems = assignment.rubric?.items?.length
+                                                ? assignment.rubric.items
+                                                : (template?.items?.map(ti => ({
+                                                    id: ti.id,
+                                                    name: ti.name,
+                                                    description: ti.description,
+                                                    weight: ti.weight,
+                                                    points: ti.points,
+                                                    min_points: ti.min_scale,
+                                                    max_points: ti.max_scale,
+                                                })) ?? [])
+                                            const totalPoints = assignment.rubric?.total_points
+                                                ?? template?.items?.reduce((s, i) => s + i.points, 0)
+                                                ?? 0
 
-                                            // Determine rubric items (could come from rubric or template)
-                                            const rubricItems = rubric?.items ?? []
-                                            const hasRubric = rubricItems.length > 0
-
-                                            if (!hasRubric) {
+                                            if (!rubricItems.length) {
                                                 return (
-                                                    <div className="text-center py-10">
+                                                    <div className="text-center py-12">
                                                         <ClipboardList className="w-10 h-10 mx-auto text-[#505050] mb-3" />
                                                         <p className="text-[#858585] text-[13px]">No rubric for this assignment.</p>
+                                                        <p className="text-[11px] text-[#606060] mt-1">Your instructor hasn't added a rubric yet.</p>
                                                     </div>
                                                 )
                                             }
 
-                                            return (
-                                                <>
-                                                    {/* Header */}
-                                                    {isTemplate && template && (
-                                                        <div className="rounded-lg border border-[#3c3c3c] bg-[#1a1a2e] px-3 py-2.5">
-                                                            <p className="text-[11px] font-semibold text-[#c586c0] flex items-center gap-1.5">
-                                                                <ClipboardList className="w-3.5 h-3.5" /> {template.title}
-                                                            </p>
+                                            // ── Template rubric: rich matrix display ──────────────────
+                                            if (isTemplate && template) {
+                                                return (
+                                                    <div className="space-y-3">
+                                                        {/* Template header banner */}
+                                                        <div className="rounded-lg border border-[#c586c0]/30 bg-gradient-to-r from-[#1a1a2e] to-[#1e1e2e] px-3 py-2.5">
+                                                            <div className="flex items-center gap-2 mb-0.5">
+                                                                <ClipboardList className="w-3.5 h-3.5 text-[#c586c0] shrink-0" />
+                                                                <span className="text-[12px] font-semibold text-[#c586c0]">{template.title}</span>
+                                                                <span className="ml-auto text-[10px] text-[#606060] shrink-0">Rubric Template</span>
+                                                            </div>
                                                             {template.description && (
-                                                                <p className="text-[10px] text-[#858585] mt-0.5">{template.description}</p>
+                                                                <p className="text-[11px] text-[#858585] ml-5">{template.description}</p>
                                                             )}
                                                         </div>
-                                                    )}
 
-                                                    <p className="text-[11px] text-[#858585]">
-                                                        Your submission will be evaluated against these criteria.
-                                                    </p>
+                                                        {/* Summary row */}
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            <div className="rounded bg-[#1e1e1e] border border-[#3c3c3c] px-2 py-1.5 text-center">
+                                                                <p className="text-[10px] text-[#606060]">Criteria</p>
+                                                                <p className="text-[13px] font-bold text-white">{template.items.length}</p>
+                                                            </div>
+                                                            <div className="rounded bg-[#1e1e1e] border border-[#3c3c3c] px-2 py-1.5 text-center">
+                                                                <p className="text-[10px] text-[#606060]">Total pts</p>
+                                                                <p className="text-[13px] font-bold text-[#dcdcaa]">{totalPoints}</p>
+                                                            </div>
+                                                            <div className="rounded bg-[#1e1e1e] border border-[#3c3c3c] px-2 py-1.5 text-center">
+                                                                <p className="text-[10px] text-[#606060]">Status</p>
+                                                                <p className={`text-[11px] font-semibold ${gradesPublished && isGraded ? 'text-[#4ec9b0]' : isSubmitted ? 'text-[#dcdcaa]' : 'text-[#606060]'}`}>
+                                                                    {gradesPublished && isGraded ? 'Graded' : isSubmitted ? 'Pending' : 'Not submitted'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
 
-                                                    {/* Total */}
+                                                        {/* Per-criterion cards */}
+                                                        <div className="space-y-2">
+                                                            {template.items.map((ti, idx) => {
+                                                                const sortedLevels = [...ti.levels].sort((a, b) => b.score - a.score)
+                                                                // Graded score for this criterion
+                                                                const gradedRs = (gradesPublished && isGraded)
+                                                                    ? latestSubmissionDetail?.rubric_scores?.find(rs => rs.rubric_item_id === ti.id)
+                                                                    : null
+                                                                const rawScore = gradedRs != null ? Number(gradedRs.score) : null
+                                                                const scaleMax = ti.max_scale
+                                                                const pts = ti.points
+                                                                const weighted = scaleMax > 0 && rawScore !== null
+                                                                    ? (rawScore / scaleMax) * pts : null
+                                                                const pct = pts > 0 && weighted !== null ? (weighted / pts) * 100 : null
+                                                                const scoreColor = pct === null ? null
+                                                                    : pct >= 90 ? '#4ec9b0'
+                                                                    : pct >= 70 ? '#dcdcaa'
+                                                                    : pct >= 50 ? '#ce9178' : '#f44747'
+                                                                const achievedLevel = sortedLevels.find(l => l.score === rawScore) ?? null
+
+                                                                return (
+                                                                    <div key={ti.id} className="rounded-lg border border-[#3c3c3c] overflow-hidden">
+                                                                        {/* Criterion header */}
+                                                                        <div className={`px-3 py-2 flex items-start justify-between gap-2 ${gradedRs ? 'bg-[#1a1a1a]' : 'bg-[#1e1e1e]'} border-b border-[#3c3c3c]`}>
+                                                                            <div className="min-w-0">
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <span className="text-[10px] text-[#606060] font-mono shrink-0">{idx + 1}</span>
+                                                                                    <span className="text-[12px] font-semibold text-white leading-tight">{ti.name}</span>
+                                                                                </div>
+                                                                                {ti.description && (
+                                                                                    <p className="text-[11px] text-[#858585] mt-0.5 ml-4 leading-relaxed">{ti.description}</p>
+                                                                                )}
+                                                                                <p className="text-[10px] text-[#606060] mt-0.5 ml-4">
+                                                                                    Scale {ti.min_scale}–{ti.max_scale}
+                                                                                </p>
+                                                                            </div>
+                                                                            <div className="text-right shrink-0">
+                                                                                {gradedRs && scoreColor ? (
+                                                                                    <>
+                                                                                        <p className="text-[13px] font-bold" style={{ color: scoreColor }}>
+                                                                                            {(weighted ?? 0).toFixed(1)}
+                                                                                        </p>
+                                                                                        <p className="text-[10px] text-[#606060]">/ {pts} pts</p>
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <>
+                                                                                        <p className="text-[13px] font-bold text-[#dcdcaa]">{pts}</p>
+                                                                                        <p className="text-[10px] text-[#606060]">pts</p>
+                                                                                    </>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Score progress bar (when graded) */}
+                                                                        {gradedRs && pct !== null && scoreColor && (
+                                                                            <div className="px-3 pt-2 pb-1 bg-[#1a1a1a]">
+                                                                                <div className="flex items-center justify-between mb-1">
+                                                                                    <span className="text-[10px]" style={{ color: scoreColor }}>
+                                                                                        Score {rawScore}/{scaleMax} → {(weighted ?? 0).toFixed(1)}/{pts} pts ({pct.toFixed(0)}%)
+                                                                                    </span>
+                                                                                </div>
+                                                                                <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                                                    <div className="h-full rounded-full transition-all duration-700"
+                                                                                        style={{ width: `${pct}%`, backgroundColor: scoreColor }} />
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Level descriptors */}
+                                                                        {sortedLevels.length > 0 && (
+                                                                            <div className="divide-y divide-[#2a2a2a]">
+                                                                                {sortedLevels.map(level => {
+                                                                                    const isAchieved = rawScore !== null && level.score === rawScore
+                                                                                    const isBelowAchieved = rawScore !== null && level.score < rawScore
+                                                                                    return (
+                                                                                        <div
+                                                                                            key={level.id}
+                                                                                            className={`flex gap-0 transition-colors ${
+                                                                                                isAchieved
+                                                                                                    ? 'bg-[#4ec9b0]/10 border-l-2 border-[#4ec9b0]'
+                                                                                                    : isBelowAchieved
+                                                                                                    ? 'bg-[#1a1a1a] opacity-50'
+                                                                                                    : 'bg-[#252526]'
+                                                                                            }`}
+                                                                                        >
+                                                                                            {/* Score pill column */}
+                                                                                            <div className="flex flex-col items-center justify-start pt-2.5 px-2.5 shrink-0 w-8">
+                                                                                                <span className={`text-[12px] font-bold leading-none ${
+                                                                                                    isAchieved ? 'text-[#4ec9b0]'
+                                                                                                    : isBelowAchieved ? 'text-[#555]'
+                                                                                                    : 'text-[#dcdcaa]'
+                                                                                                }`}>
+                                                                                                    {level.score}
+                                                                                                </span>
+                                                                                            </div>
+
+                                                                                            {/* Descriptor + badge */}
+                                                                                            <div className="flex-1 py-2 pr-3 min-w-0">
+                                                                                                {isAchieved && (
+                                                                                                    <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#4ec9b0] bg-[#4ec9b0]/15 border border-[#4ec9b0]/30 rounded px-1.5 py-0.5 mb-1">
+                                                                                                        ✓ YOUR SCORE
+                                                                                                    </span>
+                                                                                                )}
+                                                                                                <p className={`text-[11px] leading-relaxed ${
+                                                                                                    isAchieved ? 'text-[#e0e0e0]'
+                                                                                                    : isBelowAchieved ? 'text-[#555]'
+                                                                                                    : 'text-[#999]'
+                                                                                                }`}>
+                                                                                                    {level.comment || <span className="italic text-[#555]">No description</span>}
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    )
+                                                                                })}
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Instructor per-item comment */}
+                                                                        {gradedRs?.comment && (
+                                                                            <div className="px-3 py-2 bg-[#1a1a1a] border-t border-[#3c3c3c]">
+                                                                                <p className="text-[10px] font-semibold text-[#858585] uppercase tracking-wide mb-1">Instructor comment</p>
+                                                                                <p className="text-[11px] text-[#c8c8c8] leading-relaxed">💬 {gradedRs.comment}</p>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                        </div>
+
+                                                        {/* Footer notice */}
+                                                        {!gradesPublished ? (
+                                                            <p className="text-[10px] text-[#505050] text-center pt-1">
+                                                                {isSubmitted
+                                                                    ? 'Scores will appear once your instructor publishes grades.'
+                                                                    : 'Use this rubric to guide your submission.'}
+                                                            </p>
+                                                        ) : isGraded && (
+                                                            <div className="flex items-center justify-between rounded bg-[#1e1e1e] border border-[#3c3c3c] px-3 py-2">
+                                                                <span className="text-[11px] text-[#bdbdbd]">Total rubric score</span>
+                                                                <span className="text-[13px] font-bold text-[#4ec9b0]">
+                                                                    {(latestSubmissionDetail?.rubric_score ?? 0).toFixed(1)} / {totalPoints} pts
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            }
+
+                                            // ── Regular (non-template) rubric ─────────────────────────
+                                            return (
+                                                <div className="space-y-3">
+                                                    {/* Header */}
                                                     <div className="flex items-center justify-between px-3 py-1.5 rounded bg-[#1e1e1e] border border-[#3c3c3c]">
-                                                        <span className="text-[11px] text-[#bdbdbd]">Total rubric points</span>
-                                                        <span className="text-[12px] font-bold text-[#dcdcaa]">{rubric?.total_points ?? 0} pts</span>
+                                                        <span className="text-[11px] text-[#bdbdbd]">Total points</span>
+                                                        <span className="text-[12px] font-bold text-[#dcdcaa]">{totalPoints} pts</span>
                                                     </div>
 
-                                                    {/* Criteria list */}
                                                     <div className="rounded-lg border border-[#3c3c3c] overflow-hidden divide-y divide-[#3c3c3c]">
                                                         {rubricItems.map((item, idx) => {
-                                                            const templateItem = template?.items?.find(ti => ti.id === item.id)
-                                                            const levels = templateItem?.levels ?? []
-                                                            const hasLevels = levels.length > 0
-                                                            const isLevelsOpen = expandedLevels.has(item.id)
-
-                                                            // Graded score for this criterion
-                                                            const gradedScore = gradesPublished
+                                                            const gradedRs = (gradesPublished && isGraded)
                                                                 ? latestSubmissionDetail?.rubric_scores?.find(rs => rs.rubric_item_id === item.id)
                                                                 : null
-
-                                                            const rawItemScore = gradedScore ? Number(gradedScore.score) : null
+                                                            const rawScore = gradedRs ? Number(gradedRs.score) : null
                                                             const scaleMax = item.max_points
                                                             const pts = item.points
-                                                            const weighted = scaleMax > 0 && rawItemScore !== null
-                                                                ? (rawItemScore / scaleMax) * pts
-                                                                : null
+                                                            const weighted = scaleMax > 0 && rawScore !== null
+                                                                ? (rawScore / scaleMax) * pts : null
                                                             const pct = pts > 0 && weighted !== null ? (weighted / pts) * 100 : null
                                                             const scoreColor = pct === null ? '#858585'
                                                                 : pct >= 90 ? '#4ec9b0'
                                                                 : pct >= 70 ? '#dcdcaa'
-                                                                : pct >= 50 ? '#ce9178'
-                                                                : '#f44747'
-
-                                                            // Find matching level descriptor
-                                                            const matchedLevel = hasLevels && rawItemScore !== null
-                                                                ? levels.find(l => l.score === rawItemScore) ?? null
-                                                                : null
+                                                                : pct >= 50 ? '#ce9178' : '#f44747'
 
                                                             return (
-                                                                <div key={item.id ?? idx} className="bg-[#252526]">
-                                                                    <div className="px-3 py-2.5">
-                                                                        {/* Criterion name + score */}
-                                                                        <div className="flex items-start justify-between gap-2 mb-1">
-                                                                            <span className="text-[12px] font-semibold text-white leading-tight">{item.name}</span>
-                                                                            <span className="text-[11px] font-bold shrink-0" style={{ color: gradedScore ? scoreColor : '#dcdcaa' }}>
-                                                                                {gradedScore
-                                                                                    ? `${(weighted ?? 0).toFixed(1)} / ${pts} pts`
-                                                                                    : `${pts} pts`
-                                                                                }
-                                                                            </span>
-                                                                        </div>
-
-                                                                        {item.description && (
-                                                                            <p className="text-[11px] text-[#858585] leading-relaxed mb-1.5">{item.description}</p>
-                                                                        )}
-
-                                                                        {/* Scale info */}
-                                                                        <p className="text-[10px] text-[#606060]">
-                                                                            Scale: {item.min_points} – {item.max_points}
-                                                                            {scaleMax > 0 && ` → 0 – ${pts} pts`}
-                                                                        </p>
-
-                                                                        {/* Score bar when graded */}
-                                                                        {gradedScore && pct !== null && (
-                                                                            <div className="mt-2">
-                                                                                <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
-                                                                                    <div className="h-full rounded-full transition-all duration-500"
-                                                                                        style={{ width: `${pct}%`, backgroundColor: scoreColor }} />
-                                                                                </div>
-                                                                                <p className="text-[10px] mt-0.5 font-medium" style={{ color: scoreColor }}>
-                                                                                    {rawItemScore?.toFixed(1)}/{scaleMax} × {pts} = {(weighted ?? 0).toFixed(1)} pts ({pct.toFixed(0)}%)
-                                                                                </p>
-                                                                            </div>
-                                                                        )}
-
-                                                                        {/* Matched level descriptor (when graded) */}
-                                                                        {matchedLevel && (
-                                                                            <div className="mt-2 rounded border border-[#4ec9b0]/30 bg-[#4ec9b0]/5 p-2">
-                                                                                <p className="text-[10px] font-semibold text-[#4ec9b0] mb-0.5">
-                                                                                    Score {matchedLevel.score} — Achieved level
-                                                                                </p>
-                                                                                <p className="text-[11px] text-[#c8c8c8] leading-relaxed">{matchedLevel.comment}</p>
-                                                                            </div>
-                                                                        )}
-
-                                                                        {/* Instructor comment */}
-                                                                        {gradedScore?.comment && (
-                                                                            <p className="mt-2 text-[11px] text-[#a0a0a0] bg-[#1e1e1e] rounded p-2 border border-[#3c3c3c] leading-relaxed">
-                                                                                💬 {gradedScore.comment}
-                                                                            </p>
-                                                                        )}
-
-                                                                        {/* Level descriptors toggle */}
-                                                                        {hasLevels && (
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => setExpandedLevels(prev => {
-                                                                                    const next = new Set(prev)
-                                                                                    if (next.has(item.id)) next.delete(item.id)
-                                                                                    else next.add(item.id)
-                                                                                    return next
-                                                                                })}
-                                                                                className="mt-2 text-[10px] text-[#569cd6] hover:text-[#9cdcfe] flex items-center gap-1 transition-colors"
-                                                                            >
-                                                                                {isLevelsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                                                                {isLevelsOpen ? 'Hide' : 'Show'} scoring levels ({levels.length})
-                                                                            </button>
-                                                                        )}
+                                                                <div key={item.id ?? idx} className="px-3 py-3 bg-[#252526] hover:bg-[#2a2d2e] transition-colors">
+                                                                    <div className="flex items-start justify-between gap-2 mb-1">
+                                                                        <span className="text-[12px] font-semibold text-white leading-tight">{item.name}</span>
+                                                                        <span className="text-[11px] font-bold shrink-0" style={{ color: gradedRs ? scoreColor : '#dcdcaa' }}>
+                                                                            {gradedRs
+                                                                                ? `${(weighted ?? 0).toFixed(1)} / ${pts} pts`
+                                                                                : `${pts} pts`}
+                                                                        </span>
                                                                     </div>
-
-                                                                    {/* Level descriptors (expanded) */}
-                                                                    {hasLevels && isLevelsOpen && (
-                                                                        <div className="border-t border-[#3c3c3c] bg-[#1e1e1e]">
-                                                                            {[...levels].sort((a, b) => b.score - a.score).map(level => {
-                                                                                const isAchieved = gradedScore && rawItemScore === level.score
-                                                                                return (
-                                                                                    <div
-                                                                                        key={level.id}
-                                                                                        className={`px-3 py-2 border-b border-[#2a2a2a] last:border-0 ${isAchieved ? 'bg-[#4ec9b0]/8' : ''}`}
-                                                                                    >
-                                                                                        <div className="flex items-center gap-2 mb-0.5">
-                                                                                            <span className={`text-[11px] font-bold min-w-[28px] ${isAchieved ? 'text-[#4ec9b0]' : 'text-[#dcdcaa]'}`}>
-                                                                                                {level.score}
-                                                                                            </span>
-                                                                                            {isAchieved && (
-                                                                                                <span className="text-[9px] font-semibold text-[#4ec9b0] border border-[#4ec9b0]/40 rounded px-1 py-0.5">
-                                                                                                    ✓ Your score
-                                                                                                </span>
-                                                                                            )}
-                                                                                        </div>
-                                                                                        {level.comment && (
-                                                                                            <p className={`text-[11px] leading-relaxed ${isAchieved ? 'text-[#c8c8c8]' : 'text-[#858585]'}`}>
-                                                                                                {level.comment}
-                                                                                            </p>
-                                                                                        )}
-                                                                                    </div>
-                                                                                )
-                                                                            })}
+                                                                    {item.description && (
+                                                                        <p className="text-[11px] text-[#858585] mb-1.5 leading-relaxed">{item.description}</p>
+                                                                    )}
+                                                                    <p className="text-[10px] text-[#606060]">Scale: {item.min_points} – {item.max_points}</p>
+                                                                    {gradedRs && pct !== null && (
+                                                                        <div className="mt-2">
+                                                                            <div className="h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                                                <div className="h-full rounded-full transition-all duration-500"
+                                                                                    style={{ width: `${pct}%`, backgroundColor: scoreColor }} />
+                                                                            </div>
+                                                                            <p className="text-[10px] mt-0.5 font-medium" style={{ color: scoreColor }}>
+                                                                                {rawScore}/{scaleMax} × {pts} = {(weighted ?? 0).toFixed(1)} pts ({pct.toFixed(0)}%)
+                                                                            </p>
                                                                         </div>
+                                                                    )}
+                                                                    {gradedRs?.comment && (
+                                                                        <p className="mt-2 text-[11px] text-[#a0a0a0] bg-[#1e1e1e] rounded p-2 border border-[#3c3c3c] leading-relaxed">
+                                                                            💬 {gradedRs.comment}
+                                                                        </p>
                                                                     )}
                                                                 </div>
                                                             )
                                                         })}
                                                     </div>
 
-                                                    {/* Not yet graded notice */}
                                                     {!gradesPublished && isSubmitted && (
                                                         <p className="text-[10px] text-[#606060] text-center">
-                                                            Scores will appear here once grades are published.
+                                                            Scores will appear once grades are published.
                                                         </p>
                                                     )}
-                                                </>
+                                                </div>
                                             )
                                         })()}
                                     </div>
