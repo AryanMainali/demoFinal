@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.core.logging import logger
-from app.models import Assignment, TestCase, User, AuditLog
+from app.models import Assignment, TestCase, User, AuditLog, AdminSettings
 from app.services.sandbox import sandbox_executor
 from sqlalchemy import and_, or_
 
@@ -30,6 +30,13 @@ class DatabaseTask(Task):
         if self._db is not None:
             self._db.close()
             self._db = None
+
+
+def _get_admin_execution_settings(db: Session) -> AdminSettings:
+    settings_row = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+    if settings_row:
+        return settings_row
+    return AdminSettings()
 
 
 @celery_app.task(
@@ -57,6 +64,21 @@ def run_code_task(
         Dict with test results
     """
     try:
+        admin_settings = _get_admin_execution_settings(self.db)
+        if not admin_settings.sandbox_enabled:
+            return {
+                "success": False,
+                "error": "Code execution is currently disabled by administrator",
+                "results": [],
+                "total_score": 0,
+                "max_score": 0,
+                "tests_passed": 0,
+                "tests_total": 0,
+            }
+
+        execution_timeout = max(int(admin_settings.default_timeout or 0), 1)
+        execution_memory_limit = max(int(admin_settings.default_memory_limit or 0), 64)
+
         # Get assignment with test cases
         assignment = self.db.query(Assignment).filter(
             Assignment.id == assignment_id
@@ -119,7 +141,9 @@ def run_code_task(
                         code_path=temp_dir,
                         language=language,
                         test_input=stdin_input,
-                        command_args=None
+                        command_args=None,
+                        timeout_seconds=execution_timeout,
+                        memory_limit_mb=execution_memory_limit,
                     )
                     
                     # Compare output
@@ -227,6 +251,22 @@ def compile_check_task(
         Dict with compilation result
     """
     try:
+        admin_settings = _get_admin_execution_settings(self.db)
+        if not admin_settings.sandbox_enabled:
+            return {
+                "success": False,
+                "error": "Code execution is currently disabled by administrator",
+                "results": [],
+                "total_score": 0,
+                "max_score": 0,
+                "tests_passed": 0,
+                "tests_total": 0,
+                "message": "Code execution is currently disabled by administrator",
+            }
+
+        execution_timeout = max(int(admin_settings.default_timeout or 0), 1)
+        execution_memory_limit = max(int(admin_settings.default_memory_limit or 0), 64)
+
         assignment = self.db.query(Assignment).filter(
             Assignment.id == assignment_id
         ).first()
@@ -258,7 +298,9 @@ def compile_check_task(
                 code_path=temp_dir,
                 language=language,
                 test_input="",
-                command_args=None
+                command_args=None,
+                timeout_seconds=execution_timeout,
+                memory_limit_mb=execution_memory_limit,
             )
             
             # Check result

@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
 from app.models import (
-    User, UserRole, NotificationSettings, UserPreferences, AuditLog
+    User, UserRole, NotificationSettings, UserPreferences, AuditLog, AdminSettings
 )
-from app.core.security import verify_password, get_password_hash
+from app.core.security import verify_password, get_password_hash, validate_password_strength
 from app.core.logging import logger
 from pydantic import BaseModel, EmailStr, Field
 
@@ -24,6 +24,13 @@ def _get_client_ip(request: Request) -> Optional[str]:
     if request.client:
         return request.client.host
     return None
+
+
+def _get_password_policy(db: Session) -> AdminSettings:
+    settings_row = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+    if settings_row:
+        return settings_row
+    return AdminSettings()
 
 
 # ============== Schemas ==============
@@ -52,7 +59,7 @@ class ProfileUpdate(BaseModel):
 
 class PasswordChange(BaseModel):
     current_password: str
-    new_password: str = Field(..., min_length=8)
+    new_password: str
 
 class NotificationSettingsUpdate(BaseModel):
     email_submissions: Optional[bool] = None
@@ -173,6 +180,19 @@ def change_password(
     current_user: User = Depends(get_current_user)
 ):
     """Change user password"""
+    settings_row = _get_password_policy(db)
+
+    is_valid, message = validate_password_strength(
+        password_change.new_password,
+        min_length=settings_row.password_min_length,
+        require_uppercase=settings_row.password_require_uppercase,
+        require_lowercase=settings_row.password_require_lowercase,
+        require_number=settings_row.password_require_number,
+        require_special=settings_row.password_require_special,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=message)
+
     # Verify current password
     if not verify_password(password_change.current_password, current_user.hashed_password):
         db.add(AuditLog(

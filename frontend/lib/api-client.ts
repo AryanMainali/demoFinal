@@ -135,6 +135,21 @@ class ApiClient {
         return response.data;
     }
 
+    async refreshAccessToken() {
+        const refreshToken = this.getRefreshToken();
+        if (!refreshToken) {
+            throw new Error('No refresh token available');
+        }
+
+        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken,
+        });
+
+        const { access_token, refresh_token } = response.data;
+        this.setTokens(access_token, refresh_token);
+        return response.data;
+    }
+
     async getAuditLogs(params?: {
         user_id?: number;
         event_type?: string;
@@ -527,7 +542,7 @@ class ApiClient {
         return response.data;
     }
 
-    async bulkImportStudents(students: Array<{ email: string; full_name?: string; student_id?: string }>) {
+    async bulkImportStudents(students: Array<{ email: string; full_name?: string; student_id: string }>) {
         const response = await this.client.post('/admin/students/bulk-import', { students });
         return response.data;
     }

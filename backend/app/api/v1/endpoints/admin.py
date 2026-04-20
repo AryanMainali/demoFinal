@@ -13,7 +13,7 @@ from app.api.deps import get_db, get_current_user, require_role
 from app.models import User, UserRole, AuditLog, Course, Assignment, AdminSettings
 from app.schemas.user import User as UserSchema, UserUpdate, UserCreate
 from app.schemas.audit_log import AuditLog as AuditLogSchema
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, validate_password_strength
 from app.core.logging import logger
 from app.core.config import settings
 from app.core.celery_app import celery_app
@@ -31,6 +31,24 @@ def _get_client_ip(request: Request) -> Optional[str]:
     if request.client:
         return request.client.host
     return None
+
+
+def _get_password_policy(db: Session) -> AdminSettings:
+    settings_row = _get_or_create_admin_settings(db)
+    return settings_row
+
+
+def _validate_password_against_policy(password: str, settings_row: AdminSettings) -> None:
+    is_valid, message = validate_password_strength(
+        password,
+        min_length=settings_row.password_min_length,
+        require_uppercase=settings_row.password_require_uppercase,
+        require_lowercase=settings_row.password_require_lowercase,
+        require_number=settings_row.password_require_number,
+        require_special=settings_row.password_require_special,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -239,6 +257,10 @@ class BulkStudentImportRequest(BaseModel):
     students: List[BulkStudentImportItem]
 
 
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
+
+
 def _generate_temp_password(length: int = 12) -> str:
     """Generate a password that satisfies strength requirements."""
     if length < 8:
@@ -300,6 +322,9 @@ def create_user(
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Create a new user (admin only)"""
+    settings_row = _get_password_policy(db)
+    _validate_password_against_policy(user_in.password, settings_row)
+
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == user_in.email).first()
     if existing_user:
@@ -508,17 +533,31 @@ def deactivate_user(
 @router.post("/users/{user_id}/reset-password")
 def admin_reset_password(
     user_id: int,
-    new_password: str,
+    payload: AdminResetPasswordRequest,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Reset user password (admin only)"""
+    settings_row = _get_password_policy(db)
+    is_valid, message = validate_password_strength(
+        payload.new_password,
+        min_length=settings_row.password_min_length,
+        require_uppercase=settings_row.password_require_uppercase,
+        require_lowercase=settings_row.password_require_lowercase,
+        require_number=settings_row.password_require_number,
+        require_special=settings_row.password_require_special,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    user.hashed_password = get_password_hash(new_password)
+    _validate_password_against_policy(payload.new_password, _get_password_policy(db))
+
+    user.hashed_password = get_password_hash(payload.new_password)
     user.password_changed_at = datetime.utcnow()
     user.updated_at = datetime.utcnow()
     db.commit()

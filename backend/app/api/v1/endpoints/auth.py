@@ -9,7 +9,7 @@ This module handles:
 5. Get current user info - returns authenticated user's profile
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
@@ -25,9 +25,10 @@ from app.core.security import (
     decode_token
 )
 from app.models import User, AuditLog, UserRole
+from app.models import AdminSettings
 from app.schemas.token import Token, RefreshTokenRequest
 from app.schemas.user import UserCreate, User as UserSchema
-from app.core.config import settings
+from app.core.security import validate_password_strength
 
 router = APIRouter()
 
@@ -100,6 +101,64 @@ def _write_audit_log(
         db.close()
 
 
+def _get_admin_settings(db: Session) -> AdminSettings:
+    settings_row = db.query(AdminSettings).order_by(AdminSettings.id.asc()).first()
+    if settings_row:
+        return settings_row
+    return AdminSettings()
+
+
+def _validate_password_against_policy(password: str, settings_row: AdminSettings) -> None:
+    is_valid, message = validate_password_strength(
+        password,
+        min_length=settings_row.password_min_length,
+        require_uppercase=settings_row.password_require_uppercase,
+        require_lowercase=settings_row.password_require_lowercase,
+        require_number=settings_row.password_require_number,
+        require_special=settings_row.password_require_special,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+
+def _get_lockout_state(
+    db: Session,
+    user: User,
+    settings_row: AdminSettings,
+) -> tuple[bool, Optional[datetime], int]:
+    max_attempts = max(int(settings_row.max_login_attempts or 0), 0)
+    lockout_minutes = max(int(settings_row.lockout_duration or 0), 1)
+
+    if max_attempts <= 0:
+        return False, None, 0
+
+    now = datetime.utcnow()
+    window_start = now - timedelta(minutes=lockout_minutes)
+
+    latest_success_at = db.query(AuditLog.created_at).filter(
+        AuditLog.user_id == user.id,
+        AuditLog.event_type == "user_login",
+    ).order_by(AuditLog.created_at.desc()).limit(1).scalar()
+
+    failure_query = db.query(AuditLog).filter(
+        AuditLog.user_id == user.id,
+        AuditLog.event_type == "user_login_failed",
+        AuditLog.created_at >= window_start,
+    )
+    if latest_success_at:
+        failure_query = failure_query.filter(AuditLog.created_at > latest_success_at)
+
+    failed_count = failure_query.count()
+    latest_failure = failure_query.order_by(AuditLog.created_at.desc()).first()
+
+    if failed_count >= max_attempts and latest_failure:
+        lockout_until = latest_failure.created_at + timedelta(minutes=lockout_minutes)
+        if now < lockout_until:
+            return True, lockout_until, failed_count
+
+    return False, None, failed_count
+
+
 def _role_for_email(email: str) -> Optional[UserRole]:
     """Infer allowed role from ULM email domain. Returns None for non-ULM emails."""
     email_lower = email.lower()
@@ -139,6 +198,7 @@ def register(
     current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Register a new user (admin only)"""
+    _validate_password_against_policy(user_in.password, _get_admin_settings(db))
     _validate_email_role(user_in.email, user_in.role)
 
     existing_user = db.query(User).filter(User.email == user_in.email).first()
@@ -207,6 +267,9 @@ def login(
     user = db.query(User).filter(User.email == login_data.email).first()
     client_ip = _get_client_ip(request)
     
+    login_settings = _get_admin_settings(db)
+    session_timeout_minutes = max(int(login_settings.session_timeout or 0), 1)
+
     # Step 2: Verify user exists and password is correct
     if not user:
         _write_audit_log(
@@ -223,6 +286,23 @@ def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # Step 3: Enforce lockout based on admin settings
+    is_locked, lockout_until, _ = _get_lockout_state(db, user, login_settings)
+    if is_locked:
+        remaining_minutes = max(1, int((lockout_until - datetime.utcnow()).total_seconds() // 60) + 1)
+        _write_audit_log(
+            user_id=user.id,
+            event_type='user_login_failed',
+            description=f'Blocked login attempt for locked account {user.email}',
+            ip_address=client_ip,
+            status='failure',
+            error_message=f'Account locked due to too many failed attempts. Try again in {remaining_minutes} minute(s).',
+        )
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=f"Too many failed login attempts. Try again in {remaining_minutes} minute(s).",
+        )
+
     if not verify_password(login_data.password, user.hashed_password):
         _write_audit_log(
             user_id=user.id,
@@ -232,13 +312,22 @@ def login(
             status='failure',
             error_message='Incorrect email or password',
         )
+
+        is_locked, lockout_until, _ = _get_lockout_state(db, user, login_settings)
+        if is_locked:
+            remaining_minutes = max(1, int((lockout_until - datetime.utcnow()).total_seconds() // 60) + 1)
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=f"Too many failed login attempts. Try again in {remaining_minutes} minute(s).",
+            )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Step 3: Check if user account is active
+
+    # Step 4: Check if user account is active
     if not user.is_active:
         _write_audit_log(
             user_id=user.id,
@@ -253,15 +342,18 @@ def login(
             detail="User account is inactive. Please contact an administrator."
         )
     
-    # Step 4: Update last login timestamp
+    # Step 5: Update last login timestamp
     user.last_login = datetime.utcnow()
     db.commit()
-    
-    # Step 5: Create JWT tokens
-    access_token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
+
+    # Step 6: Create JWT tokens with configured session timeout
+    access_token = create_access_token(
+        data={"sub": str(user.id), "role": user.role.value},
+        expires_delta=timedelta(minutes=session_timeout_minutes),
+    )
     refresh_token = create_refresh_token(data={"sub": str(user.id), "role": user.role.value})
-    
-    # Step 6: Log the login event for auditing
+
+    # Step 7: Log the login event for auditing
     _write_audit_log(
         user_id=user.id,
         event_type='user_login',
@@ -270,7 +362,7 @@ def login(
         status='success',
     )
     
-    # Step 7: Return tokens and user information
+    # Step 8: Return tokens and user information
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -341,7 +433,13 @@ def refresh_token(
             detail="User not found or inactive"
         )
     
-    access_token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
+    login_settings = _get_admin_settings(db)
+    session_timeout_minutes = max(int(login_settings.session_timeout or 0), 1)
+
+    access_token = create_access_token(
+        data={"sub": str(user.id), "role": user.role.value},
+        expires_delta=timedelta(minutes=session_timeout_minutes),
+    )
     new_refresh_token = create_refresh_token(data={"sub": str(user.id), "role": user.role.value})
     
     return {

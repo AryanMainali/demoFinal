@@ -12,17 +12,9 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8)
+    password: str
     is_active: Optional[bool] = True
     send_welcome_email: Optional[bool] = True
-    
-    @validator('password')
-    def validate_password(cls, v):
-        from app.core.security import validate_password_strength
-        is_valid, message = validate_password_strength(v)
-        if not is_valid:
-            raise ValueError(message)
-        return v
 
 
 class AdminUserCreate(UserCreate):
@@ -46,27 +38,11 @@ class UserUpdate(BaseModel):
 
 class UserPasswordChange(BaseModel):
     current_password: str
-    new_password: str = Field(..., min_length=8)
-    
-    @validator('new_password')
-    def validate_password(cls, v):
-        from app.core.security import validate_password_strength
-        is_valid, message = validate_password_strength(v)
-        if not is_valid:
-            raise ValueError(message)
-        return v
+    new_password: str
 
 
 class AdminPasswordReset(BaseModel):
-    new_password: str = Field(..., min_length=8)
-
-    @validator("new_password")
-    def validate_password(cls, v):
-        from app.core.security import validate_password_strength
-        is_valid, message = validate_password_strength(v)
-        if not is_valid:
-            raise ValueError(message)
-        return v
+    new_password: str
 
 
 class User(UserBase):

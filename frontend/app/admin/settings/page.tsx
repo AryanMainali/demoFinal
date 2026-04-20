@@ -8,29 +8,15 @@ import apiClient from '@/lib/api-client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Modal, ModalFooter } from '@/components/ui/modal';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Select } from '@/components/ui/select';
 import { Alert } from '@/components/ui/alert';
 import {
     Server,
     Shield,
-    Mail,
-    Bell,
-    Database,
-    Clock,
-    Globe,
-    Lock,
-    Key,
     Save,
     RefreshCw,
-    AlertTriangle,
-    CheckCircle,
-    Download,
-    Upload,
-    Trash2
+    CheckCircle
 } from 'lucide-react';
 
 interface SettingsSection {
@@ -45,10 +31,6 @@ export default function SettingsPage() {
     const [hasChanges, setHasChanges] = useState(false);
     const [isLoadingSettings, setIsLoadingSettings] = useState(true);
     const [loadError, setLoadError] = useState('');
-    const [testEmailMessage, setTestEmailMessage] = useState('');
-    const [testEmailError, setTestEmailError] = useState('');
-    const [resetModal, setResetModal] = useState(false);
-    const [backupModal, setBackupModal] = useState(false);
 
     const [settings, setSettings] = useState({
         // Security
@@ -60,21 +42,6 @@ export default function SettingsPage() {
         sessionTimeout: 30,
         maxLoginAttempts: 5,
         lockoutDuration: 15,
-
-        // Email
-        smtpHost: 'smtp.gmail.com',
-        smtpPort: 587,
-        smtpUser: '',
-        smtpPassword: '',
-        emailFrom: 'noreply@kriterion.edu',
-        emailFromName: 'Kriterion System',
-
-        // Notifications
-        emailOnSubmission: true,
-        emailOnGrading: true,
-        emailOnNewAssignment: true,
-        emailOnDueReminder: true,
-        reminderDays: 2,
 
         // Code Execution
         defaultTimeout: 10,
@@ -119,18 +86,6 @@ export default function SettingsPage() {
         onSuccess: () => setHasChanges(false),
     });
 
-    const testEmailMutation = useMutation({
-        mutationFn: () => apiClient.sendAdminTestEmail(),
-        onSuccess: (data: any) => {
-            setTestEmailError('');
-            setTestEmailMessage(data?.message || 'Test email sent successfully.');
-        },
-        onError: () => {
-            setTestEmailMessage('');
-            setTestEmailError('Unable to send a test email. Verify SMTP settings and credentials.');
-        },
-    });
-
     const { data: systemHealthData } = useQuery({
         queryKey: ['system-health'],
         queryFn: () => apiClient.getSystemHealth(),
@@ -152,10 +107,7 @@ export default function SettingsPage() {
     const sections: SettingsSection[] = [
         { id: 'system-health', title: 'System Health', description: 'Service status', icon: <Server className="w-5 h-5" /> },
         { id: 'security', title: 'Security', description: 'Password and authentication', icon: <Shield className="w-5 h-5" /> },
-        { id: 'email', title: 'Email', description: 'SMTP configuration', icon: <Mail className="w-5 h-5" /> },
-        { id: 'notifications', title: 'Notifications', description: 'Email notifications', icon: <Bell className="w-5 h-5" /> },
         { id: 'execution', title: 'Code Execution', description: 'Sandbox settings', icon: <Server className="w-5 h-5" /> },
-        { id: 'backup', title: 'Backup & Reset', description: 'Data management', icon: <Database className="w-5 h-5" /> },
     ];
 
     return (
@@ -168,9 +120,9 @@ export default function SettingsPage() {
                         hasChanges ? (
                             <div className="flex gap-2">
                                 <Button
-                                    variant="outline"
+                                    variant="ghost"
                                     onClick={() => window.location.reload()}
-                                    className="border-white/30 text-white hover:bg-white/20 hover:text-white"
+                                    className="bg-white/10 text-white hover:bg-white/20 hover:text-white border border-white/20"
                                 >
                                     <RefreshCw className="w-4 h-4 mr-2" />
                                     Discard
@@ -197,18 +149,6 @@ export default function SettingsPage() {
                 {loadError && (
                     <Alert type="error" title="Settings Load Failed">
                         {loadError}
-                    </Alert>
-                )}
-
-                {testEmailMessage && (
-                    <Alert type="success" title="Test Email Sent">
-                        {testEmailMessage}
-                    </Alert>
-                )}
-
-                {testEmailError && (
-                    <Alert type="error" title="Test Email Failed">
-                        {testEmailError}
                     </Alert>
                 )}
 
@@ -371,120 +311,6 @@ export default function SettingsPage() {
                             </Card>
                         )}
 
-                        {/* Email Settings */}
-                        {activeSection === 'email' && (
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Mail className="w-5 h-5 text-[#862733]" />
-                                        Email Settings
-                                    </CardTitle>
-                                    <CardDescription>Configure SMTP server for sending emails</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-6">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Input
-                                            label="SMTP Host"
-                                            value={settings.smtpHost}
-                                            onChange={(e) => updateSetting('smtpHost', e.target.value)}
-                                            placeholder="smtp.gmail.com"
-                                        />
-                                        <Input
-                                            label="SMTP Port"
-                                            type="number"
-                                            value={settings.smtpPort.toString()}
-                                            onChange={(e) => updateSetting('smtpPort', Number.parseInt(e.target.value, 10) || 0)}
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Input
-                                            label="SMTP Username"
-                                            value={settings.smtpUser}
-                                            onChange={(e) => updateSetting('smtpUser', e.target.value)}
-                                        />
-                                        <Input
-                                            label="SMTP Password"
-                                            type="password"
-                                            value={settings.smtpPassword}
-                                            onChange={(e) => updateSetting('smtpPassword', e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Input
-                                            label="From Email"
-                                            value={settings.emailFrom}
-                                            onChange={(e) => updateSetting('emailFrom', e.target.value)}
-                                        />
-                                        <Input
-                                            label="From Name"
-                                            value={settings.emailFromName}
-                                            onChange={(e) => updateSetting('emailFromName', e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="pt-4">
-                                        <Button
-                                            variant="outline"
-                                            onClick={() => testEmailMutation.mutate()}
-                                            disabled={testEmailMutation.isPending || isLoadingSettings}
-                                        >
-                                            <Mail className="w-4 h-4 mr-2" />
-                                            {testEmailMutation.isPending ? 'Sending...' : 'Send Test Email'}
-                                        </Button>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
-
-                        {/* Notification Settings */}
-                        {activeSection === 'notifications' && (
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Bell className="w-5 h-5 text-[#862733]" />
-                                        Notification Settings
-                                    </CardTitle>
-                                    <CardDescription>Configure email notifications for users</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-6">
-                                    <div className="space-y-4">
-                                        <Switch
-                                            checked={settings.emailOnSubmission}
-                                            onChange={(checked) => updateSetting('emailOnSubmission', checked)}
-                                            label="Email on Submission"
-                                            description="Send confirmation when a student submits an assignment"
-                                        />
-                                        <Switch
-                                            checked={settings.emailOnGrading}
-                                            onChange={(checked) => updateSetting('emailOnGrading', checked)}
-                                            label="Email on Grading"
-                                            description="Notify students when their submission is graded"
-                                        />
-                                        <Switch
-                                            checked={settings.emailOnNewAssignment}
-                                            onChange={(checked) => updateSetting('emailOnNewAssignment', checked)}
-                                            label="Email on New Assignment"
-                                            description="Notify students when a new assignment is published"
-                                        />
-                                        <Switch
-                                            checked={settings.emailOnDueReminder}
-                                            onChange={(checked) => updateSetting('emailOnDueReminder', checked)}
-                                            label="Due Date Reminder"
-                                            description="Send reminder before assignment due date"
-                                        />
-                                        {settings.emailOnDueReminder && (
-                                            <Input
-                                                label="Reminder Days Before Due"
-                                                type="number"
-                                                value={settings.reminderDays.toString()}
-                                                onChange={(e) => updateSetting('reminderDays', Number.parseInt(e.target.value, 10) || 0)}
-                                                className="ml-6"
-                                            />
-                                        )}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
-
                         {/* Code Execution Settings */}
                         {activeSection === 'execution' && (
                             <Card>
@@ -531,118 +357,9 @@ export default function SettingsPage() {
                             </Card>
                         )}
 
-                        {/* Backup & Reset */}
-                        {activeSection === 'backup' && (
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <Database className="w-5 h-5 text-[#862733]" />
-                                        Backup & Reset
-                                    </CardTitle>
-                                    <CardDescription>Data management and system reset options</CardDescription>
-                                </CardHeader>
-                                <CardContent className="space-y-6">
-                                    <div className="p-4 bg-gray-50 rounded-lg">
-                                        <h3 className="font-medium text-gray-900 mb-2">Database Backup</h3>
-                                        <p className="text-sm text-gray-600 mb-4">
-                                            Create a backup of all system data including users, courses, assignments, and submissions.
-                                        </p>
-                                        <div className="flex gap-2">
-                                            <Button variant="outline" onClick={() => setBackupModal(true)}>
-                                                <Download className="w-4 h-4 mr-2" />
-                                                Export Backup
-                                            </Button>
-                                            <Button variant="outline">
-                                                <Upload className="w-4 h-4 mr-2" />
-                                                Import Backup
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                                        <h3 className="font-medium text-red-900 mb-2">Danger Zone</h3>
-                                        <p className="text-sm text-red-700 mb-4">
-                                            These actions are irreversible. Please proceed with caution.
-                                        </p>
-                                        <div className="space-y-2">
-                                            <Button
-                                                variant="outline"
-                                                className="text-red-600 border-red-300 hover:bg-red-100"
-                                                onClick={() => setResetModal(true)}
-                                            >
-                                                <RefreshCw className="w-4 h-4 mr-2" />
-                                                Reset Settings to Default
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                className="text-red-600 border-red-300 hover:bg-red-100 ml-2"
-                                            >
-                                                <Trash2 className="w-4 h-4 mr-2" />
-                                                Clear All Data
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
                     </div>
                 </div>
             </div>
-
-            {/* Reset Confirmation Modal */}
-            <Modal
-                isOpen={resetModal}
-                onClose={() => setResetModal(false)}
-                title="Reset Settings"
-                size="sm"
-            >
-                <Alert type="warning" title="Are you sure?">
-                    This will reset all settings to their default values. This action cannot be undone.
-                </Alert>
-                <ModalFooter>
-                    <Button variant="outline" onClick={() => setResetModal(false)}>
-                        Cancel
-                    </Button>
-                    <Button
-                        className="bg-red-600 hover:bg-red-700"
-                        onClick={() => {
-                            // Reset logic
-                            setResetModal(false);
-                        }}
-                    >
-                        Reset Settings
-                    </Button>
-                </ModalFooter>
-            </Modal>
-
-            {/* Backup Modal */}
-            <Modal
-                isOpen={backupModal}
-                onClose={() => setBackupModal(false)}
-                title="Export Backup"
-                size="md"
-            >
-                <div className="space-y-4">
-                    <p className="text-sm text-gray-600">
-                        Select what to include in the backup:
-                    </p>
-                    <div className="space-y-3">
-                        <Switch checked={true} onChange={() => { }} label="Users" />
-                        <Switch checked={true} onChange={() => { }} label="Courses" />
-                        <Switch checked={true} onChange={() => { }} label="Assignments" />
-                        <Switch checked={true} onChange={() => { }} label="Submissions" />
-                        <Switch checked={true} onChange={() => { }} label="Settings" />
-                    </div>
-                </div>
-                <ModalFooter>
-                    <Button variant="outline" onClick={() => setBackupModal(false)}>
-                        Cancel
-                    </Button>
-                    <Button onClick={() => setBackupModal(false)}>
-                        <Download className="w-4 h-4 mr-2" />
-                        Download Backup
-                    </Button>
-                </ModalFooter>
-            </Modal>
         </ProtectedRoute>
     );
 }

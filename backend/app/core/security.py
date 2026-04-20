@@ -52,21 +52,29 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
-def validate_password_strength(password: str) -> tuple[bool, str]:
-    """Validate password meets security requirements"""
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters long"
-    
-    if not any(c.isupper() for c in password):
+def validate_password_strength(
+    password: str,
+    *,
+    min_length: int = 8,
+    require_uppercase: bool = True,
+    require_lowercase: bool = True,
+    require_number: bool = True,
+    require_special: bool = True,
+) -> tuple[bool, str]:
+    """Validate password against configurable security requirements."""
+    if len(password) < min_length:
+        return False, f"Password must be at least {min_length} characters long"
+
+    if require_uppercase and not any(c.isupper() for c in password):
         return False, "Password must contain at least one uppercase letter"
-    
-    if not any(c.islower() for c in password):
+
+    if require_lowercase and not any(c.islower() for c in password):
         return False, "Password must contain at least one lowercase letter"
-    
-    if not any(c.isdigit() for c in password):
+
+    if require_number and not any(c.isdigit() for c in password):
         return False, "Password must contain at least one digit"
-    
-    if not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
+
+    if require_special and not any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
         return False, "Password must contain at least one special character"
-    
+
     return True, "Password is valid"
