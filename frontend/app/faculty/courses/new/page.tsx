@@ -1,12 +1,6 @@
 'use client';
 
-/**
- * Create or Edit Course
- * Form for faculty to set up a new course or edit an existing one.
- * Use ?edit=123 to load and edit course with id 123.
- */
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
@@ -18,11 +12,22 @@ import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Modal } from '@/components/ui/modal';
 import { CourseLoadingPage, CourseLoadingSpinner } from '@/components/course/CourseLoading';
-import { ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, AlertCircle, CheckCircle2, Pipette } from 'lucide-react';
 
 const SEMESTERS = ['Fall', 'Spring', 'Summer', 'Winter'];
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => currentYear + i);
+
+const PRESET_COLORS = [
+    '#862733',
+    '#1E40AF',
+    '#065F46',
+    '#7C2D12',
+    '#581C87',
+    '#0F766E',
+    '#B45309',
+    '#1D4ED8',
+];
 
 interface FormData {
     code: string;
@@ -35,8 +40,6 @@ interface FormData {
     end_date: string;
     color: string;
     status: 'draft' | 'active' | 'archived';
-    allow_late_submissions: boolean;
-    default_late_penalty: number;
 }
 
 const toDateInput = (s: string | null | undefined): string => {
@@ -61,6 +64,8 @@ const fromDateInput = (value: string): Date | null => {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const isValidHex = (value: string) => /^#[0-9A-Fa-f]{6}$/.test(value);
+
 const initialForm: FormData = {
     code: '',
     name: '',
@@ -72,8 +77,6 @@ const initialForm: FormData = {
     end_date: '',
     color: '#862733',
     status: 'draft',
-    allow_late_submissions: true,
-    default_late_penalty: 10,
 };
 
 export default function NewCoursePage() {
@@ -86,6 +89,8 @@ export default function NewCoursePage() {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [formLoaded, setFormLoaded] = useState(!isEdit);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [hexInput, setHexInput] = useState('#862733');
+    const colorPickerRef = useRef<HTMLInputElement>(null);
 
     const todayDate = fromDateInput(today()) || new Date();
     const minStartDate = isEdit ? undefined : todayDate;
@@ -101,6 +106,7 @@ export default function NewCoursePage() {
 
     useEffect(() => {
         if (isEdit && course) {
+            const color = course.color || '#862733';
             setForm({
                 code: course.code,
                 name: course.name,
@@ -110,37 +116,34 @@ export default function NewCoursePage() {
                 year: course.year,
                 start_date: toDateInput(course.start_date),
                 end_date: toDateInput(course.end_date),
-                color: course.color || '#862733',
+                color,
                 status: course.status || 'draft',
-                allow_late_submissions: course.allow_late_submissions ?? true,
-                default_late_penalty: course.default_late_penalty ?? 10,
             });
+            setHexInput(color);
             setFormLoaded(true);
         }
     }, [isEdit, course]);
 
+    const buildPayload = (data: FormData): Record<string, unknown> => {
+        const payload: Record<string, unknown> = {
+            code: data.code.trim().toUpperCase(),
+            name: data.name.trim(),
+            description: data.description.trim() || undefined,
+            section: data.section.trim() || undefined,
+            semester: data.semester,
+            year: data.year,
+            color: data.color || undefined,
+            status: data.status,
+        };
+        if (data.start_date) payload.start_date = new Date(data.start_date).toISOString();
+        if (data.end_date) payload.end_date = new Date(data.end_date).toISOString();
+        return payload;
+    };
+
     const createMutation = useMutationWithInvalidation({
-        mutationFn: (data: FormData) => {
-            const payload: Record<string, unknown> = {
-                code: data.code.trim().toUpperCase(),
-                name: data.name.trim(),
-                description: data.description.trim() || undefined,
-                section: data.section.trim() || undefined,
-                semester: data.semester,
-                year: data.year,
-                color: data.color || undefined,
-                status: data.status,
-                allow_late_submissions: data.allow_late_submissions,
-                default_late_penalty: data.default_late_penalty,
-            };
-            if (data.start_date) payload.start_date = new Date(data.start_date).toISOString();
-            if (data.end_date) payload.end_date = new Date(data.end_date).toISOString();
-            return apiClient.createCourse(payload);
-        },
+        mutationFn: (data: FormData) => apiClient.createCourse(buildPayload(data)),
         invalidateGroups: ['allCourses', 'allDashboards'],
-        onSuccess: () => {
-            setShowSuccessModal(true);
-        },
+        onSuccess: () => setShowSuccessModal(true),
         onError: (err: any) => {
             const detail = err?.response?.data?.detail;
             if (typeof detail === 'string') {
@@ -160,29 +163,17 @@ export default function NewCoursePage() {
 
     const updateMutation = useMutationWithInvalidation({
         mutationFn: (data: FormData) => {
-            const payload: Record<string, unknown> = {
-                code: data.code.trim().toUpperCase(),
-                name: data.name.trim(),
-                description: data.description.trim() || null,
-                section: data.section.trim() || null,
-                semester: data.semester,
-                year: data.year,
-                status: data.status,
-                is_active: data.status === 'active',
-                color: data.color || null,
-                allow_late_submissions: data.allow_late_submissions,
-                default_late_penalty: data.default_late_penalty,
-            };
-            if (data.start_date) payload.start_date = new Date(data.start_date).toISOString();
-            else payload.start_date = null;
-            if (data.end_date) payload.end_date = new Date(data.end_date).toISOString();
-            else payload.end_date = null;
+            const payload = buildPayload(data);
+            payload.is_active = data.status === 'active';
+            if (!data.start_date) payload.start_date = null;
+            if (!data.end_date) payload.end_date = null;
+            payload.description = data.description.trim() || null;
+            payload.section = data.section.trim() || null;
+            payload.color = data.color || null;
             return apiClient.updateCourse(editId!, payload);
         },
         invalidateGroups: ['allCourses', 'allDashboards'],
-        onSuccess: () => {
-            setShowSuccessModal(true);
-        },
+        onSuccess: () => setShowSuccessModal(true),
         onError: (err: any) => {
             const detail = err?.response?.data?.detail;
             if (typeof detail === 'string') {
@@ -202,10 +193,11 @@ export default function NewCoursePage() {
 
     const validate = (): boolean => {
         const e: Record<string, string> = {};
-        if (!form.code.trim()) e.code = 'Course code is required';
+        if (!form.code.trim()) e.code = 'Course ID is required';
         if (!form.name.trim()) e.name = 'Course name is required';
         if (!form.semester) e.semester = 'Semester is required';
         if (!form.year || form.year < 2000 || form.year > 2100) e.year = 'Valid year is required';
+        if (!isValidHex(form.color)) e.color = 'Enter a valid hex color (e.g. #862733)';
 
         const todayStr = today();
         if (form.start_date && form.start_date < todayStr && !isEdit) {
@@ -213,11 +205,6 @@ export default function NewCoursePage() {
         }
         if (form.start_date && form.end_date && form.end_date < form.start_date) {
             e.end_date = 'End date must be on or after start date';
-        }
-
-        const penalty = Number(form.default_late_penalty);
-        if (isNaN(penalty) || penalty < 0 || penalty > 100) {
-            e.default_late_penalty = 'Late penalty must be 0–100';
         }
 
         setErrors(e);
@@ -240,16 +227,26 @@ export default function NewCoursePage() {
     const update = (key: keyof FormData, value: string | number | boolean) => {
         setForm((prev) => ({ ...prev, [key]: value }));
         if (errors[key as string]) setErrors((prev) => ({ ...prev, [key]: '' }));
-
         if (key === 'start_date' && form.end_date && typeof value === 'string' && value && value > form.end_date) {
             setForm((prev) => ({ ...prev, end_date: '' }));
         }
     };
 
-    const handleLatePenaltyChange = (v: string) => {
-        const num = v === '' ? 0 : parseFloat(v);
-        if (v === '' || (!isNaN(num) && num >= 0 && num <= 100)) {
-            update('default_late_penalty', v === '' ? 0 : num);
+    const applyColor = (c: string) => {
+        update('color', c);
+        setHexInput(c);
+    };
+
+    const handleHexInputChange = (val: string) => {
+        setHexInput(val);
+        if (isValidHex(val)) {
+            update('color', val);
+        }
+    };
+
+    const handleHexInputBlur = () => {
+        if (!isValidHex(hexInput)) {
+            setHexInput(form.color);
         }
     };
 
@@ -258,21 +255,23 @@ export default function NewCoursePage() {
             <div className="mb-6">
                 <Link
                     href="/faculty/courses"
-                    className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                    className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />
                     Back to courses
                 </Link>
             </div>
 
-            <h1 className="text-xl font-semibold text-gray-900 mb-1">
-                {isEdit ? 'Edit Course' : 'New Course'}
-            </h1>
-            <p className="text-sm text-gray-500 mb-6">
-                {isEdit
-                    ? 'Update course details below.'
-                    : 'Draft courses are hidden from students until you publish.'}
-            </p>
+            <div className="mb-7">
+                <h1 className="text-2xl font-bold text-gray-900">
+                    {isEdit ? 'Edit Course' : 'New Course'}
+                </h1>
+                <p className="text-sm text-gray-500 mt-1">
+                    {isEdit
+                        ? 'Update course details below.'
+                        : 'Draft courses are hidden from students until you publish.'}
+                </p>
+            </div>
 
             {errors.submit && (
                 <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 flex items-start gap-2">
@@ -304,7 +303,7 @@ export default function NewCoursePage() {
                         <p className="text-sm text-gray-500 mt-1">
                             {isEdit
                                 ? `"${form.name}" has been updated successfully.`
-                                : `"${form.name}" has been created successfully.`}
+                                : `"${form.name}" has been created as a draft.`}
                         </p>
                     </div>
                     <Button
@@ -320,56 +319,19 @@ export default function NewCoursePage() {
             </Modal>
 
             {formLoaded && (
-                <form onSubmit={handleSubmit} className="space-y-6 animate-slide-up">
-                    <Card className="border-0 shadow-md">
-                        <CardContent className="p-4 sm:p-6 space-y-4">
-                            {/* Visibility */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Visibility</label>
-                                <div className="flex flex-wrap gap-4">
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="status"
-                                            checked={form.status === 'draft'}
-                                            onChange={() => update('status', 'draft')}
-                                            className="w-4 h-4 text-[#862733] border-gray-300 focus:ring-[#862733]"
-                                        />
-                                        <span className="text-sm">Draft</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="status"
-                                            checked={form.status === 'active'}
-                                            onChange={() => update('status', 'active')}
-                                            className="w-4 h-4 text-[#862733] border-gray-300 focus:ring-[#862733]"
-                                        />
-                                        <span className="text-sm">Publish</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="status"
-                                            checked={form.status === 'archived'}
-                                            onChange={() => update('status', 'archived')}
-                                            className="w-4 h-4 text-[#862733] border-gray-300 focus:ring-[#862733]"
-                                        />
-                                        <span className="text-sm">Archive</span>
-                                    </label>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Draft: only you see it. <br />
-                                    Publish: visible to enrolled students.<br />
-                                    Archive: past course.
-                                </p>
-                            </div>
+                <form onSubmit={handleSubmit} className="space-y-5 animate-slide-up">
 
-                            {/* Code, Section, Name */}
+                    {/* ── Identification ── */}
+                    <Card className="border border-gray-200 shadow-sm">
+                        <CardContent className="p-5 sm:p-6 space-y-4">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                Course Identification
+                            </p>
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <Input
-                                    label="Course Code"
-                                    placeholder="CS101"
+                                    label="Course ID"
+                                    placeholder="CSCI 2003"
                                     value={form.code}
                                     onChange={(e) => update('code', e.target.value.toUpperCase())}
                                     error={errors.code}
@@ -379,33 +341,49 @@ export default function NewCoursePage() {
                                     placeholder="A"
                                     value={form.section}
                                     onChange={(e) => update('section', e.target.value)}
+                                    error={errors.section}
                                 />
                             </div>
 
+                            <p className="text-xs text-gray-400 -mt-1">
+                                Course ID + Section must be unique (e.g. CSCI 2003 – A and CSCI 2003 – B are separate offerings).
+                            </p>
+
                             <Input
                                 label="Course Name"
-                                placeholder="Introduction to Programming"
+                                placeholder="Introduction to Java"
                                 value={form.name}
                                 onChange={(e) => update('name', e.target.value)}
                                 error={errors.name}
                             />
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Description</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                                    Description
+                                    <span className="ml-1 text-xs font-normal text-gray-400">(optional)</span>
+                                </label>
                                 <textarea
-                                    className="w-full min-h-[80px] rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent resize-y"
-                                    placeholder="Optional"
+                                    className="w-full min-h-[80px] rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent resize-y transition"
+                                    placeholder="Brief overview of the course…"
                                     value={form.description}
                                     onChange={(e) => update('description', e.target.value)}
                                 />
                             </div>
+                        </CardContent>
+                    </Card>
 
-                            {/* Semester & Year */}
+                    {/* ── Schedule ── */}
+                    <Card className="border border-gray-200 shadow-sm">
+                        <CardContent className="p-5 sm:p-6 space-y-4">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                Schedule
+                            </p>
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Semester</label>
                                     <select
-                                        className="w-full h-10 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent"
+                                        className="w-full h-10 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent transition"
                                         value={form.semester}
                                         onChange={(e) => update('semester', e.target.value)}
                                     >
@@ -417,7 +395,7 @@ export default function NewCoursePage() {
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Year</label>
                                     <select
-                                        className="w-full h-10 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent"
+                                        className="w-full h-10 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent transition"
                                         value={form.year}
                                         onChange={(e) => update('year', parseInt(e.target.value))}
                                     >
@@ -428,7 +406,6 @@ export default function NewCoursePage() {
                                 </div>
                             </div>
 
-                            {/* Dates */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <Calendar
                                     label="Start Date"
@@ -446,76 +423,144 @@ export default function NewCoursePage() {
                                     error={errors.end_date}
                                 />
                             </div>
+                        </CardContent>
+                    </Card>
 
-                            {/* Late submission settings */}
-                            <div className="pt-3 border-t border-gray-100 space-y-3">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={form.allow_late_submissions}
-                                        onChange={(e) => update('allow_late_submissions', e.target.checked)}
-                                        className="w-4 h-4 rounded border-gray-300 text-[#862733] focus:ring-[#862733]"
-                                    />
-                                    <span className="text-sm font-medium text-gray-700">Allow late submissions</span>
-                                </label>
-                                {form.allow_late_submissions && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                                            Late penalty (% per day)
-                                        </label>
-                                        <input
-                                            type="number"
-                                            min={0}
-                                            max={100}
-                                            step={0.5}
-                                            value={form.default_late_penalty}
-                                            onChange={(e) => handleLatePenaltyChange(e.target.value)}
-                                            className="w-full max-w-[120px] h-10 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent"
-                                        />
-                                        <p className="text-xs text-gray-500 mt-1">0–100. Default: 10% per day.</p>
-                                        {errors.default_late_penalty && (
-                                            <p className="text-sm text-red-500 mt-1">{errors.default_late_penalty}</p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+                    {/* ── Appearance ── */}
+                    <Card className="border border-gray-200 shadow-sm">
+                        <CardContent className="p-5 sm:p-6 space-y-4">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                Appearance
+                            </p>
 
-                            {/* Color */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Card color</label>
-                                <div className="flex gap-2 flex-wrap">
-                                    {['#862733', '#1E40AF', '#065F46', '#7C2D12', '#581C87'].map((c) => (
+                                <label className="block text-sm font-medium text-gray-700 mb-3">Card Color</label>
+
+                                {/* Preview */}
+                                <div
+                                    className="w-full h-10 rounded-lg mb-3 transition-colors duration-200"
+                                    style={{ backgroundColor: isValidHex(form.color) ? form.color : '#862733' }}
+                                />
+
+                                {/* Swatches */}
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    {PRESET_COLORS.map((c) => (
                                         <button
                                             key={c}
                                             type="button"
-                                            onClick={() => update('color', c)}
-                                            className={`w-8 h-8 rounded-full border-2 transition-colors ${form.color === c ? 'border-gray-900 ring-1 ring-gray-400' : 'border-gray-200 hover:border-gray-300'
-                                                }`}
+                                            onClick={() => applyColor(c)}
+                                            title={c}
+                                            className={`w-8 h-8 rounded-full border-2 transition-all ${
+                                                form.color === c
+                                                    ? 'border-gray-900 scale-110 ring-2 ring-gray-300'
+                                                    : 'border-gray-200 hover:border-gray-400 hover:scale-105'
+                                            }`}
                                             style={{ backgroundColor: c }}
                                         />
                                     ))}
                                 </div>
+
+                                {/* Hex input + native color picker */}
+                                <div className="flex items-center gap-2">
+                                    <div className="relative flex-1 max-w-[160px]">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 select-none">#</span>
+                                        <input
+                                            type="text"
+                                            maxLength={7}
+                                            value={hexInput.replace('#', '')}
+                                            onChange={(e) => handleHexInputChange('#' + e.target.value)}
+                                            onBlur={handleHexInputBlur}
+                                            placeholder="862733"
+                                            className={`w-full h-10 rounded-lg border pl-7 pr-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#862733] focus:border-transparent transition ${
+                                                errors.color ? 'border-red-400' : 'border-gray-300'
+                                            }`}
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        title="Open color picker"
+                                        onClick={() => colorPickerRef.current?.click()}
+                                        className="h-10 w-10 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-50 transition"
+                                    >
+                                        <Pipette className="w-4 h-4 text-gray-500" />
+                                    </button>
+                                    <input
+                                        ref={colorPickerRef}
+                                        type="color"
+                                        value={isValidHex(form.color) ? form.color : '#862733'}
+                                        onChange={(e) => applyColor(e.target.value)}
+                                        className="sr-only"
+                                        tabIndex={-1}
+                                    />
+                                </div>
+                                {errors.color && (
+                                    <p className="text-xs text-red-500 mt-1">{errors.color}</p>
+                                )}
                             </div>
                         </CardContent>
                     </Card>
 
-                    <div className="flex flex-col-reverse sm:flex-row gap-3">
-                        <Link href="/faculty/courses" className="sm:order-2">
+                    {/* ── Visibility ── */}
+                    <Card className="border border-gray-200 shadow-sm">
+                        <CardContent className="p-5 sm:p-6 space-y-3">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                Visibility
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                {(['draft', 'active', 'archived'] as const).map((s) => {
+                                    const label = s === 'active' ? 'Published' : s.charAt(0).toUpperCase() + s.slice(1);
+                                    const desc =
+                                        s === 'draft'
+                                            ? 'Only you can see it'
+                                            : s === 'active'
+                                            ? 'Visible to enrolled students'
+                                            : 'Past course, read-only';
+                                    return (
+                                        <label
+                                            key={s}
+                                            className={`flex flex-col gap-0.5 rounded-lg border-2 p-3 cursor-pointer transition-all ${
+                                                form.status === s
+                                                    ? 'border-[#862733] bg-red-50'
+                                                    : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="radio"
+                                                    name="status"
+                                                    checked={form.status === s}
+                                                    onChange={() => update('status', s)}
+                                                    className="w-4 h-4 text-[#862733] border-gray-300 focus:ring-[#862733]"
+                                                />
+                                                <span className="text-sm font-medium text-gray-800">{label}</span>
+                                            </div>
+                                            <p className="text-xs text-gray-400 pl-6">{desc}</p>
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* ── Actions ── */}
+                    <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
+                        <Link href="/faculty/courses">
                             <Button type="button" variant="outline" className="w-full sm:w-auto">
                                 Cancel
                             </Button>
                         </Link>
-                    <Button
-                        type="submit"
-                        disabled={isPending || (isEdit && !formLoaded)}
-                        className="w-full sm:w-auto bg-[#862733] hover:bg-[#a03040] sm:order-1 transition-all duration-200"
-                    >
-                        {isPending ? (
-                            <CourseLoadingSpinner size="sm" label={isEdit ? 'Saving...' : 'Creating...'} />
-                        ) : (
-                            isEdit ? 'Save' : 'Create Course'
-                        )}
-                    </Button>
+                        <Button
+                            type="submit"
+                            disabled={isPending || (isEdit && !formLoaded)}
+                            className="w-full sm:w-auto bg-[#862733] hover:bg-[#a03040] transition-all duration-200"
+                        >
+                            {isPending ? (
+                                <CourseLoadingSpinner size="sm" label={isEdit ? 'Saving…' : 'Creating…'} />
+                            ) : (
+                                isEdit ? 'Save Changes' : 'Create Course'
+                            )}
+                        </Button>
                     </div>
                 </form>
             )}

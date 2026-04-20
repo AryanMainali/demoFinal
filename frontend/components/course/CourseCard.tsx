@@ -77,14 +77,19 @@ const getCourseInitials = (code: string): string => {
 };
 
 const getStatusLabel = (course: CourseCardData): string => {
-    if (course.is_active === false) return 'Archived';
-    if (course.status) return String(course.status).charAt(0).toUpperCase() + String(course.status).slice(1);
-    return 'Active';
+    if (course.status) {
+        const s = String(course.status).toLowerCase();
+        if (s === 'archived') return 'Archived';
+        if (s === 'draft') return 'Draft';
+        if (s === 'active') return 'Active';
+        return String(course.status).charAt(0).toUpperCase() + String(course.status).slice(1);
+    }
+    return course.is_active === false ? 'Archived' : 'Active';
 };
 
 const getColorScheme = (course: CourseCardData) => {
-    const status = course.status || (course.is_active === false ? 'archived' : 'active');
-    return COURSE_COLORS[status] || COURSE_COLORS.active;
+    const s = course.status ? String(course.status).toLowerCase() : (course.is_active === false ? 'archived' : 'active');
+    return COURSE_COLORS[s] || COURSE_COLORS.active;
 };
 
 export function CourseCard({ course, variant, basePath, actions }: CourseCardProps) {

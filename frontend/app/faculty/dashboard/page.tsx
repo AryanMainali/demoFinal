@@ -286,13 +286,6 @@ export default function FacultyDashboard() {
                         <h1 className="text-lg font-bold leading-tight">
                             {greeting}, {firstName}
                         </h1>
-                        <p className="text-xs text-white/70 mt-0.5">
-                            {isLoading
-                                ? 'Loading your workspace…'
-                                : stats?.pending_grading
-                                    ? `${stats.pending_grading} active assignment${stats.pending_grading > 1 ? 's' : ''} with upcoming deadlines`
-                                    : 'All caught up — no pending deadlines'}
-                        </p>
                     </div>
                     <div className="hidden sm:flex flex-col items-end gap-1.5">
                         {stats && !isLoading && stats.pending_grading > 0 && (

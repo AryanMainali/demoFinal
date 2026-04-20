@@ -170,13 +170,22 @@ class ApiClient {
         return response.data;
     }
 
-    async enrollStudentByEmail(courseId: number, email: string) {
-        const response = await this.client.post(`/courses/${courseId}/enroll-by-email`, { email });
+    async enrollStudentByEmail(
+        courseId: number,
+        email: string,
+        canvasFields?: { first_name?: string; last_name?: string; canvas_user_id?: string; cwid?: string }
+    ) {
+        const response = await this.client.post(`/courses/${courseId}/enroll-by-email`, { email, ...canvasFields });
         return response.data;
     }
 
     async bulkEnrollStudents(courseId: number, emails: string[]) {
         const response = await this.client.post(`/courses/${courseId}/bulk-enroll`, { emails });
+        return response.data;
+    }
+
+    async requestRosterSync(courseId: number) {
+        const response = await this.client.post(`/courses/${courseId}/request-roster-sync`);
         return response.data;
     }
 

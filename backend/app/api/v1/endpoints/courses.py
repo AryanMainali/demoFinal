@@ -44,6 +44,10 @@ class CourseWithStats(BaseModel):
 
 class EnrollByEmailRequest(BaseModel):
     email: EmailStr
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    canvas_user_id: Optional[str] = None
+    cwid: Optional[str] = None  # SIS User ID
 
 
 class AddAssistantRequest(BaseModel):
@@ -632,28 +636,56 @@ def enroll_student_by_email(
     ).first()
 
     if not student:
-        # Record request and notify admin
-        audit = AuditLog(
-            user_id=current_user.id,
-            event_type="student_add_requested",
-            description=f"Faculty requested to add student {email_lower} for {course.code}. Student not in system."
-        )
-        db.add(audit)
-        db.commit()
+        # If Canvas fields are provided, auto-create the student account
+        if request.first_name and request.last_name:
+            import secrets, string as _string
+            from app.core.security import get_password_hash
+            chars = _string.ascii_letters + _string.digits + "!@#$%"
+            temp_pw = ''.join(secrets.choice(chars) for _ in range(14))
+            full_name = f"{request.first_name.strip()} {request.last_name.strip()}"
+            student = User(
+                email=email_lower,
+                full_name=full_name,
+                hashed_password=get_password_hash(temp_pw),
+                role=UserRole.STUDENT,
+                is_active=True,
+                is_verified=False,
+                student_id=request.cwid or None,
+                canvas_user_id=request.canvas_user_id or None,
+                cwid=request.cwid or None,
+            )
+            db.add(student)
+            db.flush()  # Get student.id without committing
+            audit_create = AuditLog(
+                user_id=current_user.id,
+                event_type="student_created_via_enrollment",
+                description=f"Student {email_lower} created and enrolled in {course.code} by {current_user.email}"
+            )
+            db.add(audit_create)
+            # Fall through to enrollment below
+        else:
+            # No Canvas fields — notify admin as before
+            audit = AuditLog(
+                user_id=current_user.id,
+                event_type="student_add_requested",
+                description=f"Faculty requested to add student {email_lower} for {course.code}. Student not in system."
+            )
+            db.add(audit)
+            db.commit()
 
-        admin_notified = send_student_add_request_to_admin(
-            student_email=email_lower,
-            course_code=course.code,
-            course_name=course.name,
-            faculty_name=current_user.full_name or current_user.email,
-            faculty_email=current_user.email,
-        )
-        return {
-            "enrolled": False,
-            "student_not_found": True,
-            "message": "Student is not in the system. Request has been sent to the admin to add this student." if admin_notified else "Student is not in the system. Request has been logged. Admin will be notified.",
-            "admin_notified": admin_notified,
-        }
+            admin_notified = send_student_add_request_to_admin(
+                student_email=email_lower,
+                course_code=course.code,
+                course_name=course.name,
+                faculty_name=current_user.full_name or current_user.email,
+                faculty_email=current_user.email,
+            )
+            return {
+                "enrolled": False,
+                "student_not_found": True,
+                "message": "Student is not in the system. Request has been sent to the admin to add this student." if admin_notified else "Student is not in the system. Request has been logged. Admin will be notified.",
+                "admin_notified": admin_notified,
+            }
 
     # Check if already enrolled
     existing = db.query(Enrollment).filter(
@@ -821,6 +853,43 @@ def bulk_enroll_students(
         not_found=not_found,
         already_enrolled=already_enrolled_list,
     )
+
+
+@router.post("/{course_id}/request-roster-sync", status_code=status.HTTP_200_OK)
+def request_roster_sync(
+    course_id: int,
+    current_user: User = Depends(require_roles(UserRole.FACULTY, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """Faculty requests admin to sync course roster with Canvas."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+
+    if current_user.role == UserRole.FACULTY and course.instructor_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this course")
+
+    # Notify all admins
+    admins = db.query(User).filter(User.role == UserRole.ADMIN, User.is_active == True).all()
+    for admin in admins:
+        create_notification(
+            db,
+            user_id=admin.id,
+            notification_type=NotificationType.ROSTER_SYNC_REQUESTED,
+            title=f"Roster Sync Requested: {course.code}",
+            message=f"{current_user.full_name or current_user.email} requested a Canvas roster sync for {course.code} – {course.name}.",
+            course_id=course.id,
+        )
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        event_type="roster_sync_requested",
+        description=f"Roster sync requested for {course.code} by {current_user.email}",
+    )
+    db.add(audit)
+    db.commit()
+
+    return {"message": f"Roster sync request sent to admin for {course.code}."}
 
 
 @router.get("/{course_id}/students", response_model=List[StudentInCourse])

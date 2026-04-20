@@ -34,6 +34,8 @@ class User(Base):
     
     # Student specific
     student_id = Column(String(50), unique=True, nullable=True, index=True)
+    canvas_user_id = Column(String(50), nullable=True, index=True)
+    cwid = Column(String(50), nullable=True, index=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

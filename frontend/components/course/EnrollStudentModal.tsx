@@ -1,20 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useEffect } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api-client';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CourseLoadingSpinner } from '@/components/course/CourseLoading';
-import { UserPlus, Search } from 'lucide-react';
-
-interface SystemStudent {
-    id: number;
-    email: string;
-    full_name: string;
-    student_id?: string | null;
-}
+import { UserPlus, CheckCircle2, AlertCircle, Info } from 'lucide-react';
 
 export interface EnrollStudentModalProps {
     courseId: number;
@@ -24,9 +17,24 @@ export interface EnrollStudentModalProps {
     onError?: (error: unknown) => void;
     courseInfo?: { code: string; name: string };
     invalidateKeys?: readonly (readonly unknown[])[];
-    // IDs of students already enrolled, to exclude from the list
     enrolledStudentIds?: number[];
 }
+
+interface CanvasStudentFields {
+    lastName: string;
+    firstName: string;
+    canvasId: string;
+    sisUserId: string;
+    sisLoginId: string;
+}
+
+const EMPTY_FIELDS: CanvasStudentFields = {
+    lastName: '',
+    firstName: '',
+    canvasId: '',
+    sisUserId: '',
+    sisLoginId: '',
+};
 
 export function EnrollStudentModal({
     courseId,
@@ -36,62 +44,85 @@ export function EnrollStudentModal({
     onError,
     courseInfo,
     invalidateKeys = [],
-    enrolledStudentIds = [],
 }: EnrollStudentModalProps) {
-    const [search, setSearch] = useState('');
-    const [selectedEmail, setSelectedEmail] = useState('');
+    const [fields, setFields] = useState<CanvasStudentFields>(EMPTY_FIELDS);
+    const [result, setResult] = useState<{ type: 'success' | 'warn' | null; message: string }>({ type: null, message: '' });
     const queryClient = useQueryClient();
 
     useEffect(() => {
         if (!isOpen) {
-            setSearch('');
-            setSelectedEmail('');
+            setFields(EMPTY_FIELDS);
+            setResult({ type: null, message: '' });
         }
     }, [isOpen]);
 
-    const { data: allStudents = [], isLoading: studentsLoading } = useQuery<SystemStudent[]>({
-        queryKey: ['system-students'],
-        queryFn: () => apiClient.getFacultyStudents() as Promise<SystemStudent[]>,
-        enabled: isOpen,
-        staleTime: 60_000,
-    });
+    const email = fields.sisLoginId.trim()
+        ? `${fields.sisLoginId.trim().toLowerCase()}@warhawks.ulm.edu`
+        : '';
 
-    const availableStudents = useMemo(() => {
-        const enrolledSet = new Set(enrolledStudentIds);
-        return allStudents.filter((s) => !enrolledSet.has(s.id));
-    }, [allStudents, enrolledStudentIds]);
-
-    const filteredStudents = useMemo(() => {
-        const q = search.trim().toLowerCase();
-        if (!q) return availableStudents;
-        return availableStudents.filter(
-            (s) =>
-                s.full_name.toLowerCase().includes(q) ||
-                s.email.toLowerCase().includes(q) ||
-                (s.student_id ?? '').toLowerCase().includes(q),
-        );
-    }, [availableStudents, search]);
+    const isFormValid =
+        fields.lastName.trim() &&
+        fields.firstName.trim() &&
+        fields.sisLoginId.trim();
 
     const enrollMutation = useMutation({
-        mutationFn: (email: string) =>
-            apiClient.enrollStudentByEmail(courseId, email) as Promise<{
+        mutationFn: () =>
+            apiClient.enrollStudentByEmail(courseId, email, {
+                first_name: fields.firstName.trim() || undefined,
+                last_name: fields.lastName.trim() || undefined,
+                canvas_user_id: fields.canvasId.trim() || undefined,
+                cwid: fields.sisUserId.trim() || undefined,
+            }) as Promise<{
                 enrolled?: boolean;
                 student_not_found?: boolean;
                 message?: string;
             }>,
         onSuccess: (data) => {
             invalidateKeys.forEach((key) => queryClient.invalidateQueries({ queryKey: [...key] }));
-            onSuccess?.(data);
-            onClose();
+            if (data.student_not_found) {
+                // This only happens when no Canvas fields were provided (shouldn't occur from this modal)
+                setResult({
+                    type: 'warn',
+                    message: `${fields.firstName} ${fields.lastName} was not found in the system. Admin has been notified.`,
+                });
+            } else {
+                setResult({
+                    type: 'success',
+                    message: `${fields.firstName} ${fields.lastName} has been enrolled in this course.`,
+                });
+                onSuccess?.(data);
+                setTimeout(() => onClose(), 1800);
+            }
         },
         onError: (err) => onError?.(err),
     });
 
     const handleEnroll = () => {
-        const email = selectedEmail.trim();
-        if (!email || !email.includes('@')) return;
-        enrollMutation.mutate(email);
+        if (!isFormValid || !email) return;
+        setResult({ type: null, message: '' });
+        enrollMutation.mutate();
     };
+
+    const field = (
+        label: string,
+        key: keyof CanvasStudentFields,
+        placeholder: string,
+        required = false,
+        hint?: string,
+    ) => (
+        <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+                {label}
+                {required && <span className="text-red-500 ml-0.5">*</span>}
+            </label>
+            <Input
+                placeholder={placeholder}
+                value={fields[key]}
+                onChange={(e) => setFields((prev) => ({ ...prev, [key]: e.target.value }))}
+            />
+            {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+        </div>
+    );
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Enroll Student" size="md">
@@ -105,83 +136,57 @@ export function EnrollStudentModal({
                     </div>
                 )}
 
-                {/* Search box */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Search students
-                    </label>
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <Input
-                            placeholder="Name, email, or student ID..."
-                            value={search}
-                            onChange={(e) => {
-                                setSearch(e.target.value);
-                                setSelectedEmail('');
-                            }}
-                            className="pl-9"
-                        />
-                    </div>
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-100 flex gap-2 text-sm text-blue-700">
+                    <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <span>Enter the student information from Canvas. Fields match the Canvas People export format.</span>
                 </div>
 
-                {/* Student list */}
-                <div className="border border-gray-200 rounded-xl overflow-hidden">
-                    {studentsLoading ? (
-                        <div className="flex items-center justify-center py-8 text-gray-400 text-sm gap-2">
-                            <CourseLoadingSpinner size="sm" label="Loading students..." />
-                        </div>
-                    ) : filteredStudents.length === 0 ? (
-                        <div className="py-8 text-center text-sm text-gray-400">
-                            {availableStudents.length === 0
-                                ? 'All system students are already enrolled.'
-                                : 'No students match your search.'}
-                        </div>
-                    ) : (
-                        <ul className="max-h-52 overflow-y-auto divide-y divide-gray-100">
-                            {filteredStudents.map((s) => {
-                                const selected = selectedEmail === s.email;
-                                return (
-                                    <li key={s.id}>
-                                        <button
-                                            type="button"
-                                            onClick={() => setSelectedEmail(selected ? '' : s.email)}
-                                            className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                                                selected
-                                                    ? 'bg-[#862733]/8 border-l-2 border-[#862733]'
-                                                    : 'hover:bg-gray-50'
-                                            }`}
-                                        >
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
-                                                selected ? 'bg-[#862733] text-white' : 'bg-gray-100 text-gray-600'
-                                            }`}>
-                                                {s.full_name.charAt(0).toUpperCase()}
-                                            </div>
-                                            <div className="min-w-0 flex-1">
-                                                <p className="text-sm font-medium text-gray-900 truncate">{s.full_name}</p>
-                                                <p className="text-xs text-gray-500 truncate">{s.email}</p>
-                                            </div>
-                                            {s.student_id && (
-                                                <span className="text-xs text-gray-400 font-mono flex-shrink-0">{s.student_id}</span>
-                                            )}
-                                        </button>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                    )}
+                {/* Canvas fields */}
+                <div className="grid grid-cols-2 gap-3">
+                    {field('Last Name', 'lastName', 'e.g. Smith', true)}
+                    {field('First Name', 'firstName', 'e.g. John', true)}
                 </div>
-
-                {selectedEmail && (
-                    <p className="text-xs text-gray-500">
-                        Selected: <span className="font-medium text-gray-700">{selectedEmail}</span>
-                    </p>
+                <div className="grid grid-cols-2 gap-3">
+                    {field('Canvas User ID', 'canvasId', 'e.g. 12345')}
+                    {field('SIS User ID (CWID)', 'sisUserId', 'e.g. 700123456')}
+                </div>
+                {field(
+                    'SIS Login ID',
+                    'sisLoginId',
+                    'e.g. jsmith123',
+                    true,
+                    'This is the part before "@warhawks.ulm.edu" in their university email.',
                 )}
 
-                <div className="flex justify-end gap-3 pt-1">
-                    <Button variant="outline" onClick={onClose}>Cancel</Button>
+                {/* Derived email preview */}
+                {email && (
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                        <span className="text-xs text-gray-500">Email:</span>
+                        <span className="text-sm font-mono font-medium text-gray-800">{email}</span>
+                    </div>
+                )}
+
+                {/* Result feedback */}
+                {result.type === 'success' && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm">
+                        <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span>{result.message}</span>
+                    </div>
+                )}
+                {result.type === 'warn' && (
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        <span>{result.message}</span>
+                    </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-1 border-t border-gray-100">
+                    <Button variant="outline" onClick={onClose}>
+                        Cancel
+                    </Button>
                     <Button
                         onClick={handleEnroll}
-                        disabled={!selectedEmail || enrollMutation.isPending}
+                        disabled={!isFormValid || enrollMutation.isPending}
                         className="bg-[#862733] hover:bg-[#a03040] text-white"
                     >
                         {enrollMutation.isPending ? (
