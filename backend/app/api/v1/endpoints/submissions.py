@@ -803,6 +803,94 @@ async def download_submission(
     )
 
 
+@router.get("/assignment/{assignment_id}/download-bulk")
+async def download_bulk_submissions(
+    assignment_id: int,
+    submission_ids: str = Query(..., description="Comma-separated submission IDs"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Download selected submissions as a zip, organized by student name."""
+    from fastapi.responses import FileResponse
+    import io, re, tempfile as tmpf
+
+    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    if current_user.role not in (UserRole.FACULTY, UserRole.ASSISTANT, UserRole.ADMIN):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if current_user.role in (UserRole.FACULTY, UserRole.ASSISTANT):
+        if not _can_grade_for_course(db, current_user, assignment.course_id):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    # Parse requested submission IDs
+    try:
+        ids = [int(x.strip()) for x in submission_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid submission IDs")
+
+    if not ids:
+        raise HTTPException(status_code=400, detail="No submission IDs provided")
+
+    submissions = (
+        db.query(Submission)
+        .options(joinedload(Submission.files), joinedload(Submission.student))
+        .filter(Submission.id.in_(ids), Submission.assignment_id == assignment_id)
+        .all()
+    )
+
+    if not submissions:
+        raise HTTPException(status_code=404, detail="No submissions found")
+
+    def safe_name(name: str) -> str:
+        return re.sub(r'[^\w\s\-.]', '_', name).strip().replace(' ', '_')
+
+    # Build in-memory zip: StudentName/filename
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for sub in submissions:
+            student = sub.student
+            student_name = safe_name(student.full_name if student else f"student_{sub.student_id}")
+            folder = student_name
+
+            for file_record in sub.files:
+                filename = file_record.original_filename or file_record.filename
+                arcname = f"{folder}/{filename}"
+
+                if settings.USE_S3_STORAGE and file_record.file_path.startswith("http"):
+                    try:
+                        from urllib.parse import unquote
+                        raw = file_record.file_path.split(".amazonaws.com/")[-1] if ".amazonaws.com/" in file_record.file_path else file_record.file_path
+                        s3_key = unquote(raw.split("?")[0])
+                        with tmpf.NamedTemporaryFile(delete=False) as tmp:
+                            s3_service.download_submission_file(s3_key, tmp.name)
+                            zipf.write(tmp.name, arcname)
+                            os.unlink(tmp.name)
+                    except Exception as e:
+                        logger.error(f"S3 download error for file {file_record.id}: {e}")
+                else:
+                    file_path = Path(file_record.file_path)
+                    if file_path.exists():
+                        zipf.write(str(file_path), arcname)
+
+    zip_buffer.seek(0)
+
+    # Write to temp file for FileResponse
+    safe_title = safe_name(assignment.title)
+    zip_path = Path(settings.TEMP_DIR) / f"bulk_{assignment_id}_{current_user.id}.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(zip_path, 'wb') as f:
+        f.write(zip_buffer.read())
+
+    return FileResponse(
+        path=zip_path,
+        filename=f"{safe_title}_submissions.zip",
+        media_type="application/zip"
+    )
+
+
 @router.get("/{submission_id}/files/{file_id}/content")
 def get_file_content(
     submission_id: int,

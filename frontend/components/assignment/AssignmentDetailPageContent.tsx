@@ -39,12 +39,9 @@ import {
     Save,
     Download,
     GraduationCap,
-    Award,
     CheckSquare,
-    Video,
     ExternalLink,
     Link2,
-    Play,
     BookOpen,
 } from 'lucide-react';
 
@@ -267,17 +264,6 @@ const getLetterGrade = (score: number | null, max: number): string => {
     return 'F';
 };
 
-const getLetterGradeStyle = (grade: string) => {
-    switch (grade) {
-        case 'A': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-        case 'B': return 'bg-blue-100 text-blue-700 border-blue-200';
-        case 'C': return 'bg-amber-100 text-amber-700 border-amber-200';
-        case 'D': return 'bg-orange-100 text-orange-700 border-orange-200';
-        case 'F': return 'bg-red-100 text-red-700 border-red-200';
-        default: return 'bg-gray-100 text-gray-500 border-gray-200';
-    }
-};
-
 /* ====================================================================
    COMPONENT
    ==================================================================== */
@@ -313,12 +299,16 @@ export default function AssignmentDetailPageContent() {
     const [deletingTCId, setDeletingTCId] = useState<number | null>(null);
     const [tcForm, setTCForm] = useState<Partial<TestCaseItem>>({});
     const [tcError, setTCError] = useState<string | null>(null);
-    const [expandedStudents, setExpandedStudents] = useState<Set<number>>(new Set());
     const [expandedPlagiarismStudent, setExpandedPlagiarismStudent] = useState<number | null>(null);
     const [plagiarismMatchesMap, setPlagiarismMatchesMap] = useState<Record<number, any[]>>({});
     const [loadingMatches, setLoadingMatches] = useState<number | null>(null);
     const [sortBy, setSortBy] = useState<'name' | 'score' | 'date' | 'attempts'>('name');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+    // Download mode
+    const [downloadMode, setDownloadMode] = useState(false);
+    const [selectedSubmissions, setSelectedSubmissions] = useState<Set<number>>(new Set());
+    const [isDownloading, setIsDownloading] = useState(false);
 
     // Bulk run (autograde latest submission for each student)
     const [bulkRunning, setBulkRunning] = useState(false);
@@ -554,6 +544,37 @@ export default function AssignmentDetailPageContent() {
         queryClient.invalidateQueries({ queryKey: ['assignment-submissions', assignmentId] });
     }, [assignment, submissions, bulkRunning, queryClient, assignmentId]);
 
+    const handleBulkDownload = useCallback(async () => {
+        if (!assignment || selectedSubmissions.size === 0) return;
+        setIsDownloading(true);
+        try {
+            const blob = await apiClient.downloadBulkSubmissions(assignmentId, Array.from(selectedSubmissions));
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const safe = assignment.title.replace(/[^a-zA-Z0-9]/g, '_');
+            a.download = `${safe}_submissions.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('Download failed', err);
+        } finally {
+            setIsDownloading(false);
+        }
+    }, [assignment, assignmentId, selectedSubmissions]);
+
+    const toggleSubmissionSelect = useCallback((subId: number, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setSelectedSubmissions(prev => {
+            const next = new Set(prev);
+            if (next.has(subId)) next.delete(subId);
+            else next.add(subId);
+            return next;
+        });
+    }, []);
+
     // Test case helpers
     const testCases: TestCaseItem[] = assignment?.test_cases ?? [];
 
@@ -726,28 +747,6 @@ export default function AssignmentDetailPageContent() {
 
         return result;
     }, [studentGroups, searchQuery, sortBy, sortDir]);
-
-    // Stats
-    const stats = useMemo(() => {
-        const total = studentGroups.length;
-        const submitted = total;
-        const graded = studentGroups.filter(g => g.latestSubmission.final_score !== null).length;
-        const scores = studentGroups.map(g => g.bestScore).filter((s): s is number => s !== null);
-        const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-        const passing = scores.filter(s => s >= (assignment?.passing_score ?? 60)).length;
-        const late = studentGroups.filter(g => g.submissions.some(s => s.is_late)).length;
-        const flagged = studentGroups.filter(g => g.submissions.some(s => s.plagiarism_flagged || s.ai_flagged)).length;
-        return { total, submitted, graded, avg, passing, late, flagged, scores };
-    }, [studentGroups, assignment]);
-
-    const toggleExpanded = useCallback((studentId: number) => {
-        setExpandedStudents(prev => {
-            const next = new Set(prev);
-            if (next.has(studentId)) next.delete(studentId);
-            else next.add(studentId);
-            return next;
-        });
-    }, []);
 
     const navigateToGrading = useCallback((studentId: number) => {
         router.push(`/${basePath}/courses/${courseId}/assignments/${assignmentId}/grade/${studentId}`);
@@ -1747,8 +1746,51 @@ export default function AssignmentDetailPageContent() {
                                                 {col} {sortBy === col && (sortDir === 'asc' ? '↑' : '↓')}
                                             </button>
                                         ))}
+                                        <button
+                                            onClick={() => {
+                                                setDownloadMode(m => !m);
+                                                setSelectedSubmissions(new Set());
+                                            }}
+                                            className={`px-3 py-2 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${downloadMode ? 'bg-[#862733] text-white border-[#862733]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                                        >
+                                            <Download className="w-3.5 h-3.5" />
+                                            {downloadMode ? 'Cancel' : 'Download'}
+                                        </button>
                                     </div>
                                 </div>
+                                {/* Download mode bar */}
+                                {downloadMode && (
+                                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={() => {
+                                                    const allIds = filteredGroups.map(g => g.latestSubmission.id);
+                                                    setSelectedSubmissions(prev =>
+                                                        prev.size === allIds.length ? new Set() : new Set(allIds)
+                                                    );
+                                                }}
+                                                className="text-xs text-[#862733] hover:underline font-medium"
+                                            >
+                                                {selectedSubmissions.size === filteredGroups.length ? 'Deselect all' : 'Select all'}
+                                            </button>
+                                            <span className="text-xs text-gray-500">
+                                                {selectedSubmissions.size} selected
+                                            </span>
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            disabled={selectedSubmissions.size === 0 || isDownloading}
+                                            onClick={handleBulkDownload}
+                                            className="gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white text-xs h-8"
+                                        >
+                                            {isDownloading ? (
+                                                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Downloading…</>
+                                            ) : (
+                                                <><Download className="w-3.5 h-3.5" /> Download {selectedSubmissions.size > 0 ? `(${selectedSubmissions.size})` : ''}</>
+                                            )}
+                                        </Button>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
 
@@ -1788,15 +1830,25 @@ export default function AssignmentDetailPageContent() {
                                     return (
                                         <Card
                                             key={entry.groupId}
-                                            className="overflow-hidden transition-shadow hover:shadow-md cursor-pointer"
-                                            onClick={() => navigateToGrading(latest.student_id)}
+                                            className={`overflow-hidden transition-shadow hover:shadow-md cursor-pointer ${downloadMode && selectedSubmissions.has(latest.id) ? 'ring-2 ring-[#862733]' : ''}`}
+                                            onClick={() => downloadMode ? toggleSubmissionSelect(latest.id, { stopPropagation: () => {} } as React.MouseEvent) : navigateToGrading(latest.student_id)}
                                         >
                                             <div className="p-4 hover:bg-gray-50/50 transition-colors">
                                                 <div className="flex items-start gap-4">
-                                                    {/* Group icon */}
+                                                    {/* Group icon / checkbox */}
+                                                    {downloadMode ? (
+                                                        <button
+                                                            onClick={(e) => toggleSubmissionSelect(latest.id, e)}
+                                                            className="shrink-0 mt-2 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+                                                            style={{ borderColor: selectedSubmissions.has(latest.id) ? '#862733' : '#d1d5db', backgroundColor: selectedSubmissions.has(latest.id) ? '#862733' : 'white' }}
+                                                        >
+                                                            {selectedSubmissions.has(latest.id) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                                        </button>
+                                                    ) : (
                                                     <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                                                         <Users className="w-5 h-5 text-primary" />
                                                     </div>
+                                                    )}
 
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -1851,15 +1903,17 @@ export default function AssignmentDetailPageContent() {
                                                         </span>
                                                     </div>
 
-                                                    <Button
-                                                        size="sm"
-                                                        onClick={(e) => { e.stopPropagation(); navigateToGrading(latest.student_id); }}
-                                                        className="h-8 px-3 text-xs shrink-0 gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white"
-                                                    >
-                                                        <Edit className="w-3.5 h-3.5" /> Grade
-                                                    </Button>
+                                                    {!downloadMode && (
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={(e) => { e.stopPropagation(); navigateToGrading(latest.student_id); }}
+                                                            className="h-8 px-3 text-xs shrink-0 gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white"
+                                                        >
+                                                            <Edit className="w-3.5 h-3.5" /> Grade
+                                                        </Button>
+                                                    )}
 
-                                                    <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                                                    {!downloadMode && <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
                                                 </div>
                                             </div>
                                         </Card>
@@ -1876,13 +1930,23 @@ export default function AssignmentDetailPageContent() {
                                     return (
                                         <Card
                                             key={group.student.id}
-                                            className={`overflow-hidden transition-shadow hover:shadow-md cursor-pointer ${hasFlagged ? 'border-l-4 border-l-red-500' : ''}`}
-                                            onClick={() => navigateToGrading(group.student.id)}
+                                            className={`overflow-hidden transition-shadow hover:shadow-md cursor-pointer ${hasFlagged ? 'border-l-4 border-l-red-500' : ''} ${downloadMode && selectedSubmissions.has(latest.id) ? 'ring-2 ring-[#862733]' : ''}`}
+                                            onClick={() => downloadMode ? toggleSubmissionSelect(latest.id, { stopPropagation: () => {} } as React.MouseEvent) : navigateToGrading(group.student.id)}
                                         >
                                             <div className="flex items-center gap-4 p-4 hover:bg-gray-50/50 transition-colors">
+                                                {downloadMode ? (
+                                                    <button
+                                                        onClick={(e) => toggleSubmissionSelect(latest.id, e)}
+                                                        className="shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors"
+                                                        style={{ borderColor: selectedSubmissions.has(latest.id) ? '#862733' : '#d1d5db', backgroundColor: selectedSubmissions.has(latest.id) ? '#862733' : 'white' }}
+                                                    >
+                                                        {selectedSubmissions.has(latest.id) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                                    </button>
+                                                ) : (
                                                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                                                     <User className="w-5 h-5 text-primary" />
                                                 </div>
+                                                )}
 
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 flex-wrap">
@@ -1943,15 +2007,17 @@ export default function AssignmentDetailPageContent() {
                                                     </span>
                                                 </div>
 
-                                                <Button
-                                                    size="sm"
-                                                    onClick={(e) => { e.stopPropagation(); navigateToGrading(group.student.id); }}
-                                                    className="h-8 px-3 text-xs shrink-0 gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white"
-                                                >
-                                                    <Edit className="w-3.5 h-3.5" /> Grade
-                                                </Button>
+                                                {!downloadMode && (
+                                                    <Button
+                                                        size="sm"
+                                                        onClick={(e) => { e.stopPropagation(); navigateToGrading(group.student.id); }}
+                                                        className="h-8 px-3 text-xs shrink-0 gap-1.5 bg-[#862733] hover:bg-[#a03040] text-white"
+                                                    >
+                                                        <Edit className="w-3.5 h-3.5" /> Grade
+                                                    </Button>
+                                                )}
 
-                                                <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
+                                                {!downloadMode && <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
                                             </div>
                                         </Card>
                                     );

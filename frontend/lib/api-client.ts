@@ -456,6 +456,17 @@ class ApiClient {
         return response.data;
     }
 
+    async downloadBulkSubmissions(assignmentId: number, submissionIds: number[]) {
+        const response = await this.client.get(
+            `/submissions/assignment/${assignmentId}/download-bulk`,
+            {
+                params: { submission_ids: submissionIds.join(',') },
+                responseType: 'blob',
+            }
+        );
+        return response.data;
+    }
+
     async getSubmissionFileContent(submissionId: number, fileId: number) {
         const response = await this.client.get(`/submissions/${submissionId}/files/${fileId}/content`);
         return response.data;
