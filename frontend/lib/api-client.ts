@@ -787,7 +787,8 @@ class ApiClient {
 
     // Language endpoints
     async getLanguages(activeOnly = true) {
-        const response = await this.client.get('/languages/', { params: { active_only: activeOnly } });
+        // No trailing slash — FastAPI route is GET /languages; /languages/ returns 404 when redirect_slashes=False
+        const response = await this.client.get('/languages', { params: { active_only: activeOnly } });
         return response.data;
     }
 
@@ -797,7 +798,7 @@ class ApiClient {
     }
 
     async createLanguage(data: any) {
-        const response = await this.client.post('/languages/', data);
+        const response = await this.client.post('/languages', data);
         return response.data;
     }
 

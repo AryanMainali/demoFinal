@@ -212,16 +212,14 @@ export function AssignmentUpsertPage({
         const loadLanguages = async () => {
             try {
                 const list = await apiClient.getLanguages();
-                // Filter to only Python and Java
-                const filtered = (list || []).filter((lang: Language) => {
-                    const name = lang.name?.toLowerCase() || '';
-                    return name.includes('python') || name.includes('java');
-                });
-                setLanguages(filtered);
+                const langs = Array.isArray(list) ? list : [];
+                setLanguages(langs);
                 // Default to Python if not in edit mode
-                if (!isEditMode && filtered.length > 0) {
-                    const pythonLang = filtered.find((l: Language) => l.name?.toLowerCase().includes('python'));
-                    const defaultLang = pythonLang || filtered[0];
+                if (!isEditMode && langs.length > 0) {
+                    const pythonLang = langs.find((l: Language) =>
+                        (l.name || '').toLowerCase().includes('python')
+                    );
+                    const defaultLang = pythonLang || langs[0];
                     setValue('language_id', defaultLang.id, { shouldValidate: false });
                 }
             } catch (e) {

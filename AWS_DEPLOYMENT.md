@@ -2,19 +2,21 @@
 
 ## Architecture Overview
 
+### Full stack on AWS (Next.js + API on EC2)
+
 ```
 Internet
    │
    ▼
-Route 53 (DNS)
+Route 53 (optional custom domain)
    │
    ▼
-ACM (SSL/TLS Certificate)
+ACM (SSL/TLS certificate — optional if using HTTPS on ALB)
    │
    ▼
-Application Load Balancer  (port 443 → HTTP)
-   ├── /api/*   → Backend Target Group  (EC2 / ECS)
-   └── /*       → Frontend Target Group (EC2 / ECS)
+Application Load Balancer  (HTTP 80 and/or HTTPS 443)
+   ├── /api/*   → Backend Target Group  (EC2 / ECS, port 8000)
+   └── /*       → Frontend Target Group (EC2 / ECS, port 3000)
          │
          ├── EC2: Backend  (FastAPI + Celery worker + Celery beat)
          ├── EC2: Frontend (Next.js)
@@ -22,6 +24,26 @@ Application Load Balancer  (port 443 → HTTP)
          ├── ElastiCache: Redis 7
          └── S3: File submissions + static assets
 ```
+
+### Frontend on Vercel (or another HTTPS host) + API on AWS
+
+Browsers must call your API over **HTTPS**. An ALB DNS name alone is usually **HTTP**, which causes **mixed content** when the UI is on **HTTPS**. **Amazon CloudFront** (CDN) in front of the ALB terminates **HTTPS** using the default **`https://dxxxxxxxx.cloudfront.net`** hostname — **no custom domain required**.
+
+```
+Internet (browser)
+   │
+   ├── https://*.vercel.app  → Vercel (Next.js)
+   │
+   └── https://dxxx.cloudfront.net  → CloudFront (HTTPS)
+              │
+              ▼ (HTTP to origin)
+         Application Load Balancer
+              │
+              ▼
+         EC2: FastAPI :8000
+```
+
+Use **Step 10 — CloudFront** after the ALB is created. Point `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_API_URL` at the **CloudFront** URL (`https` / `wss`), not the raw ALB `http` URL.
 
 ---
 
@@ -293,19 +315,25 @@ AWS_S3_BUCKET_NAME=kriterion-submissions-prod
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
-# ── CORS (replace with your real domain) ──
+# ── CORS (origins allowed to call the API — include your Vercel URL if UI is not on AWS) ──
 BACKEND_CORS_ORIGINS=["https://kriterion.vercel.app"]
 
-# ── Frontend (replace with your ALB DNS name) ──
-NEXT_PUBLIC_API_URL=http://kriterion-alb-643058633.us-east-1.elb.amazonaws.com/api/v1
-# Use 'ws://' and the same ALB DNS name. Do not include the /api/v1 path.
-NEXT_PUBLIC_WS_API_URL=http://kriterion-alb-643058633.us-east-1.elb.amazonaws.com/api/v1
+# ── Frontend build-time URLs (used when building the Next.js image on EC2) ──
+# If the UI is on Vercel: use your CloudFront HTTPS URL (Step 10), not raw ALB HTTP.
+# If the UI is on AWS behind the same ALB with HTTPS: use that public URL with https:// and wss://
+NEXT_PUBLIC_API_URL=https://dxxxxxxxxxxxx.cloudfront.net/api/v1
+NEXT_PUBLIC_WS_API_URL=wss://dxxxxxxxxxxxx.cloudfront.net
+# If you are not using CloudFront and only serve over HTTP on the ALB (not recommended for Vercel):
+# NEXT_PUBLIC_API_URL=http://YOUR_ALB_DNS.elb.amazonaws.com/api/v1
+# NEXT_PUBLIC_WS_API_URL=ws://YOUR_ALB_DNS.elb.amazonaws.com
 
 NEXT_PUBLIC_APP_NAME=Kriterion
 EOF
 
 echo "✅  .env.production created — review and fill in CHANGE_THIS_DB_PASSWORD"
 ```
+
+> **Vercel + AWS API:** Set `NEXT_PUBLIC_*` in the **Vercel project** environment variables to the same **CloudFront** URLs. `BACKEND_CORS_ORIGINS` must include your Vercel origin (e.g. `https://your-app.vercel.app`). You do **not** need to list CloudFront in CORS — the browser’s `Origin` header is still the Vercel site.
 
 ---
 
@@ -429,12 +457,22 @@ docker-compose -f docker-compose.prod.yml exec backend python scripts/seed_data.
 docker-compose -f docker-compose.prod.yml ps
 ```
 
+If the **UI is hosted on Vercel** (not on this EC2 instance), start only the backend stack and omit the `frontend` service:
+
+```bash
+docker-compose -f docker-compose.prod.yml --env-file .env up -d --build \
+  backend redis celery_worker celery_beat sandbox
+```
+
+Then use **Step 10 (CloudFront)** and register **only** the backend target group (port 8000) on the ALB.
+
 ---
 
 ## Step 9 — Set Up the Application Load Balancer
 
-⚠️ **STEP 9 to 12. Run these commands on your LOCAL machine, not the EC2 instance.**
+⚠️ **Steps 9–13 (and Step 10 CloudFront).** Run these commands on your **local** machine, not the EC2 instance.
 
+```bash
 # Get all subnet IDs (ALB needs at least 2 AZs)
 SUBNET_IDS=($(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
@@ -458,11 +496,11 @@ BACKEND_TG=$(aws elbv2 create-target-group \
   --port 8000 \
   --vpc-id $VPC_ID \
   --target-type instance \
-  --health-check-path /api/v1/health \
+  --health-check-path /health \
   --health-check-interval-seconds 30 \
   --query "TargetGroups[0].TargetGroupArn" --output text)
 
-# ── Frontend Target Group (Next.js on port 3000) ──
+# ── Frontend Target Group (Next.js on port 3000) — skip if frontend is only on Vercel ──
 FRONTEND_TG=$(aws elbv2 create-target-group \
   --name kriterion-frontend-tg \
   --protocol HTTP \
@@ -503,9 +541,92 @@ ALB_DNS=$(aws elbv2 describe-load-balancers \
 echo "ALB DNS: $ALB_DNS"
 ```
 
+If you **only** host the API on EC2 (frontend on Vercel), you can use a **single** backend target group and an HTTP listener that **forwards** to port 8000 instead of the two target groups above — or keep path rules if you add a frontend container later.
+
 ---
 
-## Step 10 — Request an SSL Certificate (ACM)
+## Step 10 — CloudFront in front of the ALB (HTTPS without a custom domain)
+
+**Amazon CloudFront** is an AWS CDN. For **HTTPS** clients (e.g. a Vercel app), put CloudFront in front of the ALB so viewers use **`https://dxxxxxxxxxxxx.cloudfront.net`** while CloudFront talks to the ALB over **HTTP** on port **80**.
+
+### Prerequisites
+
+- Step 9 is complete: you have `$ALB_ARN`, `$ALB_DNS`, and targets **healthy** (backend responds on `GET /health`).
+- The ALB security group allows **inbound TCP 80** from the internet (simplest while testing). Later you can restrict the ALB to [CloudFront’s managed prefix list](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/restrict-access-to-load-balancer.html).
+
+### If your HTTP listener redirects to HTTPS (Step 9 script)
+
+The Step 9 example creates an HTTP listener that **redirects** to port 443. That only works after you add an **HTTPS listener** with an ACM certificate (Step 11). For **CloudFront-only HTTPS** (no cert on the ALB), the origin must answer on **HTTP** without redirecting.
+
+Either:
+
+1. **Add** an HTTP listener on port **80** whose default action **forwards** to `$BACKEND_TG` (and optional path rules for `/api/*`), **or**
+2. **Replace** the redirect with a forward action until CloudFront is working.
+
+Example: forward HTTP to the backend target group (API-only deployment):
+
+```bash
+# List listeners — note the HTTP :80 listener ARN
+aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN
+
+# Replace LISTENER_ARN_FROM_80 with the ARN of the :80 listener
+# Replace $BACKEND_TG with your backend target group ARN
+aws elbv2 modify-listener \
+  --listener-arn LISTENER_ARN_FROM_80 \
+  --default-actions Type=forward,TargetGroupArn=$BACKEND_TG
+```
+
+For **full stack** (frontend + backend on EC2), keep your path-based rules; ensure **HTTP :80** forwards correctly to both target groups as needed for CloudFront (often CloudFront only fronts **API** traffic — use one behavior or path patterns).
+
+### Create the distribution (console)
+
+1. AWS Console → **CloudFront** → **Create distribution**.
+2. **Origin**
+   - **Origin domain**: select your **ALB** DNS name (`$ALB_DNS`), e.g. `kriterion-alb-xxxxx.us-east-1.elb.amazonaws.com`.
+   - **Protocol**: **HTTP only** (if the ALB listener is HTTP on port 80).
+   - **HTTP port**: **80**.
+3. **Default cache behavior**
+   - **Viewer protocol policy**: **Redirect HTTP to HTTPS**.
+   - **Allowed HTTP methods**: **GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE**.
+   - **Cache policy**: **CachingDisabled** (recommended for API responses — search managed policies for “CachingDisabled”).
+   - **Origin request policy**: a policy that forwards headers your API needs (e.g. **Authorization**, **Cookie**, **Origin** for CORS). Start with **AllViewer** or **AllViewerExceptHostHeader**; if auth or CORS fails, switch to a policy that forwards more headers.
+4. **WebSockets** (if you use `NEXT_PUBLIC_WS_API_URL`): CloudFront forwards upgrade requests; the same origin request policy should allow **`Sec-WebSocket-***` headers (full viewer policies usually do).
+5. **Settings**
+   - **Alternate domain name (CNAME)**: leave empty if you are not using a custom domain.
+   - **Custom SSL certificate**: default **CloudFront certificate** (covers `*.cloudfront.net`).
+6. **Create distribution** and wait until status is **Deployed** (often several minutes).
+
+Note the **Distribution domain name**, e.g. `d111111abcdef8.cloudfront.net`.
+
+### Verify
+
+```bash
+export CF_DOMAIN=d111111abcdef8.cloudfront.net   # your distribution
+
+curl -sS "https://${CF_DOMAIN}/health"
+```
+
+You should see JSON from FastAPI. Then set:
+
+- `NEXT_PUBLIC_API_URL=https://${CF_DOMAIN}/api/v1`
+- `NEXT_PUBLIC_WS_API_URL=wss://${CF_DOMAIN}`
+
+Keep **`BACKEND_CORS_ORIGINS`** on the backend as your **Vercel** origin(s), e.g. `["https://your-app.vercel.app"]`.
+
+### Optional: AWS CLI
+
+Managed policy IDs vary; list them first:
+
+```bash
+aws cloudfront list-cache-policies --type managed --query "CachePolicyList.Items[?CachePolicy.CachePolicyConfig.Name=='Managed-CachingDisabled'].CachePolicy.Id" --output text
+aws cloudfront list-origin-request-policies --type managed --query "OriginRequestPolicyList.Items[?OriginRequestPolicy.OriginRequestPolicyConfig.Name=='Managed-AllViewer'].OriginRequestPolicy.Id" --output text
+```
+
+Use the console for the first distribution unless you are automating; the CLI `create-distribution` JSON is long and easy to misconfigure.
+
+---
+
+## Step 11 — Request an SSL Certificate (ACM)
 
 ```bash
 # Request the certificate (replace with your real domain)
@@ -521,9 +642,9 @@ aws acm describe-certificate \
   --query "Certificate.DomainValidationOptions[0].ResourceRecord"
 ```
 
-> **NOTE:** Since you are not using a custom domain, you can **SKIP Step 10 and Step 11**.
-> You will access your application via the ALB's DNS name over HTTP.
-
+> **NOTE:** If you use **CloudFront (Step 10)** for HTTPS and do **not** need HTTPS **on the ALB itself**, you can **skip this step and Step 12** until you add a custom domain. Ensure the ALB still accepts **HTTP** from CloudFront as the origin.
+>
+> If you use a **custom domain** on the ALB with ACM, complete this step and Step 12.
 
 Add the CNAME record shown above to your domain's DNS. Once validated (~5 min):
 
@@ -538,16 +659,18 @@ HTTPS_LISTENER=$(aws elbv2 create-listener \
   --default-actions Type=forward,TargetGroupArn=$FRONTEND_TG \
   --query "Listeners[0].ListenerArn" --output text)
 
-# Route /api/* and /docs to backend
+# Route /api/* (includes /api/docs, /api/openapi.json) to backend
 aws elbv2 create-rule \
   --listener-arn $HTTPS_LISTENER \
   --priority 10 \
-  --conditions '[{"Field":"path-pattern","Values":["/api/*","/docs","/openapi.json"]}]' \
+  --conditions '[{"Field":"path-pattern","Values":["/api/*"]}]' \
   --actions Type=forward,TargetGroupArn=$BACKEND_TG
 ```
 
 
-## Step 11 — Point Your Domain to the ALB (Route 53) NOTE: This step is not needed if you are not using a custom domain.
+## Step 12 — Point Your Domain to the ALB (Route 53)
+
+Skip if you are not using a custom domain (you can use the ALB DNS name for testing, or **CloudFront’s** `dxxx.cloudfront.net` for HTTPS).
 
 ```bash
 # Get your hosted zone ID
@@ -580,7 +703,7 @@ aws route53 change-resource-record-sets \
 
 ---
 
-## Step 12 — Set Up Auto-Start on Reboot
+## Step 13 — Set Up Auto-Start on Reboot
 
 On the EC2 instance (via SSM):
 ```bash
@@ -626,8 +749,10 @@ git pull
 docker-compose -f docker-compose.prod.yml up -d --build
 docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
 
-# Check health
-curl https://kriterion.yourdomain.com/api/v1/health
+# Check health (FastAPI exposes /health at the app root)
+curl https://kriterion.yourdomain.com/health
+# Or via CloudFront:
+# curl https://dxxxxxxxxxxxx.cloudfront.net/health
 
 # Connect to the database
 docker-compose -f docker-compose.prod.yml exec backend \
@@ -644,10 +769,11 @@ docker-compose -f docker-compose.prod.yml exec backend \
 | RDS db.t3.micro      | PostgreSQL   | ~$15/month    |
 | ElastiCache t3.micro | Redis        | ~$12/month    |
 | ALB                  | ~1000 req/hr | ~$20/month    |
+| CloudFront           | low traffic  | ~$1–5/month (varies by data transfer) |
 | S3                   | 10 GB        | ~$0.25/month  |
 | Route 53             | 1 zone       | ~$0.50/month  |
 | ACM                  | 1 cert       | **Free**      |
-| **Total**            |              | **~$78/month**|
+| **Total**            |              | **~$79–85/month** (add CloudFront if used) |
 
 > 💡 **Save money:** Stop RDS and EC2 when not in use during development.
 > ```bash
@@ -684,3 +810,17 @@ docker-compose -f docker-compose.prod.yml logs celery_worker
 docker-compose -f docker-compose.prod.yml exec backend alembic upgrade head
 docker-compose -f docker-compose.prod.yml exec backend alembic current
 ```
+
+**CloudFront returns 502 / 403 or curl to `/health` fails**
+```bash
+# Confirm the ALB serves HTTP directly (replace with your ALB DNS)
+curl -sS "http://YOUR_ALB_DNS/health"
+
+# If that works but CloudFront does not: check origin domain, port 80, and
+# that the HTTP listener forwards to the backend target group (not only a redirect to HTTPS).
+aws cloudfront get-distribution --id YOUR_DISTRIBUTION_ID
+```
+
+**CORS errors from the Vercel app**
+- Ensure `BACKEND_CORS_ORIGINS` includes `https://your-app.vercel.app` (the browser Origin), not only the CloudFront URL.
+- Use an origin request policy on CloudFront that forwards the **Origin** header if the backend needs it.

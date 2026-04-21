@@ -33,7 +33,7 @@ RUN echo "=== Starting Build ===" && \
     echo "=== Contents of /app/.next/ ===" && \
     ls -la /app/.next/ && \
     echo "=== Contents of /app/.next/standalone/ ===" && \
-    ls -la /app/.next/standalone/ || echo "ERROR: /app/.next/standalone not found"
+    ls -la /app/.next/standalone/
 
 # Production image, copy all the files and run next
 FROM base AS runner
@@ -46,7 +46,7 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Copy public
-COPY --from=builder /app/public ./public 2>/dev/null || true
+COPY --from=builder /app/public ./public
 
 # Create and set permissions for .next
 RUN mkdir -p .next && chown -R nextjs:nodejs .next
