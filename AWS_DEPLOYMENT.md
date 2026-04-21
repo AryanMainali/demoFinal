@@ -518,6 +518,10 @@ aws acm describe-certificate \
   --query "Certificate.DomainValidationOptions[0].ResourceRecord"
 ```
 
+> **NOTE:** Since you are not using a custom domain, you can **SKIP Step 10 and Step 11**.
+> You will access your application via the ALB's DNS name over HTTP.
+
+
 Add the CNAME record shown above to your domain's DNS. Once validated (~5 min):
 
 ```bash
@@ -539,9 +543,8 @@ aws elbv2 create-rule \
   --actions Type=forward,TargetGroupArn=$BACKEND_TG
 ```
 
----
 
-## Step 11 — Point Your Domain to the ALB (Route 53)
+## Step 11 — Point Your Domain to the ALB (Route 53) NOTE: This step is not needed if you are not using a custom domain.
 
 ```bash
 # Get your hosted zone ID

@@ -19,6 +19,22 @@ services:
       - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_WS_API_URL: ${NEXT_PUBLIC_WS_API_URL}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Kriterion}
+    container_name: kriterion-frontend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
   celery_worker:
     build:
       context: ./backend
