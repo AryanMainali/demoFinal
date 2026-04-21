@@ -82,12 +82,18 @@ class ApiClient {
     getInteractiveRunWebSocketUrl(assignmentId: number): string {
         const token = this.getAccessToken();
 
+        const appendToken = (url: string) => {
+            if (!token) return url;
+            const sep = url.includes('?') ? '&' : '?';
+            return `${url}${sep}token=${encodeURIComponent(token)}`;
+        };
+
         const toWsUrl = (rawBase: string): string => {
             const normalizedBase = rawBase.endsWith('/api/v1')
                 ? rawBase
                 : `${rawBase.replace(/\/$/, '')}/api/v1`;
 
-            const absolute = /^https?:\/\//i.test(normalizedBase)
+            const absolute = /^(https?|wss?):\/\//i.test(normalizedBase)
                 ? normalizedBase
                 : (typeof window !== 'undefined'
                     ? new URL(normalizedBase, window.location.origin).toString()
@@ -100,7 +106,11 @@ class ApiClient {
                 apiUrl.protocol = 'https:';
             }
 
-            apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+            if (apiUrl.protocol === 'https:' || apiUrl.protocol === 'wss:') {
+                apiUrl.protocol = 'wss:';
+            } else {
+                apiUrl.protocol = 'ws:';
+            }
             apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/assignments/${assignmentId}/run/interactive`;
             if (token) {
                 apiUrl.searchParams.set('token', token);
@@ -114,9 +124,14 @@ class ApiClient {
             }
             return toWsUrl(API_BASE_URL);
         } catch {
-            const base = API_BASE_URL.replace(/^http/, 'ws');
-            const q = token ? `?token=${encodeURIComponent(token)}` : '';
-            return `${base}/assignments/${assignmentId}/run/interactive${q}`;
+            // Final fallback that still guarantees an absolute URL.
+            const baseOrigin = (typeof window !== 'undefined' && window.location?.origin)
+                ? window.location.origin
+                : 'http://localhost:3000';
+            const fallback = new URL('/api/v1', baseOrigin);
+            fallback.protocol = fallback.protocol === 'https:' ? 'wss:' : 'ws:';
+            fallback.pathname = `${fallback.pathname.replace(/\/$/, '')}/assignments/${assignmentId}/run/interactive`;
+            return appendToken(fallback.toString());
         }
     }
 
