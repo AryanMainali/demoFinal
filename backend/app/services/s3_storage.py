@@ -29,20 +29,35 @@ class S3StorageService:
             key = getattr(settings, 'AWS_ACCESS_KEY_ID', '') or ''
             secret = getattr(settings, 'AWS_SECRET_ACCESS_KEY', '') or ''
             region = getattr(settings, 'AWS_REGION', 'us-east-1') or 'us-east-1'
-            if not key or not secret:
-                raise Exception(
-                    "AWS credentials not configured. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env"
-                )
-            self._s3_client = boto3.client(
-                's3',
-                aws_access_key_id=key.strip(),
-                aws_secret_access_key=secret.strip(),
-                region_name=region.strip(),
-                config=Config(
-                    retries={'max_attempts': 3, 'mode': 'standard'},
-                    signature_version='s3v4'
-                )
+            cfg = Config(
+                retries={'max_attempts': 3, 'mode': 'standard'},
+                signature_version='s3v4'
             )
+
+            key = key.strip()
+            secret = secret.strip()
+            region = region.strip() or 'us-east-1'
+
+            if key and secret:
+                # Explicit credentials from environment (local/dev pattern).
+                self._s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=key,
+                    aws_secret_access_key=secret,
+                    region_name=region,
+                    config=cfg
+                )
+            elif key or secret:
+                raise Exception(
+                    "Incomplete AWS credentials: set both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or neither to use IAM role/default chain"
+                )
+            else:
+                # Production pattern: rely on AWS default credential chain (EC2/ECS role, env vars, shared config).
+                self._s3_client = boto3.client(
+                    's3',
+                    region_name=region,
+                    config=cfg
+                )
         return self._s3_client
 
     @property

@@ -14,6 +14,7 @@ export function useInteractiveTerminal({ assignmentId, onError }: UseInteractive
     const [running, setRunning] = useState(false);
     const [exitCode, setExitCode] = useState<number | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
+    const wsUrlRef = useRef<string | null>(null);
     const outputEndRef = useRef<HTMLDivElement>(null);
 
     const start = useCallback(
@@ -25,6 +26,7 @@ export function useInteractiveTerminal({ assignmentId, onError }: UseInteractive
             setRunning(true);
 
             const url = apiClient.getInteractiveRunWebSocketUrl(assignmentId);
+            wsUrlRef.current = url;
             let ws: WebSocket;
             try {
                 ws = new WebSocket(url);
@@ -68,13 +70,21 @@ export function useInteractiveTerminal({ assignmentId, onError }: UseInteractive
             };
 
             ws.onerror = () => {
-                setOutput((prev) => [...prev, { type: 'error', text: 'WebSocket error' }]);
+                const attempted = wsUrlRef.current ? ` (${wsUrlRef.current})` : '';
+                const message = `WebSocket connection failed${attempted}`;
+                setOutput((prev) => [...prev, { type: 'error', text: message }]);
                 setRunning(false);
                 wsRef.current = null;
-                onError?.('WebSocket error');
+                onError?.(message);
             };
 
-            ws.onclose = () => {
+            ws.onclose = (event) => {
+                if (event.code !== 1000) {
+                    const reason = event.reason ? `: ${event.reason}` : '';
+                    const message = `Interactive session closed (${event.code})${reason}`;
+                    setOutput((prev) => [...prev, { type: 'error', text: message }]);
+                    onError?.(message);
+                }
                 if (wsRef.current === ws) wsRef.current = null;
                 setRunning((prev) => {
                     if (prev) setExitCode(-1);
@@ -110,6 +120,7 @@ export function useInteractiveTerminal({ assignmentId, onError }: UseInteractive
                 wsRef.current.close();
                 wsRef.current = null;
             }
+            wsUrlRef.current = null;
         };
     }, []);
 

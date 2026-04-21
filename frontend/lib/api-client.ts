@@ -79,10 +79,27 @@ class ApiClient {
 
     /** WebSocket URL for interactive run (process blocks on input; send stdin line-by-line). */
     getInteractiveRunWebSocketUrl(assignmentId: number): string {
-        const base = API_BASE_URL.replace(/^http/, 'ws');
         const token = this.getAccessToken();
-        const q = token ? `?token=${encodeURIComponent(token)}` : '';
-        return `${base}/assignments/${assignmentId}/run/interactive${q}`;
+
+        try {
+            const apiUrl = new URL(API_BASE_URL);
+
+            // Browsers block ws:// from an https:// page, so upgrade protocol for handshake safety.
+            if (typeof window !== 'undefined' && window.location.protocol === 'https:' && apiUrl.protocol === 'http:') {
+                apiUrl.protocol = 'https:';
+            }
+
+            apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+            apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/assignments/${assignmentId}/run/interactive`;
+            if (token) {
+                apiUrl.searchParams.set('token', token);
+            }
+            return apiUrl.toString();
+        } catch {
+            const base = API_BASE_URL.replace(/^http/, 'ws');
+            const q = token ? `?token=${encodeURIComponent(token)}` : '';
+            return `${base}/assignments/${assignmentId}/run/interactive${q}`;
+        }
     }
 
     private getRefreshToken(): string | null {
