@@ -24,8 +24,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-        NEXT_PUBLIC_WS_API_URL: ${NEXT_PUBLIC_WS_API_URL}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://kriterion-alb-643058633.us-east-1.elb.amazonaws.com/api/v1}
+        NEXT_PUBLIC_WS_API_URL: ${NEXT_PUBLIC_WS_API_URL:-http://kriterion-alb-643058633.us-east-1.elb.amazonaws.com/api/v1}
         NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Kriterion}
     container_name: kriterion-frontend
     restart: unless-stopped

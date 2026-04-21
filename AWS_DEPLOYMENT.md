@@ -296,8 +296,11 @@ AWS_SECRET_ACCESS_KEY=
 # ── CORS (replace with your real domain) ──
 BACKEND_CORS_ORIGINS=["https://kriterion.vercel.app"]
 
-# ── Frontend ──
-NEXT_PUBLIC_API_URL=https://kriterion.yourdomain.com/api/v1
+# ── Frontend (replace with your ALB DNS name) ──
+NEXT_PUBLIC_API_URL=http://kriterion-alb-643058633.us-east-1.elb.amazonaws.com/api/v1
+# Use 'ws://' and the same ALB DNS name. Do not include the /api/v1 path.
+NEXT_PUBLIC_WS_API_URL=http://kriterion-alb-643058633.us-east-1.elb.amazonaws.com/api/v1
+
 NEXT_PUBLIC_APP_NAME=Kriterion
 EOF
 
