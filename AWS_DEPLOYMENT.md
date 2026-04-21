@@ -380,6 +380,13 @@ sudo curl -L \
   -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
 
+# ── Install Docker Buildx (required for compose build) ──
+curl -L https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-amd64 \
+  -o /tmp/buildx
+chmod +x /tmp/buildx
+mkdir -p ~/.docker/cli-plugins
+sudo mv /tmp/buildx /usr/libexec/docker/cli-plugins/docker-buildx
+
 # ── Clone the repo ──
 git clone https://github.com/YOUR_ORG/kriterion.git /home/ec2-user/kriterion
 cd /home/ec2-user/kriterion
@@ -423,21 +430,23 @@ docker-compose -f docker-compose.prod.yml ps
 
 ## Step 9 — Set Up the Application Load Balancer
 
-```bash
+⚠️ **STEP 9 to 12. Run these commands on your LOCAL machine, not the EC2 instance.**
+
 # Get all subnet IDs (ALB needs at least 2 AZs)
-SUBNET_IDS=$(aws ec2 describe-subnets \
+SUBNET_IDS=($(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" \
-  --query "Subnets[*].SubnetId" --output text)
+  --query "Subnets[].SubnetId" \
+  --output text))
 
 # Create the ALB
 ALB_ARN=$(aws elbv2 create-load-balancer \
   --name kriterion-alb \
-  --subnets $SUBNET_IDS \
-  --security-groups $ALB_SG \
+  --subnets "${SUBNET_IDS[@]}" \
+  --security-groups "$ALB_SG" \
   --scheme internet-facing \
   --type application \
-  --query "LoadBalancers[0].LoadBalancerArn" --output text)
-echo "ALB ARN: $ALB_ARN"
+  --query "LoadBalancers[0].LoadBalancerArn" \
+  --output text)
 
 # ── Backend Target Group (FastAPI on port 8000) ──
 BACKEND_TG=$(aws elbv2 create-target-group \

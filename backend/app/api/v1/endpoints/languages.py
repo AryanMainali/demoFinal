@@ -39,7 +39,7 @@ class LanguageUpdateRequest(BaseModel):
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=List[LanguageWithExtensions])
+@router.get("", response_model=List[LanguageWithExtensions])
 def get_languages(
     db: Session = Depends(get_db),
     active_only: bool = True,
@@ -69,7 +69,7 @@ def get_language(
     return language
 
 
-@router.post("/", response_model=LanguageSchema, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=LanguageSchema, status_code=status.HTTP_201_CREATED)
 def create_language(
     body: LanguageCreateRequest,
     db: Session = Depends(get_db),
