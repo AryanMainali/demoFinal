@@ -2,6 +2,7 @@ import axios, { AxiosInstance} from 'axios';
 
 const PUBLIC_API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_BASE_URL = PUBLIC_API.endsWith('/api/v1') ? PUBLIC_API : `${PUBLIC_API.replace(/\/$/, '')}/api/v1`;
+const PUBLIC_WS_API = process.env.NEXT_PUBLIC_WS_API_URL || '';
 
 class ApiClient {
     private client: AxiosInstance;
@@ -81,8 +82,18 @@ class ApiClient {
     getInteractiveRunWebSocketUrl(assignmentId: number): string {
         const token = this.getAccessToken();
 
-        try {
-            const apiUrl = new URL(API_BASE_URL);
+        const toWsUrl = (rawBase: string): string => {
+            const normalizedBase = rawBase.endsWith('/api/v1')
+                ? rawBase
+                : `${rawBase.replace(/\/$/, '')}/api/v1`;
+
+            const absolute = /^https?:\/\//i.test(normalizedBase)
+                ? normalizedBase
+                : (typeof window !== 'undefined'
+                    ? new URL(normalizedBase, window.location.origin).toString()
+                    : normalizedBase);
+
+            const apiUrl = new URL(absolute);
 
             // Browsers block ws:// from an https:// page, so upgrade protocol for handshake safety.
             if (typeof window !== 'undefined' && window.location.protocol === 'https:' && apiUrl.protocol === 'http:') {
@@ -95,6 +106,13 @@ class ApiClient {
                 apiUrl.searchParams.set('token', token);
             }
             return apiUrl.toString();
+        };
+
+        try {
+            if (PUBLIC_WS_API.trim()) {
+                return toWsUrl(PUBLIC_WS_API.trim());
+            }
+            return toWsUrl(API_BASE_URL);
         } catch {
             const base = API_BASE_URL.replace(/^http/, 'ws');
             const q = token ? `?token=${encodeURIComponent(token)}` : '';
