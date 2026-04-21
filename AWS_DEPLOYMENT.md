@@ -294,7 +294,7 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
 # ── CORS (replace with your real domain) ──
-BACKEND_CORS_ORIGINS=["https://kriterion.yourdomain.com"]
+BACKEND_CORS_ORIGINS=["https://kriterion.vercel.app"]
 
 # ── Frontend ──
 NEXT_PUBLIC_API_URL=https://kriterion.yourdomain.com/api/v1

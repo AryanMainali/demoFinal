@@ -45,45 +45,61 @@ function isProtectedPath(pathname: string): boolean {
   );
 }
 
+function getRole(rawRole: string | undefined): string {
+  return (rawRole ?? '').trim().toUpperCase();
+}
+
+function buildRedirect(request: NextRequest, pathname: string): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  return NextResponse.redirect(url);
+}
+
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  try {
+    const { pathname } = request.nextUrl;
 
-  // Always allow public paths and assets
-  if (isPublicPath(pathname) && pathname !== '/login') {
-    return NextResponse.next();
-  }
-
-  const isAuthenticated = request.cookies.get('kriterion_auth')?.value === '1';
-  const role = (request.cookies.get('kriterion_role')?.value ?? '').trim();
-
-  // Authenticated user hitting /login → redirect to their dashboard
-  if (pathname === '/login' && isAuthenticated && role) {
-    const home = ROLE_HOME[role];
-    if (home) {
-      return NextResponse.redirect(new URL(home, request.url));
+    // Always allow public paths and assets
+    if (isPublicPath(pathname) && pathname !== '/login') {
+      return NextResponse.next();
     }
-  }
 
-  // Not a protected route → allow
-  if (!isProtectedPath(pathname)) {
+    const isAuthenticated = request.cookies.get('kriterion_auth')?.value === '1';
+    const role = getRole(request.cookies.get('kriterion_role')?.value);
+
+    // Authenticated user hitting /login → redirect to their dashboard
+    if (pathname === '/login' && isAuthenticated && role) {
+      const home = ROLE_HOME[role];
+      if (home) {
+        return buildRedirect(request, home);
+      }
+    }
+
+    // Not a protected route → allow
+    if (!isProtectedPath(pathname)) {
+      return NextResponse.next();
+    }
+
+    // Unauthenticated user hitting a protected route → login
+    if (!isAuthenticated) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = '/login';
+      loginUrl.searchParams.set('returnUrl', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+
+    // Authenticated - enforce role boundaries
+    const allowedPrefix = ROLE_PREFIX[role];
+    if (!allowedPrefix || !pathname.startsWith(allowedPrefix)) {
+      const home = ROLE_HOME[role] ?? '/login';
+      return buildRedirect(request, home);
+    }
+
+    return NextResponse.next();
+  } catch (error) {
+    console.error('middleware_error', error);
     return NextResponse.next();
   }
-
-  // Unauthenticated user hitting a protected route → login
-  if (!isAuthenticated) {
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('returnUrl', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Authenticated - enforce role boundaries
-  const allowedPrefix = ROLE_PREFIX[role];
-  if (!allowedPrefix || !pathname.startsWith(allowedPrefix)) {
-    const home = ROLE_HOME[role] ?? '/login';
-    return NextResponse.redirect(new URL(home, request.url));
-  }
-
-  return NextResponse.next();
 }
 
 export const config = {
