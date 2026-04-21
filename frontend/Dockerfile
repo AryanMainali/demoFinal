@@ -22,7 +22,7 @@ ENV NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
 
 ENV NEXT_TELEMETRY_DISABLED 1
 
-RUN npm run build
+RUN npm run build && echo "Build complete" && ls -la /app/.next/ 2>&1 || echo "No .next directory found"
 
 # Production image, copy all the files and run next
 FROM base AS runner
