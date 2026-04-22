@@ -693,8 +693,23 @@ async def grade_submission(
 
         return result
     except Exception as e:
+        # Return a structured error payload so bulk grading can surface the reason per-student,
+        # instead of failing the whole call with a 500 and showing stale scores in the UI.
         logger.error(f"Error grading submission {submission_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Grading failed: {str(e)}")
+        try:
+            db.refresh(submission)
+        except Exception:
+            pass
+
+        return {
+            "submission_id": submission_id,
+            "status": "error",
+            "test_score": getattr(submission, "test_score", None) or 0,
+            "tests_passed": getattr(submission, "tests_passed", None) or 0,
+            "total_tests": getattr(submission, "tests_total", None) or 0,
+            "final_score": getattr(submission, "final_score", None),
+            "error_message": getattr(submission, "error_message", None) or str(e),
+        }
 
 
 @router.put("/{submission_id}/override-score")

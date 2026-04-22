@@ -516,6 +516,10 @@ export default function AssignmentDetailPageContent() {
                         finalScore: typeof result?.final_score === 'number' ? result.final_score : latest.final_score,
                         testsPassed: typeof result?.tests_passed === 'number' ? result.tests_passed : latest.tests_passed,
                         totalTests: typeof result?.total_tests === 'number' ? result.total_tests : latest.tests_total,
+                        errorMessage:
+                            typeof result?.error_message === 'string'
+                                ? result.error_message
+                                : undefined,
                     },
                 ]);
             } catch (err: any) {
@@ -527,9 +531,11 @@ export default function AssignmentDetailPageContent() {
                         studentName: group.student.full_name,
                         submissionId: latest.id,
                         status: 'error',
-                        finalScore: latest.final_score,
-                        testsPassed: latest.tests_passed,
-                        totalTests: latest.tests_total,
+                        // Avoid showing a stale manual grade when the re-grade errored.
+                        finalScore: undefined,
+                        testScore: undefined,
+                        testsPassed: undefined,
+                        totalTests: undefined,
                         errorMessage: message,
                     },
                 ]);
@@ -1638,7 +1644,9 @@ export default function AssignmentDetailPageContent() {
                                                                         : '-'}
                                                                 </td>
                                                                 <td className="px-4 py-2.5 text-gray-600">
-                                                                    {typeof r.finalScore === 'number'
+                                                                    {r.status === 'error'
+                                                                        ? '-'
+                                                                        : typeof r.finalScore === 'number'
                                                                         ? `${r.finalScore.toFixed(1)}%`
                                                                         : typeof r.testScore === 'number'
                                                                             ? `${r.testScore.toFixed(1)}%`
