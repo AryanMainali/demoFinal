@@ -766,10 +766,13 @@ async def websocket_interactive_run(websocket: WebSocket, assignment_id: int):
                 return
 
         temp_dir = tempfile.mkdtemp(prefix="assignment_interactive_", dir=settings.SANDBOX_WORK_DIR)
+        # mkdtemp defaults to 0700; sandbox runs as uid 1000 so make it traversable/readable
+        os.chmod(temp_dir, 0o755)
         for f in files:
             path = os.path.join(temp_dir, f["name"])
             with open(path, "w", encoding="utf-8") as fp:
                 fp.write(f["content"])
+            os.chmod(path, 0o644)
 
         lang = (assignment.language.name or "python").lower().strip()
         cmd = sandbox_executor.get_exec_command(lang, temp_dir, None)
@@ -972,12 +975,14 @@ async def run_assignment_code(
     temp_dir = None
     try:
         temp_dir = tempfile.mkdtemp(prefix="assignment_run_", dir=settings.SANDBOX_WORK_DIR)
+        os.chmod(temp_dir, 0o755)
         
         # Write files to temp directory
         for file in request.files:
             file_path = os.path.join(temp_dir, file.name)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(file.content)
+            os.chmod(file_path, 0o644)
         
         # Optional input file (e.g. input.txt) for file-based test input
         if request.input_file and request.input_file.name and request.input_file.name.strip():
@@ -989,6 +994,7 @@ async def run_assignment_code(
             input_path = os.path.join(temp_dir, input_name)
             with open(input_path, 'w', encoding='utf-8') as f:
                 f.write(request.input_file.content)
+            os.chmod(input_path, 0o644)
         
         # Terminal mode: when stdin is provided, run once with that input (like VS Code / manual run)
         stdin_provided = bool(request.stdin and str(request.stdin).strip())

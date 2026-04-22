@@ -232,12 +232,16 @@ class GradingService:
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp(prefix="grading_", dir=settings.SANDBOX_WORK_DIR)
+            # mkdtemp defaults to 0700; sandbox runs as uid 1000 so make it traversable/readable
+            os.chmod(temp_dir, 0o755)
             language = assignment.language
             ext = (language.file_extension if language else ".py") or ".py"
 
             if submission.code:
                 main_name = f"main{ext}" if not ext.startswith(".") else f"main{ext}"
-                (Path(temp_dir) / main_name).write_text(submission.code, encoding="utf-8")
+                out_path = Path(temp_dir) / main_name
+                out_path.write_text(submission.code, encoding="utf-8")
+                os.chmod(str(out_path), 0o644)
                 return temp_dir
 
             if not submission.files:
@@ -250,6 +254,7 @@ class GradingService:
                     content = ""
                 out_path = Path(temp_dir) / file_record.filename
                 out_path.write_text(content, encoding="utf-8")
+                os.chmod(str(out_path), 0o644)
 
             return temp_dir
         except Exception as e:

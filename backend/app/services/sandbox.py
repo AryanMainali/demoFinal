@@ -130,8 +130,13 @@ class SandboxExecutor:
                     java_cmd = f"{java_home}/bin/java"
             except Exception:
                 pass
-            
-            return f"{javac_cmd} *.java && {java_cmd} {main_class} {a}".strip()
+
+            # Compile to a writable temp dir inside the sandbox container. The workspace is mounted read-only.
+            # This avoids permission issues and keeps student source immutable during execution.
+            return (
+                f"OUT=/tmp/kriterion_classes && mkdir -p \"$OUT\" && "
+                f"{javac_cmd} -d \"$OUT\" *.java && {java_cmd} -cp \"$OUT\" {main_class} {a}"
+            ).strip()
 
         return "echo 'Unsupported language (only python and java are enabled)'"
 

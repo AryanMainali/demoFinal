@@ -113,6 +113,7 @@ def run_code_task(
         
         # Create temp directory for code
         temp_dir = tempfile.mkdtemp(prefix=f"celery_run_{assignment_id}_", dir=settings.SANDBOX_WORK_DIR)
+        os.chmod(temp_dir, 0o755)
         
         try:
             # Write files
@@ -120,6 +121,7 @@ def run_code_task(
                 file_path = os.path.join(temp_dir, file["name"])
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(file["content"])
+                os.chmod(file_path, 0o644)
             
             # Run tests
             all_results = []
@@ -283,6 +285,7 @@ def compile_check_task(
             }
         
         temp_dir = tempfile.mkdtemp(prefix=f"celery_compile_{assignment_id}_", dir=settings.SANDBOX_WORK_DIR)
+        os.chmod(temp_dir, 0o755)
         
         try:
             # Write files
@@ -290,6 +293,7 @@ def compile_check_task(
                 file_path = os.path.join(temp_dir, file["name"])
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(file["content"])
+                os.chmod(file_path, 0o644)
             
             # Try to compile/run
             language = assignment.language.name.lower() if assignment.language else "python"
