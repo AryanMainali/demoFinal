@@ -46,6 +46,8 @@ import {
     ArrowLeftRight,
     Users,
     Upload as UploadIcon,
+    Pencil,
+    Lock,
 } from 'lucide-react';
 
 /* ====================================================================
@@ -308,6 +310,11 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
     const [uploadedDatasets, setUploadedDatasets] = useState<{ name: string; content: string }[]>([]);
     const [datasetRunResults, setDatasetRunResults] = useState<{ name: string; stdout?: string; stderr?: string; compilation_status?: string; success: boolean }[]>([]);
     const [viewingTestResult, setViewingTestResult] = useState<TestResultOut | null>(null);
+
+    // Faculty "edit to run" mode (does NOT save changes to the student's submission)
+    const [facultyEditMode, setFacultyEditMode] = useState(false);
+    const [editedFileIds, setEditedFileIds] = useState<Set<number>>(new Set());
+
     const gutterRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<HTMLTextAreaElement>(null);
     const testFileInputRef = useRef<HTMLInputElement>(null);
@@ -595,6 +602,8 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
         setFileContents({});
         setSelectedFileId(null);
         setRunResult(null);
+        setFacultyEditMode(false);
+        setEditedFileIds(new Set());
 
         const files = selectedSub.files || [];
         const testResults = selectedSub.test_results || [];
@@ -660,6 +669,11 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             const existing = prev[fileId];
             if (!existing) return prev;
             return { ...prev, [fileId]: { ...existing, content: newContent } };
+        });
+        setEditedFileIds(prev => {
+            const next = new Set(prev);
+            next.add(fileId);
+            return next;
         });
     }, []);
 
@@ -1387,11 +1401,36 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                         }`}>
                                     <FileCode className="w-3.5 h-3.5 text-[#858585]" />
                                     <span className="font-mono">{file.filename}</span>
+                                    {editedFileIds.has(file.id) && (
+                                        <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded bg-[#862733]/25 text-[#ce9178] border border-[#862733]/30">
+                                            edited
+                                        </span>
+                                    )}
                                 </div>
                             ))}
                             {subFiles.length === 0 && (
                                 <div className="px-3 py-1.5 text-[12px] text-[#858585]">No files</div>
                             )}
+
+                            <div className="ml-auto px-2 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setFacultyEditMode(v => !v)}
+                                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] border transition-colors ${
+                                        facultyEditMode
+                                            ? 'bg-[#1e1e1e] text-white border-[#862733]/60 hover:border-[#862733]'
+                                            : 'bg-[#2d2d2d] text-[#cccccc] border-[#3c3c3c] hover:bg-[#3c3c3c]'
+                                    }`}
+                                    title={
+                                        facultyEditMode
+                                            ? 'Editing enabled (for running only). Changes are not saved to the submission.'
+                                            : 'Enable editing (for running only).'
+                                    }
+                                >
+                                    {facultyEditMode ? <Pencil className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                                    {facultyEditMode ? 'Editing: ON' : 'Editing: OFF'}
+                                </button>
+                            </div>
                         </div>
                     )}
 
@@ -1483,7 +1522,11 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
                                             <textarea
                                                 ref={editorRef}
                                                 value={currentFile.content}
-                                                readOnly
+                                                readOnly={!facultyEditMode}
+                                                onChange={(e) => {
+                                                    if (!facultyEditMode || !selectedFileId) return;
+                                                    updateFileContent(selectedFileId, e.target.value);
+                                                }}
                                                 onScroll={() => {
                                                     if (editorRef.current && gutterRef.current) {
                                                         gutterRef.current.scrollTop = editorRef.current.scrollTop;
