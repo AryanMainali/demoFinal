@@ -9,6 +9,7 @@ from celery import Task
 from sqlalchemy.orm import Session
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logging import logger
 from app.models import Assignment, TestCase, User, AuditLog, AdminSettings
@@ -111,7 +112,7 @@ def run_code_task(
             ).get()
         
         # Create temp directory for code
-        temp_dir = tempfile.mkdtemp(prefix=f"celery_run_{assignment_id}_")
+        temp_dir = tempfile.mkdtemp(prefix=f"celery_run_{assignment_id}_", dir=settings.SANDBOX_WORK_DIR)
         
         try:
             # Write files
@@ -281,7 +282,7 @@ def compile_check_task(
                 "message": "Assignment not found"
             }
         
-        temp_dir = tempfile.mkdtemp(prefix=f"celery_compile_{assignment_id}_")
+        temp_dir = tempfile.mkdtemp(prefix=f"celery_compile_{assignment_id}_", dir=settings.SANDBOX_WORK_DIR)
         
         try:
             # Write files

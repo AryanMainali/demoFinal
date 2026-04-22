@@ -15,6 +15,13 @@ services:
     env_file: .env
     ports:
       - "8000:8000"
+    # SandboxExecutor runs `docker run` in production; mount host daemon + CLI in image.
+    # ./sandbox-work must map to SANDBOX_DOCKER_HOST_BIND in .env (absolute host path to this folder).
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./sandbox-work:/sandbox-work
+    environment:
+      SANDBOX_WORK_DIR: /sandbox-work
     depends_on:
       - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
@@ -43,6 +50,11 @@ services:
     container_name: kriterion-celery-worker
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./sandbox-work:/sandbox-work
+    environment:
+      SANDBOX_WORK_DIR: /sandbox-work
     depends_on:
       - redis
     command: celery -A app.core.celery_app worker --loglevel=info --queues=default,code_execution,grading --concurrency=1

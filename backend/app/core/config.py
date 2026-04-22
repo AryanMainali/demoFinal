@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     SANDBOX_MEMORY_LIMIT_MB: int = 512
     SANDBOX_CPU_LIMIT: float = 1.0
     SANDBOX_IMAGE: str = "kriterion-sandbox:latest"
+    # When backend runs in Docker and spawns `docker run`, bind mounts are resolved on the *host*.
+    # Mount host dir -> SANDBOX_WORK_DIR in compose, then set SANDBOX_DOCKER_HOST_BIND to that same host path.
+    SANDBOX_WORK_DIR: str = "/tmp/kriterion/sandbox-work"
+    SANDBOX_DOCKER_HOST_BIND: str = ""
     
     # Celery
     CELERY_BROKER_URL: str = "redis://redis:6379/0"
@@ -80,3 +84,4 @@ settings = Settings()
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.SUBMISSIONS_DIR, exist_ok=True)
 os.makedirs(settings.TEMP_DIR, exist_ok=True)
+os.makedirs(settings.SANDBOX_WORK_DIR, exist_ok=True)

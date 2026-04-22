@@ -139,6 +139,30 @@ class SandboxExecutor:
         """Public: return shell command to run code (for interactive execution)."""
         return self._get_exec_command(language, code_path, command_args)
 
+    def _docker_bind_source(self, code_path: str) -> str:
+        """
+        Path passed to `docker run -v` is resolved on the Docker *host*.
+        When the API runs inside a container, code_path lives in the container filesystem unless
+        SANDBOX_WORK_DIR is bind-mounted from the host and SANDBOX_DOCKER_HOST_BIND is set to that
+        host directory (see docker-compose.prod.yml).
+        """
+        bind_root = (settings.SANDBOX_DOCKER_HOST_BIND or "").strip()
+        if not bind_root:
+            return code_path
+        work = os.path.realpath(settings.SANDBOX_WORK_DIR)
+        real_cp = os.path.realpath(code_path)
+        if not (real_cp == work or real_cp.startswith(work + os.sep)):
+            logger.warning(
+                "code_path %s is not under SANDBOX_WORK_DIR %s; docker bind may fail",
+                real_cp,
+                work,
+            )
+            return code_path
+        rel = os.path.relpath(real_cp, work)
+        if rel == ".":
+            return bind_root
+        return os.path.join(bind_root, rel)
+
     def _run_in_docker(
         self,
         command: str,
@@ -154,6 +178,7 @@ class SandboxExecutor:
         if settings.ENVIRONMENT == "development":
             return self._run_local(command, code_path, stdin_input, timeout_seconds=effective_timeout)
         
+        mount_src = self._docker_bind_source(code_path)
         docker_cmd = [
             "docker", "run",
             "--rm",
@@ -161,7 +186,7 @@ class SandboxExecutor:
             "--memory", effective_memory_limit,
             "--cpus", str(self.cpu_limit),
             "--user", "1000:1000",
-            "-v", f"{code_path}:/workspace:ro",
+            "-v", f"{mount_src}:/workspace:ro",
             "-w", "/workspace",
             self.sandbox_image,
             "sh", "-c", command

@@ -231,7 +231,7 @@ class GradingService:
         """Write submission code to a temp directory (inline code or all files from storage). Returns path or None."""
         temp_dir = None
         try:
-            temp_dir = tempfile.mkdtemp(prefix="grading_")
+            temp_dir = tempfile.mkdtemp(prefix="grading_", dir=settings.SANDBOX_WORK_DIR)
             language = assignment.language
             ext = (language.file_extension if language else ".py") or ".py"
 

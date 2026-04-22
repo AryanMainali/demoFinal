@@ -43,6 +43,7 @@ from app.schemas.assignment import (
 from app.models.rubric_template import CourseRubricTemplate, CourseRubricTemplateItem, CourseRubricTemplateLevelDescriptor
 
 from app.core.logging import logger
+from app.core.config import settings
 from app.core.security import decode_token
 from app.core.database import SessionLocal
 from app.services.autograding import autograding_service
@@ -764,7 +765,7 @@ async def websocket_interactive_run(websocket: WebSocket, assignment_id: int):
                 await websocket.close()
                 return
 
-        temp_dir = tempfile.mkdtemp(prefix="assignment_interactive_")
+        temp_dir = tempfile.mkdtemp(prefix="assignment_interactive_", dir=settings.SANDBOX_WORK_DIR)
         for f in files:
             path = os.path.join(temp_dir, f["name"])
             with open(path, "w", encoding="utf-8") as fp:
@@ -970,7 +971,7 @@ async def run_assignment_code(
     # Create temporary directory for code files
     temp_dir = None
     try:
-        temp_dir = tempfile.mkdtemp(prefix="assignment_run_")
+        temp_dir = tempfile.mkdtemp(prefix="assignment_run_", dir=settings.SANDBOX_WORK_DIR)
         
         # Write files to temp directory
         for file in request.files:
