@@ -1178,7 +1178,9 @@ async def run_assignment_code(
                                 with open(input_path, "w", encoding="utf-8") as f:
                                     f.write(file_content)
                                 os.chmod(input_path, 0o644)
-                            stdin_input = ""
+                            # Provide stdin too when present; file-based programs will ignore it,
+                            # but stdin-based programs otherwise see EOF and fail.
+                            stdin_input = _normalize_stdin(test_case.input_data or "")
                         except Exception as e:
                             logger.warning(f"Failed to load test input file(s) from S3: {e}")
                             stdin_input = _normalize_stdin(test_case.input_data or "")

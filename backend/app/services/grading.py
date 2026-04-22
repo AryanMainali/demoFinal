@@ -309,6 +309,9 @@ class GradingService:
                             f"Grading: failed to load input file '{input_filename}' for "
                             f"test case {test_case.id}: {e}"
                         )
+                # Also pass stdin if provided to support stdin-based solutions.
+                # File-based solutions will ignore stdin, but stdin-based solutions otherwise see EOF.
+                stdin_input = _normalize_stdin(test_case.input_data or "")
             else:
                 raw_input = test_case.input_data or ""
                 stdin_input = _normalize_stdin(raw_input)
