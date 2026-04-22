@@ -186,6 +186,9 @@ class SandboxExecutor:
         mount_src = self._docker_bind_source(code_path)
         docker_cmd = [
             "docker", "run",
+            # Keep stdin open so programs that call input()/Scanner don't see EOF.
+            # Without -i, Docker closes stdin even if we pass input=... to subprocess.run.
+            "-i",
             "--rm",
             "--network", "none",
             "--memory", effective_memory_limit,
