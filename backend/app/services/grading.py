@@ -2,6 +2,7 @@
 Grading Service - Automated grading with sandbox execution
 """
 import asyncio
+import os
 import shutil
 import tempfile
 from datetime import datetime
