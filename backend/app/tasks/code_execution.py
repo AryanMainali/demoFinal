@@ -16,6 +16,14 @@ from app.models import Assignment, TestCase, User, AuditLog, AdminSettings
 from app.services.sandbox import sandbox_executor
 from sqlalchemy import and_, or_
 
+def _normalize_stdin(raw: str) -> str:
+    s = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" in s:
+        return s
+    if "," in s and " " not in s:
+        return s.replace(",", "\n")
+    return s
+
 
 class DatabaseTask(Task):
     """Base task with database session management"""
@@ -134,8 +142,7 @@ def run_code_task(
                 max_score += test_case.points
                 
                 try:
-                    raw_input = test_case.input_data or ""
-                    stdin_input = raw_input.replace(",", "\n") if raw_input else ""
+                    stdin_input = _normalize_stdin(test_case.input_data or "")
                     
                     execution_result = sandbox_executor.execute_code(
                         code_path=temp_dir,

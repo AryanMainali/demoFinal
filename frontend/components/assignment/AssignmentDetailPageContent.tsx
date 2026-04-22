@@ -1612,7 +1612,7 @@ export default function AssignmentDetailPageContent() {
                                                             <th className="px-4 py-2.5 text-left font-medium text-gray-600">Status</th>
                                                             <th className="px-4 py-2.5 text-left font-medium text-gray-600">Tests passed</th>
                                                             <th className="px-4 py-2.5 text-left font-medium text-gray-600">Score</th>
-                                                            {bulkResults.some((r) => r.errorMessage) && (
+                                                            {bulkResults.some((r) => r.status === 'error') && (
                                                                 <th className="px-4 py-2.5 text-left font-medium text-gray-600">Error</th>
                                                             )}
                                                         </tr>
@@ -1652,9 +1652,14 @@ export default function AssignmentDetailPageContent() {
                                                                             ? `${r.testScore.toFixed(1)}%`
                                                                             : '-'}
                                                                 </td>
-                                                                {bulkResults.some((b) => b.errorMessage) && (
-                                                                    <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[200px] truncate" title={r.errorMessage}>
-                                                                        {r.errorMessage || '-'}
+                                                                {bulkResults.some((b) => b.status === 'error') && (
+                                                                    <td
+                                                                        className="px-4 py-2.5 text-xs text-gray-500 max-w-[200px] truncate"
+                                                                        title={r.errorMessage || (r.status === 'error' ? 'Execution failed (no details returned)' : '')}
+                                                                    >
+                                                                        {r.status === 'error'
+                                                                            ? (r.errorMessage || 'Execution failed (no details returned)')
+                                                                            : '-'}
                                                                     </td>
                                                                 )}
                                                             </tr>

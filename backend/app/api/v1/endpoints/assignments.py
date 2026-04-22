@@ -55,6 +55,20 @@ from app.services.s3_storage import s3_service
 
 router = APIRouter()
 
+def _normalize_stdin(raw: str) -> str:
+    """
+    Normalize stdin input for sandbox runs.
+    - Normalizes Windows newlines.
+    - Supports legacy comma-separated multi-line inputs *only* when there are no newlines already.
+      (So '1,2,3' becomes lines, but 'a, b' stays a single line.)
+    """
+    s = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" in s:
+        return s
+    if "," in s and " " not in s:
+        return s.replace(",", "\n")
+    return s
+
 
 # ============== Request/Response Models ==============
 
@@ -1163,15 +1177,16 @@ async def run_assignment_code(
                                 input_path = os.path.join(temp_dir, (input_filename or "input.txt").strip() or "input.txt")
                                 with open(input_path, "w", encoding="utf-8") as f:
                                     f.write(file_content)
+                                os.chmod(input_path, 0o644)
                             stdin_input = ""
                         except Exception as e:
                             logger.warning(f"Failed to load test input file(s) from S3: {e}")
-                            stdin_input = (test_case.input_data or "").replace("\r\n", "\n").replace("\r", "\n")
+                            stdin_input = _normalize_stdin(test_case.input_data or "")
                     else:
-                        stdin_input = (test_case.input_data or "").replace("\r\n", "\n").replace("\r", "\n")
+                        stdin_input = _normalize_stdin(test_case.input_data or "")
                 else:
                     raw_input = test_case.input_data or ""
-                    stdin_input = raw_input.replace("\r\n", "\n").replace("\r", "\n") if raw_input else ""
+                    stdin_input = _normalize_stdin(raw_input) if raw_input else ""
                 
                 execution_result = await asyncio.to_thread(
                     sandbox_executor.execute_code,

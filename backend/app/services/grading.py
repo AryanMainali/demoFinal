@@ -17,6 +17,19 @@ from app.core.config import settings
 from app.core.logging import logger
 
 
+def _normalize_stdin(raw: str) -> str:
+    """
+    Normalize stdin input for sandbox runs. Keep behavior consistent with /assignments/{id}/run:
+    - Normalize Windows newlines
+    - Treat comma-separated inputs as multi-line only if there are no newlines and no spaces
+    """
+    s = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    if "\n" in s:
+        return s
+    if "," in s and " " not in s:
+        return s.replace(",", "\n")
+    return s
+
 def _read_submission_file_content(file_record: SubmissionFile) -> str:
     """Read file content from storage (local path or S3). Same logic as submissions get_file_content."""
     if getattr(settings, "USE_S3_STORAGE", False) and file_record.file_path.startswith("http"):
@@ -287,9 +300,9 @@ class GradingService:
                     try:
                         from app.services.s3_storage import s3_service
                         file_content = s3_service.get_object_content(s3_key)
-                        (Path(code_path) / input_filename).write_text(
-                            file_content, encoding="utf-8"
-                        )
+                        out_path = Path(code_path) / input_filename
+                        out_path.write_text(file_content, encoding="utf-8")
+                        os.chmod(str(out_path), 0o644)
                     except Exception as e:
                         logger.warning(
                             f"Grading: failed to load input file '{input_filename}' for "
@@ -297,7 +310,7 @@ class GradingService:
                         )
             else:
                 raw_input = test_case.input_data or ""
-                stdin_input = raw_input.replace("\r\n", "\n").replace("\r", "\n")
+                stdin_input = _normalize_stdin(raw_input)
 
             # ── Execute ──────────────────────────────────────────
             execution_result = await asyncio.to_thread(
