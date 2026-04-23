@@ -735,6 +735,7 @@ class PlagiarismService:
 
         engine_result = self._run_engine(assignment)
         pairs = engine_result["pairs"]
+        engine_name = "jplag" if _jplag_available() else "ngram"
 
         student_latest = self._latest_per_student(assignment_id)
 
