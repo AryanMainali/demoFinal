@@ -71,6 +71,7 @@ services:
     command: celery -A app.core.celery_app beat --loglevel=info
 
   sandbox:
+    image: kriterion-sandbox:latest
     build:
       context: ./sandbox
       dockerfile: Dockerfile
