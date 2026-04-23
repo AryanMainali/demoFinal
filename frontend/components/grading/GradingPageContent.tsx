@@ -779,9 +779,15 @@ export function GradingPageContent({ courseId, assignmentId, studentId, assignme
             setPlagiarismMatches(matches || []);
             queryClient.invalidateQueries({ queryKey: ['submission-detail', selectedSub.id] });
             queryClient.invalidateQueries({ queryKey: ['assignment-submissions', assignmentId] });
+
+            const comparisons = (result as any)?.comparisons ?? 0;
+            const engine = (result as any)?.engine;
             toast({
                 title: 'Plagiarism Check Complete',
-                description: `Similarity score: ${result.plagiarism_score?.toFixed(1) ?? 0}%${result.plagiarism_flagged ? ' - FLAGGED' : ''}`,
+                description:
+                    comparisons === 0
+                        ? `No comparable matches found (need at least 2 submissions with code). Engine: ${engine ?? 'unknown'}.`
+                        : `Similarity score: ${result.plagiarism_score?.toFixed(1) ?? 0}%${result.plagiarism_flagged ? ' - FLAGGED' : ''} (comparisons: ${comparisons}, engine: ${engine ?? 'unknown'})`,
             });
         } catch (err: any) {
             toast({ title: 'Check Failed', description: err?.response?.data?.detail || 'Plagiarism check failed', variant: 'destructive' });

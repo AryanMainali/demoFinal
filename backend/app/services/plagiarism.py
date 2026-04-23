@@ -451,9 +451,11 @@ class PlagiarismService:
                 sa, code_a, fp_a = sub_code[ids[i]]
                 sb, code_b, fp_b = sub_code[ids[j]]
                 sim = _jaccard(fp_a, fp_b)
-                if sim < 15:
-                    continue
-                snippets = _find_matching_snippets(code_a, code_b, language)
+                # Always keep the similarity so we can report a non-zero max_similarity
+                # even when it's below the "show details" threshold.
+                snippets: List[Dict] = []
+                if sim >= 15:
+                    snippets = _find_matching_snippets(code_a, code_b, language)
                 pairs[(sa.id, sb.id)] = {
                     "sub_a": sa,
                     "sub_b": sb,
@@ -630,6 +632,8 @@ class PlagiarismService:
 
         engine_result = self._run_engine(assignment)
         pairs = engine_result["pairs"]
+        engine_name = "jplag" if _jplag_available() else "ngram"
+        engine_name = "jplag" if _jplag_available() else "ngram"
 
         max_sim = 0.0
         all_match_info: List[Dict] = []
@@ -640,6 +644,9 @@ class PlagiarismService:
 
             sim = pair["similarity"]
             matches = pair["matches"]
+            # Track max similarity even when below the "show details" threshold.
+            if sim > max_sim:
+                max_sim = sim
             if sim < 15:
                 continue
 
@@ -659,9 +666,6 @@ class PlagiarismService:
                 "similarity_percentage": round(sim, 1),
                 "snippet_count": len(matches),
             })
-
-            if sim > max_sim:
-                max_sim = sim
 
             oriented_matches = matches
             if is_reversed:
@@ -695,7 +699,7 @@ class PlagiarismService:
             "comparisons": len(all_match_info),
             "matches": all_match_info,
             "checked_at": datetime.utcnow().isoformat(),
-            "engine": "jplag" if _jplag_available() else "ngram",
+            "engine": engine_name,
         }
         if flagged:
             submission.status = SubmissionStatus.FLAGGED
@@ -709,6 +713,7 @@ class PlagiarismService:
             "plagiarism_flagged": flagged,
             "comparisons": len(all_match_info),
             "matches": all_match_info,
+            "engine": engine_name,
         }
 
     def check_all_for_assignment(self, assignment_id: int) -> Dict:
@@ -772,7 +777,7 @@ class PlagiarismService:
                 "comparisons": len(mi),
                 "matches": mi,
                 "checked_at": datetime.utcnow().isoformat(),
-                "engine": "jplag" if _jplag_available() else "ngram",
+                "engine": engine_name,
             }
             if fl:
                 sub.status = SubmissionStatus.FLAGGED
@@ -790,7 +795,7 @@ class PlagiarismService:
             "assignment_id": assignment_id,
             "total_checked": len(results),
             "results": results,
-            "engine": "jplag" if _jplag_available() else "ngram",
+            "engine": engine_name,
         }
 
     def get_matches(self, submission_id: int) -> List[PlagiarismMatch]:
