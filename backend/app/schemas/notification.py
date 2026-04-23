@@ -21,6 +21,7 @@ class NotificationType(str, PyEnum):
     COURSE_APPROVAL_REQUIRED = "COURSE_APPROVAL_REQUIRED"
     SYSTEM_ALERT = "SYSTEM_ALERT"
     COURSE_ASSIGNED = "course_assigned"
+    ROSTER_SYNC_REQUESTED = "ROSTER_SYNC_REQUESTED"
 
 
 class NotificationCreateSchema(BaseModel):

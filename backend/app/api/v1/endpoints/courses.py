@@ -228,11 +228,20 @@ def list_courses(
 def get_course(
     course_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    include_hidden: bool = False,
 ):
     """Get course details"""
     course = db.query(Course).options(joinedload(Course.instructor)).filter(Course.id == course_id).first()
     if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Course not found"
+        )
+
+    # Hide soft-deleted courses from everyone by default (including admins),
+    # unless explicitly requested via include_hidden.
+    if course.is_hidden and not include_hidden:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found"
