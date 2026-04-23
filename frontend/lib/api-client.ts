@@ -222,8 +222,8 @@ class ApiClient {
     }
 
     // endpoints
-    async getCourses() {
-        const response = await this.client.get('/courses');
+    async getCourses(params?: { include_hidden?: boolean }) {
+        const response = await this.client.get('/courses', { params });
         return response.data;
     }
 

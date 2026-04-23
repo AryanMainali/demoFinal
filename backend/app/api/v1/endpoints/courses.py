@@ -155,7 +155,8 @@ def list_courses(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    include_hidden: bool = False,
 ):
     """List courses based on user role with stats"""
     if current_user.role == UserRole.STUDENT:
@@ -181,8 +182,11 @@ def list_courses(
             Course.is_hidden == False,
         ).offset(skip).limit(limit).all() if course_ids else []
     else:
-        # Admin sees all courses including hidden
-        courses = db.query(Course).offset(skip).limit(limit).all()
+        # Admin can optionally include soft-deleted/hidden courses.
+        q = db.query(Course)
+        if not include_hidden:
+            q = q.filter(Course.is_hidden == False)
+        courses = q.offset(skip).limit(limit).all()
     
     # Build response with stats
     result = []
