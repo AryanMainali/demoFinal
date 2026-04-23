@@ -1,5 +1,44 @@
 # Kriterion — AWS Deployment Guide
 
+## Installation Plan (Modules + sequencing)
+
+### Modules required
+
+- **AWS infrastructure**
+  - **EC2** (Amazon Linux 2023) to run Docker containers
+  - **VPC/Subnets** (this guide uses the default VPC), plus **Security Groups**
+  - **ALB** (Application Load Balancer) for public routing
+  - **RDS PostgreSQL 16** for the database
+  - **ElastiCache Redis 7** for Celery broker/result backend
+  - **S3** for submissions/static assets
+  - **IAM Role + Instance Profile** for EC2 (S3 + SSM permissions)
+  - **SSM Session Manager** for remote access (no SSH keys)
+  - **Optional HTTPS**
+    - **CloudFront** in front of ALB (recommended when UI is on Vercel; HTTPS without custom domain)
+    - **ACM + Route 53** (only if you need a custom domain and/or HTTPS listener on the ALB)
+- **Local machine tooling**
+  - `awscli` v2
+  - Session Manager plugin
+- **EC2 host tooling**
+  - `docker`, `git`
+  - Docker Compose (installed in Step 8)
+
+### Start sequence (operational)
+
+1. **Start dependencies**: RDS → ElastiCache (Redis)
+2. **Start compute**: EC2 instance
+3. **Start application containers**: `docker-compose -f docker-compose.prod.yml --env-file .env up -d --build`
+4. **Run migrations**: `docker-compose ... exec backend alembic upgrade head`
+5. **Verify health**: `GET /health` (via ALB / CloudFront, depending on setup)
+6. **Enable traffic**: confirm ALB target health checks are green; if using CloudFront, ensure distribution is deployed
+
+### Stop sequence (operational)
+
+1. **Stop traffic / workloads**: stop app containers first to prevent new work
+2. **Stop application containers**: `docker-compose -f docker-compose.prod.yml down`
+3. **Stop compute**: EC2 instance
+4. **Optional cost-saving stop**: stop Redis + RDS when not needed (note RDS stop is time-limited by AWS)
+
 ## Architecture Overview
 
 ### Full stack on AWS (Next.js + API on EC2)
@@ -64,6 +103,60 @@ aws configure
 # Default output format: json
 ```
 
+### IAM policies / permissions you may need (common deployment blocker)
+
+If you were previously blocked by “AccessDenied” errors while creating AWS resources, attach **one** of the following to the IAM identity you use locally with `aws configure` (an IAM user or role).
+
+#### Option A (simplest): AdministratorAccess (not least-privilege)
+
+- Attach AWS managed policy: `AdministratorAccess`
+- Use this for class demos/submissions when least-privilege is not required.
+
+#### Option B (service-scoped): “KriterionDeployerPolicy” (recommended starting point)
+
+This policy is broad enough to run the steps in this guide (S3, IAM role/profile, EC2, ALB, RDS, ElastiCache, CloudFront, ACM, Route 53, SSM).
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "KriterionProvisioningServices",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:*",
+        "elasticloadbalancing:*",
+        "rds:*",
+        "elasticache:*",
+        "cloudfront:*",
+        "acm:*",
+        "route53:*",
+        "s3:*",
+        "ssm:*",
+        "iam:GetRole",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:UpdateRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:PassRole",
+        "iam:GetInstanceProfile",
+        "iam:List*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+> If your org requires least-privilege, start from Option B and then tighten it by restricting resources by ARN and/or by tag once the deployment is working.
+
 ---
 
 ## Step 1 — Create an S3 Bucket for Submissions
@@ -123,7 +216,12 @@ cat > /tmp/s3-policy.json << 'EOF'
   "Version": "2012-10-17",
   "Statement": [{
     "Effect": "Allow",
-    "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:ListBucket"],
+    "Action": [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:ListBucket"
+    ],
     "Resource": [
       "arn:aws:s3:::kriterion-submissions-prod",
       "arn:aws:s3:::kriterion-submissions-prod/*"
@@ -299,6 +397,10 @@ ENVIRONMENT=production
 DEBUG=false
 SECRET_KEY=$(openssl rand -hex 32)
 
+# Initial Admin Account (used by the app on first run / seed)
+INITIAL_ADMIN_EMAIL=admin@kriterion.edu
+INITIAL_ADMIN_PASSWORD=Admin@123456
+
 # ── Database ──
 DATABASE_URL=postgresql://kriterion:CHANGE_THIS_DB_PASSWORD@${DB_HOST}:5432/kriterion
 
@@ -311,12 +413,14 @@ CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:6379/0
 USE_S3_STORAGE=true
 AWS_REGION=us-east-1
 AWS_S3_BUCKET_NAME=kriterion-submissions-prod
-# Leave these blank — the EC2 IAM role handles auth
+# Auth options:
+# - Recommended on EC2: leave these blank and use the EC2 IAM role (Step 2)
+# - If running backend somewhere else (no instance role): set access keys (see AWS_S3_SETUP.md)
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
 # ── CORS (origins allowed to call the API — include your Vercel URL if UI is not on AWS) ──
-BACKEND_CORS_ORIGINS=["https://kriterion.vercel.app"]
+BACKEND_CORS_ORIGINS=["https://your-app.vercel.app"]
 
 # ── Frontend build-time URLs (used when building the Next.js image on EC2) ──
 # If the UI is on Vercel: use your CloudFront HTTPS URL (Step 10), not raw ALB HTTP.
@@ -436,7 +540,7 @@ aws s3 cp .env.production s3://kriterion-submissions-prod/.env.production \
 # On the EC2 instance, download it:
 aws s3 cp s3://kriterion-submissions-prod/.env.production \
   /home/ec2-user/kriterion/.env
-rm -f  # remove from S3 after copying
+# Optional: remove the uploaded file from S3 after copying it to EC2
 aws s3 rm s3://kriterion-submissions-prod/.env.production
 ```
 
@@ -756,7 +860,7 @@ curl https://kriterion.yourdomain.com/health
 
 # Connect to the database
 docker-compose -f docker-compose.prod.yml exec backend \
-  python -c "from app.core.database import engine; print(engine.execute('SELECT 1').fetchone())"
+  python -c "from sqlalchemy import text; from app.core.database import SessionLocal; s=SessionLocal(); print(s.execute(text('SELECT 1')).scalar()); s.close()"
 ```
 
 ---
